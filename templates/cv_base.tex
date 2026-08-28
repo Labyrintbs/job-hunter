@@ -1,0 +1,229 @@
+%-------------------------
+% Resume in LaTeX
+% Based on Jake Gutierrez template, customized for Hongming Fang
+% Tailored for: Implicity — Deep Learning Engineer, SaMD squad (Paris)
+%------------------------
+
+\documentclass[letterpaper,12pt]{article}
+
+\usepackage{latexsym}
+\usepackage{titlesec}
+\usepackage{marvosym}
+\usepackage[usenames,dvipsnames]{color}
+\usepackage{verbatim}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+\usepackage{fancyhdr}
+\usepackage[english]{babel}
+\usepackage{tabularx}
+\usepackage{fontawesome5}
+\usepackage{multicol}
+\usepackage{ragged2e}
+\usepackage{needspace}
+\usepackage[
+  top=0.6in,
+  bottom=0.55in,
+  left=0.6in,
+  right=0.6in
+]{geometry}
+
+\setlength{\multicolsep}{-3.0pt}
+\setlength{\columnsep}{-1pt}
+\input{glyphtounicode}
+
+%----------HEADER / FOOTER----------
+\pagestyle{fancy}
+\fancyhf{} % clear all header and footer fields
+\fancyfoot{}
+\renewcommand{\headrulewidth}{0pt}
+\renewcommand{\footrulewidth}{0pt}
+
+\urlstyle{same}
+
+\raggedbottom
+\justifying
+\setlength{\tabcolsep}{0in}
+
+%----------SECTION FORMATTING----------
+\titleformat{\section}{
+  \vspace{-4pt}\scshape\raggedright\large\bfseries
+}{}{0em}{}[\color{black}\titlerule \vspace{-5pt}]
+
+% Ensure that generated pdf is machine readable/ATS parsable
+\pdfgentounicode=1
+
+%-------------------------
+% Custom commands
+\newcommand{\resumeItem}[1]{
+  \item\small{
+    {#1 \vspace{-1pt}}
+  }
+}
+
+\newcommand{\classesList}[4]{
+    \item\small{
+        {#1 #2 #3 #4 \vspace{-2pt}}
+  }
+}
+
+\newcommand{\resumeSubheading}[4]{
+  \vspace{-2pt}\item
+    \begin{tabular*}{1.0\textwidth}[t]{l@{\extracolsep{\fill}}r}
+      \textbf{#1} & \textbf{#2} \\
+      {#3} & \textnormal{#4} \\
+    \end{tabular*}\vspace{-7pt}
+}
+
+\newcommand{\resumeSubSubheading}[2]{
+    \item
+    \begin{tabular*}{0.97\textwidth}{l@{\extracolsep{\fill}}r}
+      \textit{\small#1} & \textit{\small #2} \\
+    \end{tabular*}\vspace{-7pt}
+}
+
+\newcommand{\resumeProjectHeading}[2]{
+    \item
+    \begin{tabular*}{1.001\textwidth}{l@{\extracolsep{\fill}}r}
+      \small#1 & \textbf{\small #2}\\
+    \end{tabular*}\vspace{-7pt}
+}
+
+\newcommand{\resumeProjectHeadingFourItemResearch}[4]{
+    \item
+    \begin{tabular*}{1.001\textwidth}{l@{\extracolsep{\fill}}r}
+      #1 & \textbf{#2}\\
+      {#3} & \textnormal{#4} \\
+    \end{tabular*}\vspace{-7pt}
+}
+
+\newcommand{\resumeSubItem}[1]{\resumeItem{#1}\vspace{-4pt}}
+
+\renewcommand\labelitemi{$\vcenter{\hbox{\tiny$\bullet$}}$}
+\renewcommand\labelitemii{$\vcenter{\hbox{\tiny$\bullet$}}$}
+
+\newcommand{\resumeSubHeadingListStart}{\begin{itemize}[leftmargin=0.0in, label={}]}
+\newcommand{\resumeSubHeadingListEnd}{\end{itemize}}
+\newcommand{\resumeItemListStart}{\begin{itemize}}
+\newcommand{\resumeItemListEnd}{\end{itemize}\vspace{-5pt}}
+
+\newcommand{\projectdesc}[1]{%
+  {\fontsize{11pt}{12pt}\selectfont #1}%
+}
+
+%-------------------------------------------
+%%%%%%  RESUME STARTS HERE  %%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+\begin{document}
+
+%----------HEADING----------
+\vspace*{-0.15in}
+\begin{center}
+    {\Huge \scshape Hongming Fang} \\[2pt]
+    \small Paris, France $|$ (+33) 07 75 77 55 06 $|$
+    \href{mailto:hongming.marius.fang@gmail.com}{hongming.marius.fang@gmail.com} \\[2pt]
+    \href{https://linkedin.com/in/hongming-fang}{\raisebox{-0.2\height}\faLinkedin\ linkedin.com/in/hongming-fang} \\
+    {Seeking a full-time Machine Learning role (CDI) from September 2026 — Île-de-France, open to mobility}
+    \vspace{-5pt}
+\end{center}
+
+%-----------EDUCATION-----------
+\section{EDUCATION}
+  \resumeSubHeadingListStart
+    \resumeSubheading
+    {Master of Science in Computer Science, Specialization in Image}{09/2024 -- 09/2026}
+    {Sorbonne University}{Paris, France}
+    \resumeItemListStart
+     \resumeItem{\textit{Major Modules}: Biomedical Imaging, Pattern Recognition and Machine Learning for Image Understanding, Advanced Methods for Computer Vision/Image Analysis, Image Processing, 3D Graphics Algorithms, Data Science}
+     \resumeItem{Overall grade: 15.2/20 (M1) and 16.59/20 (M2, ongoing).}
+    \resumeItemListEnd
+
+    \resumeSubheading
+      {Diplôme d'Ingénieur in Electronic Information}{09/2017 -- 06/2024}
+      {École Centrale de Pékin, Beihang University}{Beijing, China}
+    \resumeItemListStart
+        \resumeItem{CTI-accredited French engineering degree from a joint program between Beihang University and the Groupe des Écoles Centrales, also awarding Chinese Bachelor \& Master of Science degrees.}
+    \resumeItemListEnd
+  \resumeSubHeadingListEnd
+
+%-----------PROJECTS & RESEARCH-----------
+\section{PROJECTS \& RESEARCH EXPERIENCE}
+    \vspace{-5pt}
+    \resumeSubHeadingListStart
+
+    \resumeProjectHeadingFourItemResearch
+    {\textbf{Deep Learning for Classification of Colorectal Polyps}}{02/2025 -- 05/2025}
+    {Sorbonne University, Projet DIGIT}{Paris, France}
+
+    \projectdesc{Developed a binary classification system of colorectal polyps (adenomatous vs. hyperplastic) using CNNs on the clinical POLAR dataset.}
+    \resumeItemListStart
+      \resumeItem{Reviewed state-of-the-art CNN approaches for colorectal polyp classification and selected VGG-19 as backbone, preprocessed and restructured the dataset to ensure label consistency.}
+      \resumeItem{Applied transfer learning with data augmentation to mitigate severe class imbalance, improving hyperplastic polyp F1 from 0.148 to 0.351.}
+    \resumeItemListEnd
+
+    \resumeProjectHeadingFourItemResearch
+    {\textbf{Image and Point Cloud Analysis for Cultural Heritage}}{11/2025 -- 02/2026}{Sorbonne University, PRAT Project}{Paris, France}
+
+    \projectdesc{Comparative study of geometric (FPFH) and learning-based (SpinNet) descriptors for cross-modal 3D point cloud registration, aligning photogrammetry and laser scans of a 12-meter wooden relief from the Cernuschi Museum.}
+    \resumeItemListStart
+      \resumeItem{Built a coarse-to-fine registration pipeline in Open3D (scale normalization, voxel downsampling, feature extraction, RANSAC global alignment, ICP refinement) to handle cross-modal differences in density, scale, and overlap with no ground-truth correspondences.}
+      \resumeItem{Designed overlap-aware evaluation metrics for a benchmark without ground truth, showing that SpinNet, pretrained only on indoor 3DMatch data, generalizes to cultural-heritage scans and succeeds on 5 of 7 fragments where FPFH fails entirely, at 6.6 times higher runtime.}
+    \resumeItemListEnd
+
+    \resumeProjectHeadingFourItemResearch
+     {\textbf{Interpretability Based Dialog Policy Optimization}}{12/2022 -- 06/2024}{Beihang University}{Master Thesis}
+    \resumeItemListStart
+        \resumeItem{Modeled a task-oriented dialogue pipeline with structural causal models and constructed counterfactual belief states to mitigate spurious correlations, then trained the policy with offline reinforcement learning (BCQ) and causal reward shaping.}
+        \resumeItem{Achieved competitive results (Inform 96.3\%, Success 83.4\%) while improving robustness and interpretability over baseline models.}
+    \resumeItemListEnd
+
+    \resumeSubHeadingListEnd
+
+%-----------PROFESSIONAL EXPERIENCE-----------
+\section{PROFESSIONAL EXPERIENCE}
+  \resumeSubHeadingListStart
+
+    \resumeSubheading
+      {DeepWise}{03/2023 -- 09/2023}
+      {AI Algorithm Intern, Medical Imaging}{Beijing, China}
+      \resumeItemListStart
+        \resumeItem{Developed and validated deep learning segmentation models for clinical CT and CTA imaging, deployed in a production annotation pipeline used by medical annotators.}
+        \resumeItem{Improved a segmentation model initially trained on lower-limb CTA data by incorporating newly annotated aorta CTA scans, achieving Dice scores of 0.88/0.72.}
+        \resumeItem{Extended model coverage to full-body CT by manually annotating over 300 head CTA scans after diagnosing performance degradation on out-of-distribution anatomy, then deployed the model to pre-annotate over 1000 non-enhanced CT datasets with less than 5\% manual correction required.}
+        \resumeItem{Combined CTA and non-enhanced CT data to retrain a unified segmentation model based on observed failure patterns, achieving pre-release Dice scores of 0.93/0.76 and demonstrating strong generalization across previously unseen body regions.}
+      \resumeItemListEnd
+
+
+    \resumeSubheading
+      {Orange Labs International Center Beijing}{06/2022 -- 09/2022}
+      {AI Algorithm Intern, Self-Supervised Speech Modeling}{Beijing, China}
+      \resumeItemListStart
+        \resumeItem{Researched textless speech generation (GSLM), benchmarking self-supervised representation encoders (CPC, wav2vec, HuBERT) and neural vocoders (Tacotron2, WaveGlow) across the full pipeline.}
+        \resumeItem{Trained a HuBERT self-supervised encoder with distributed data parallel (DDP) on a self-constructed 30GB bilingual corpus built from CommonVoice and Librispeech.}
+        \resumeItem{Evaluated cross-lingual English and French performance, identifying specific failure modes such as uvular sound mishandling that limited generalization to French.}
+      \resumeItemListEnd
+
+
+    \resumeSubheading
+      {DiliTrust}{03/2026 -- 08/2026}
+      {Machine Learning Engineer Intern}{Paris, France}
+      \resumeItemListStart
+        \resumeItem{Evaluated Qwen3.5-4B as a migration candidate to replace a production LLM for multilingual legal entity extraction. Closed its accuracy gap to the production baseline by engineering a structured prompt framework with field-level metadata, raising extraction precision by 1.6 points and context accuracy by 8.4 points.}
+        \resumeItem{Built an automated agentic pipeline in LangGraph where an LLM-as-judge critic scores extraction quality against a 9-category failure taxonomy and iteratively refines the prompts used by another model, raising context accuracy to 96.8\% and cutting inference time by 40.8\% against the production model.}
+        \resumeItem{Fine-tuned Qwen3.5-4B via SFT on the optimized prompt, then diagnosed that it overfit to training labels: strong in-distribution gains, but generalization to unseen labels fell below the out-of-box model. Resolved this by merging multiple data sources and switching to reinforcement learning (GRPO) with a custom reward function combining exact-match and LLM-judge scoring, lifting in-distribution accuracy 8 points above the out-of-box model while achieving the best generalization to unseen labels of any fine-tuned variant.}
+      \resumeItemListEnd
+
+  \resumeSubHeadingListEnd
+
+%-----------SKILLS-----------
+\section{SKILLS}
+ \begin{itemize}[leftmargin=0.2in, label={}]
+    \small{\item{
+    \textbf{Deep Learning:} CNNs, Transformers, self-supervised representation learning, transfer learning, distributed training (DDP), training pipeline design, experiment reproducibility\\
+    \textbf{Medical \& Biomedical Imaging:} CT/CTA segmentation, clinical dataset annotation workflows, class imbalance handling, out-of-distribution generalization diagnosis\\
+    \textbf{Technical Skills:} Python, C/C++; PyTorch, NumPy, pandas, scikit-learn; Linux, Git, Docker\\
+    \textbf{Languages:} Mandarin (native), English (fluent), French (professional working proficiency)
+    }}
+ \end{itemize}
+
+\end{document}

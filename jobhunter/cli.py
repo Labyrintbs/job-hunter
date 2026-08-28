@@ -4,7 +4,7 @@ import argparse
 
 from . import db
 from .config import DB_PATH
-from .pipeline import run_fetch
+from .pipeline import run_fetch, tailor_one
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -17,6 +17,9 @@ def main(argv: list[str] | None = None) -> int:
     p_list = sub.add_parser("list", help="list stored jobs")
     p_list.add_argument("--status", default=None)
     p_list.add_argument("--min-score", type=int, default=0)
+
+    p_tailor = sub.add_parser("tailor", help="generate + compile a tailored CV")
+    p_tailor.add_argument("job_id", type=int)
 
     p_web = sub.add_parser("web", help="run the dashboard")
     p_web.add_argument("--host", default="127.0.0.1")
@@ -41,6 +44,15 @@ def main(argv: list[str] | None = None) -> int:
             for r in rows:
                 print(f"[{r['score']:3d}] {r['status']:11s} {r['title'][:55]:55s} @ {r['company'][:25]:25s} {r['location'][:20]}")
             print(f"\n{len(rows)} jobs")
+        return 0
+
+    if args.command == "tailor":
+        result = tailor_one(args.job_id)
+        if result.get("error"):
+            print(f"error: {result['error']}")
+            return 1
+        print(f"tex: {result['tex']}")
+        print(f"pdf: {result['pdf']}  (compiled={result['compiled']})")
         return 0
 
     if args.command == "web":

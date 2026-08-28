@@ -7,7 +7,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from .. import db
-from ..pipeline import run_fetch
+from ..pipeline import run_fetch, tailor_one
 
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
@@ -58,5 +58,11 @@ def set_status(job_id: int = Form(...), status: str = Form(...)):
 
 @app.post("/run/fetch")
 def run_fetch_route():
-    stats = run_fetch()
+    run_fetch()
     return RedirectResponse(url="/", status_code=303)
+
+
+@app.post("/tailor/{job_id}")
+def tailor_route(job_id: int):
+    result = tailor_one(job_id)
+    return JSONResponse(result)

@@ -158,6 +158,23 @@ def update_status(conn: sqlite3.Connection, job_id: int, status: str) -> None:
     )
 
 
+def job_from_row(row: sqlite3.Row) -> Job:
+    return Job(
+        source=row["source"], external_id=row["external_id"], title=row["title"],
+        company=row["company"], location=row["location"], language=row["language"],
+        url=row["url"], description=row["description"], contract_type=row["contract_type"],
+        posted_at=row["posted_at"],
+    )
+
+
+def add_cv_artifact(conn: sqlite3.Connection, job_id: int, tex_path: str,
+                    pdf_path: str, base_version: str = "") -> None:
+    conn.execute(
+        "INSERT INTO cv_artifacts (job_id, tex_path, pdf_path, base_version) VALUES (?,?,?,?)",
+        (job_id, tex_path, pdf_path, base_version),
+    )
+
+
 def status_counts(conn: sqlite3.Connection) -> dict[str, int]:
     rows = conn.execute(
         "SELECT status, COUNT(*) AS n FROM applications GROUP BY status"

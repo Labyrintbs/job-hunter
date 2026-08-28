@@ -35,7 +35,12 @@
           {% endfor %}
         </select>
       </td>
-      <td>{% if j["cv_pdf"] %}<a href="file://{{ j['cv_pdf'] }}" target="_blank">PDF</a>{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td>
+        {% if j["cv_pdf"] %}<a href="file://{{ j['cv_pdf'] }}" target="_blank">PDF</a>{% endif %}
+        <button class="ghost" style="padding:4px 8px; font-size:12px;" onclick="tailorCV(this, {{ j['id'] }})">
+          {% if j["cv_pdf"] %}↻{% else %}Tailor{% endif %}
+        </button>
+      </td>
     </tr>
   {% else %}
     <tr><td colspan="7" class="muted">No jobs yet. Click “Fetch new jobs”.</td></tr>

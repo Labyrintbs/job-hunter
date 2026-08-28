@@ -49,6 +49,14 @@
       sel.style.outline = r.ok ? '2px solid #35c46a' : '2px solid #e5534b';
       setTimeout(() => sel.style.outline = 'none', 700);
     }
+    async function tailorCV(btn, jobId) {
+      const label = btn.textContent;
+      btn.textContent = '…'; btn.disabled = true;
+      const r = await fetch('/tailor/' + jobId, { method:'POST' });
+      const data = await r.json();
+      if (data.compiled) { location.reload(); }
+      else { btn.textContent = 'failed'; btn.disabled = false; }
+    }
   </script>
 </body>
 </html>
