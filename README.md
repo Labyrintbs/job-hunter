@@ -1,35 +1,41 @@
 # Job Hunter — Paris ML-Engineer edition
 
 Personal tool to fetch ML-engineer job postings (Paris / Île-de-France, CDI, no
-internships), score them against a profile, track applications, and — in later
-phases — auto-tailor a LaTeX CV per job. **Draft-and-review by design: it never
-auto-submits applications.**
+internships), score them against your profile, auto-tailor a LaTeX CV and draft a
+cover letter per job, and track every application from a local web dashboard.
+**Draft-and-review by design: it never auto-submits applications.**
 
-## Status (MVP)
-Working end-to-end today:
-- **Fetch** from Welcome to the Jungle (public Algolia backend, no login).
-- **Score + filter** with a rule-based, junior-tuned matcher (Paris/IDF ranked
-  above other-France; internships/alternance excluded; seniority = soft penalty).
-- **Store** in SQLite with cross-run dedup (by id *and* content — WTTJ reposts the
-  same job under several ids).
-- **Track** each posting through a status lifecycle from a local web dashboard
-  (table + kanban), with a one-click "Fetch new jobs" button.
-
-Seams are in place for the next phases: LinkedIn/Indeed/ATS sources, an LLM judge,
-and LaTeX CV auto-tailoring (`cv_artifacts` table + `data/cv/` already wired).
+## Features
+- **Fetch** from Welcome to the Jungle (public Algolia backend) and company ATS
+  boards (Greenhouse + Lever), filtered to France at the source.
+- **Score + filter** with a rule-based, junior-tuned matcher: title-based ML
+  relevance gate, internships/alternance excluded, seniority as a soft penalty,
+  Paris/IDF ranked above other-France.
+- **LLM fit-judge** (Claude): 0–100 score + verdict + reasons, junior-calibrated.
+- **LaTeX CV auto-tailoring**: reorders your projects/experience by relevance to
+  each job, rewrites the "Seeking" tagline, compiles to PDF (`latexmk`).
+- **Cover-letter drafting** (Claude): grounded in your real CV, matches the
+  posting's language, never fabricates.
+- **Track**: SQLite with cross-run dedup (by id *and* content); each posting moves
+  through a status lifecycle from a table + kanban dashboard.
 
 ## Setup
 ```bash
 uv venv --python 3.13 .venv
 uv pip install --python .venv/bin/python -e .
-.venv/bin/python -m playwright install chromium   # for later LinkedIn phase
 ```
+LLM features use whichever is available: `ANTHROPIC_API_KEY` (`pip install -e '.[llm]'`)
+or the local `claude` CLI (subscription) — check with `jobhunter llm-status`.
 
 ## Use
 ```bash
-.venv/bin/python -m jobhunter.cli fetch     # fetch + score + store new jobs
-.venv/bin/python -m jobhunter.cli list      # print stored jobs (--status, --min-score)
-.venv/bin/python -m jobhunter.cli web       # dashboard at http://127.0.0.1:8000
+P=.venv/bin/python
+$P -m jobhunter.cli fetch            # fetch + score + store new jobs (WTTJ + ATS)
+$P -m jobhunter.cli judge --min-score 40   # LLM-judge promising jobs
+$P -m jobhunter.cli tailor <job_id>  # tailored CV -> data/cv/<job>/cv.pdf
+$P -m jobhunter.cli cover  <job_id>  # cover letter -> data/cv/<job>/cover_letter.md
+$P -m jobhunter.cli list  --min-score 40
+$P -m jobhunter.cli web              # dashboard at http://127.0.0.1:8000
 ```
 
 ## Daily automation (cron)
@@ -38,18 +44,31 @@ uv pip install --python .venv/bin/python -e .
 ```
 
 ## Configuration
-Edit `config/search.yaml` — query, boost keywords, geo, languages, exclude terms
-(internships etc.), company blocklist, `min_score`, `max_hits`.
+- `config/search.yaml` — query, role/boost keywords, geo, languages, exclude
+  terms, company blocklist, `min_score`, `max_hits`.
+- `config/companies.yaml` — ATS boards to pull (`name`, `ats`, `token`).
+- `templates/cv_base.tex` — the base CV the tailoring reorders.
+
+## Tests
+```bash
+.venv/bin/python -m pytest -q
+```
 
 ## Layout
 ```
 jobhunter/
-  sources/wttj.py   WTTJ Algolia fetch (verified live)
-  match.py          rule-based junior-tuned scoring
-  db.py             SQLite: jobs / applications / cv_artifacts + dedup
-  pipeline.py       fetch -> score -> store
-  cli.py            fetch / list / web / init
-  web/              FastAPI + Jinja dashboard (table + kanban)
-config/search.yaml
-data/jobhunter.db   (created on first run)
+  sources/wttj.py, sources/ats.py   fetch (WTTJ Algolia; Greenhouse/Lever)
+  match.py                          rule-based junior-tuned scoring + relevance gate
+  llm/provider.py                   Claude seam (API key or claude CLI)
+  llm/judge.py, apply/cover_letter.py   LLM fit-judge + cover letter
+  tailor/snippet_bank.py, tailor/engine.py   parse + reorder + compile CV
+  db.py                             SQLite: jobs / applications / cv_artifacts
+  pipeline.py                       fetch / judge / tailor / cover orchestration
+  cli.py, web/                      CLI + FastAPI/Jinja dashboard (table + kanban)
+config/, templates/, tests/, data/  (data/ created on first run; git-ignored)
 ```
+
+## Roadmap
+- LinkedIn / Indeed sources (Playwright, `li_at` cookie; secondary account).
+- LLM-assisted screening-question answers with a cached Q→A store.
+- Notifications (Telegram/email) on new high-fit jobs.

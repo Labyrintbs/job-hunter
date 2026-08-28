@@ -13,6 +13,14 @@ dependencies = [
     "pydantic>=2.8",
 ]
 
+[project.optional-dependencies]
+# LLM via API key path (the claude CLI path needs no package). Cover-letter/judge
+# also work through the local `claude` CLI with no extra install.
+llm = ["anthropic>=0.40"]
+# Reserved for the future LinkedIn logged-in fetch phase.
+browser = ["playwright>=1.4"]
+dev = ["pytest>=8.0", "playwright>=1.4"]
+
 [project.scripts]
 jobhunter = "jobhunter.cli:main"
 
