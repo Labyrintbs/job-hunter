@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import argparse
 
-from . import db
+from . import db, schedule
 from .config import DB_PATH
 from .llm import provider
-from .pipeline import cover_one, judge_all, judge_one, run_fetch, tailor_one
+from .pipeline import cover_one, daily_run, judge_all, judge_one, run_fetch, tailor_one
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -31,6 +31,13 @@ def main(argv: list[str] | None = None) -> int:
     p_cover.add_argument("job_id", type=int)
 
     sub.add_parser("llm-status", help="show which LLM backend is active")
+
+    p_run = sub.add_parser("run", help="one scheduled run: fetch + judge new jobs (cron target)")
+    p_run.add_argument("--no-judge", action="store_true")
+
+    p_cron = sub.add_parser("cron", help="manage the daily crontab entry")
+    p_cron.add_argument("action", choices=["show", "install", "uninstall"], nargs="?", default="show")
+    p_cron.add_argument("--time", default="08:00", help="HH:MM (default 08:00)")
 
     p_web = sub.add_parser("web", help="run the dashboard")
     p_web.add_argument("--host", default="127.0.0.1")
@@ -88,6 +95,29 @@ def main(argv: list[str] | None = None) -> int:
         if result.get("error"):
             print(f"error: {result['error']}"); return 1
         print(f"cover letter: {result['cover_letter']}")
+        return 0
+
+    if args.command == "run":
+        summary = daily_run(judge=not args.no_judge)
+        print(f"fetched={summary['fetched']} kept={summary['kept']} new={summary['new']} judged={summary['judged']}")
+        if summary.get("new_by_source"):
+            print("  new by source:", dict(summary["new_by_source"]))
+        return 0
+
+    if args.command == "cron":
+        try:
+            hour, minute = (int(x) for x in args.time.split(":"))
+        except ValueError:
+            print("--time must be HH:MM"); return 1
+        if args.action == "install":
+            line = schedule.install(hour, minute)
+            print(f"installed:\n  {line}")
+        elif args.action == "uninstall":
+            print("removed" if schedule.uninstall() else "no jobhunter entry found")
+        else:
+            cur = schedule.current()
+            print(f"current:\n  {cur}" if cur else "not installed")
+            print(f"\nwould install:\n  {schedule.cron_line(hour, minute)}")
         return 0
 
     if args.command == "web":

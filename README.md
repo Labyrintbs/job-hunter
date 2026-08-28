@@ -40,9 +40,17 @@ $P -m jobhunter.cli web              # dashboard at http://127.0.0.1:8000
 ```
 
 ## Daily automation (cron)
+`jobhunter run` is the scheduled entrypoint: fetch everywhere, then LLM-judge the
+new promising jobs (capped per run). Manage the crontab entry with:
+```bash
+$P -m jobhunter.cli run                 # run once now (what cron calls)
+$P -m jobhunter.cli cron show           # preview the crontab line (no changes)
+$P -m jobhunter.cli cron install --time 08:00   # add the daily entry
+$P -m jobhunter.cli cron uninstall      # remove it
 ```
-0 8 * * *  cd /Users/hongmingfang/Documents/job-hunter && .venv/bin/python -m jobhunter.cli fetch
-```
+Installing is opt-in because the daily run makes LLM calls. Only the tagged
+`# jobhunter-daily` line is ever touched; your other cron jobs are preserved.
+Output is appended to `data/cron.log`.
 
 ## Configuration
 - `config/search.yaml` — query, role/boost keywords, geo, languages, exclude
