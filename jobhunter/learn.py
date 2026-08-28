@@ -12,6 +12,7 @@ import re
 from collections import Counter
 
 from . import db
+from .llm import provider
 
 # Ubiquitous role/geo/format tokens carry no signal (they appear everywhere) — drop them.
 _STOP = set("""
@@ -96,3 +97,43 @@ def mine_rules(conn, min_support: int = 2, min_score: float = 0.34,
 
     return {"status": "ok", "dismissed": len(neg), "interested": len(pos),
             "suggested": len(candidates), "new": new, "rules": candidates}
+
+
+_PROFILE_SYSTEM = (
+    "You distill a job-seeker's preferences from their own accept/reject decisions "
+    "into a short instruction block for a downstream job-fit judge. Output 5-8 terse "
+    "bullet lines, no preamble. Generalise ONLY from the evidence — never invent a "
+    "preference. Capture what to prioritise and what to avoid: domains, seniority, "
+    "tech stack, company type. Each bullet starts with 'Prefer' or 'Avoid'."
+)
+
+
+def _example_block(rows, dismissed: bool = False, limit: int = 15) -> str:
+    lines = []
+    for r in rows[:limit]:
+        tag = ""
+        if dismissed and r["dismiss_reasons"]:
+            tag = f"  [reasons: {r['dismiss_reasons']}]"
+        lines.append(f"- {r['title']} @ {r['company']}{tag}")
+    return "\n".join(lines) or "(none)"
+
+
+def condense_profile(conn, max_examples: int = 15, persist: bool = True) -> dict:
+    """Ask the LLM to distill a preference profile from labeled jobs. Stored as a
+    new version; the latest is injected into the judge in Phase 5."""
+    pos = db.labeled_jobs(conn, "interested")
+    neg = db.labeled_jobs(conn, "dismissed")
+    if not provider.available():
+        return {"status": "no_llm", "interested": len(pos), "dismissed": len(neg)}
+    if len(pos) + len(neg) < 3:
+        return {"status": "insufficient", "interested": len(pos), "dismissed": len(neg)}
+
+    prompt = (
+        f"INTERESTED (you liked these):\n{_example_block(pos, limit=max_examples)}\n\n"
+        f"DISMISSED (you rejected these):\n{_example_block(neg, dismissed=True, limit=max_examples)}\n\n"
+        "Write the preference profile now."
+    )
+    text = provider.generate(prompt, system=_PROFILE_SYSTEM, max_tokens=400).strip()
+    if persist and text:
+        db.add_profile(conn, text, len(pos), len(neg))
+    return {"status": "ok", "text": text, "interested": len(pos), "dismissed": len(neg)}

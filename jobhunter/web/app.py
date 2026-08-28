@@ -127,9 +127,11 @@ def rules_page(request: Request):
         pending = db.list_rules(conn, active=0)
         active = db.list_rules(conn, active=1)
         n_dismissed = db.dismissed_count(conn)
+        profile = db.current_profile(conn)
     return TEMPLATES.TemplateResponse(
         request, "rules.html",
-        {"pending": pending, "active": active, "n_dismissed": n_dismissed},
+        {"pending": pending, "active": active, "n_dismissed": n_dismissed,
+         "profile": profile, "llm_available": provider.available()},
     )
 
 
@@ -152,3 +154,12 @@ def rules_reject_route(rule_id: int):
     with db.connect() as conn:
         db.delete_rule(conn, rule_id)
     return JSONResponse({"ok": True, "rule_id": rule_id})
+
+
+@app.post("/profile/update")
+def profile_update_route():
+    if not provider.available():
+        return RedirectResponse(url="/rules", status_code=303)
+    with db.connect() as conn:
+        learn.condense_profile(conn)
+    return RedirectResponse(url="/rules", status_code=303)

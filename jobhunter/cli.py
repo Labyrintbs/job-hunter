@@ -63,6 +63,9 @@ def main(argv: list[str] | None = None) -> int:
     p_rules.add_argument("--value", help="for add")
     p_rules.add_argument("--weight", type=int, default=20)
 
+    p_profile = sub.add_parser("profile", help="show / update the learned preference profile")
+    p_profile.add_argument("action", choices=["show", "update"], default="show", nargs="?")
+
     p_web = sub.add_parser("web", help="run the dashboard")
     p_web.add_argument("--host", default="127.0.0.1")
     p_web.add_argument("--port", type=int, default=8000)
@@ -232,6 +235,30 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  {mark} #{r['id']:<3d} [{r['source']:7s}] {r['kind']:13s} {r['value']:30s} "
                   f"w={r['weight']:<3d} hits={r['hit_count']:<3d} {r['evidence']}")
         print(f"\n{len(rows)} rules ({args.show})")
+        return 0
+
+    if args.command == "profile":
+        db.init_db()
+        if args.action == "update":
+            with db.connect() as conn:
+                result = learn.condense_profile(conn)
+            if result["status"] == "no_llm":
+                print("no LLM backend available (set ANTHROPIC_API_KEY or install the claude CLI)")
+                return 1
+            if result["status"] == "insufficient":
+                print(f"not enough feedback yet: {result['interested']} interested / "
+                      f"{result['dismissed']} dismissed (need >= 3 total)")
+                return 0
+            print("updated preference profile:\n")
+            print(result["text"])
+            return 0
+        with db.connect() as conn:
+            row = db.current_profile(conn)
+        if not row:
+            print("no profile yet. Run: jobhunter profile update")
+        else:
+            print(f"# preference profile (from {row['n_pos']} interested / {row['n_neg']} dismissed, {row['created_at']})\n")
+            print(row["text"])
         return 0
 
     if args.command == "web":

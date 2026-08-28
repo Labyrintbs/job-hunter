@@ -66,6 +66,14 @@ CREATE TABLE IF NOT EXISTS filter_rules (
     created_at TEXT DEFAULT (datetime('now')),
     UNIQUE(kind, value)
 );
+
+CREATE TABLE IF NOT EXISTS preference_profile (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    text       TEXT NOT NULL,
+    n_pos      INTEGER DEFAULT 0,
+    n_neg      INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now'))
+);
 """
 
 
@@ -384,6 +392,21 @@ def delete_rule(conn: sqlite3.Connection, rule_id: int) -> None:
 
 def bump_rule_hits(conn: sqlite3.Connection, rule_id: int, n: int = 1) -> None:
     conn.execute("UPDATE filter_rules SET hit_count = hit_count + ? WHERE id = ?", (n, rule_id))
+
+
+def add_profile(conn: sqlite3.Connection, text: str, n_pos: int, n_neg: int) -> int:
+    cur = conn.execute(
+        "INSERT INTO preference_profile (text, n_pos, n_neg) VALUES (?,?,?)",
+        (text, n_pos, n_neg),
+    )
+    return cur.lastrowid
+
+
+def current_profile(conn: sqlite3.Connection) -> sqlite3.Row | None:
+    """The most recent preference profile, or None."""
+    return conn.execute(
+        "SELECT * FROM preference_profile ORDER BY id DESC LIMIT 1"
+    ).fetchone()
 
 
 def status_counts(conn: sqlite3.Connection) -> dict[str, int]:

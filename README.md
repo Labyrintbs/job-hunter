@@ -38,6 +38,10 @@ cover letter per job, and track every application from a local web dashboard.
   company rules by document-frequency difference — each with its evidence. Rules
   land **inactive**; nothing filters your jobs until you approve it in the Rules
   page (or `jobhunter rules approve <id>`). CLI: `jobhunter rules mine|list|approve|reject|add`.
+- **Preference profile (LLM-condensed)**: Claude distills your interested-vs-dismissed
+  jobs into a short "Prefer … / Avoid …" instruction block, versioned in the DB and
+  shown on the Rules page. It's injected into the LLM judge (Phase 5). Grounded in
+  your evidence only. CLI: `jobhunter profile show|update`.
 - **Track**: SQLite with cross-run dedup (by id *and* content); each posting moves
   through a status lifecycle from a table + kanban dashboard.
 - **Notify**: after each scheduled run, a digest of new high-fit jobs goes to the

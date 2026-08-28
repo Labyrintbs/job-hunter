@@ -47,6 +47,42 @@ def test_mines_discriminative_terms_inactive(tmp_db):
         assert again["new"] == 0
 
 
+def test_condense_profile_persists(tmp_db, monkeypatch):
+    monkeypatch.setattr(learn.provider, "available", lambda: True)
+    captured = {}
+
+    def fake_generate(prompt, system=None, **kw):
+        captured["prompt"] = prompt
+        return "- Prefer applied ML product roles\n- Avoid blockchain / web3"
+
+    monkeypatch.setattr(learn.provider, "generate", fake_generate)
+    with db.connect() as conn:
+        _add(conn, "1", "ML Engineer", "GoodCo", "pytorch", "interested")
+        _add(conn, "2", "Blockchain Engineer", "BadCorp", "solidity", "dismissed", "wrong_domain")
+        _add(conn, "3", "Web3 Engineer", "BadCorp", "ethereum", "dismissed", "wrong_domain")
+        out = learn.condense_profile(conn)
+        assert out["status"] == "ok" and "blockchain" in out["text"].lower()
+        row = db.current_profile(conn)
+        assert row["text"] == out["text"] and row["n_pos"] == 1 and row["n_neg"] == 2
+    # examples were actually fed to the model
+    assert "Blockchain Engineer" in captured["prompt"] and "wrong_domain" in captured["prompt"]
+
+
+def test_condense_profile_no_llm(tmp_db, monkeypatch):
+    monkeypatch.setattr(learn.provider, "available", lambda: False)
+    with db.connect() as conn:
+        _add(conn, "1", "ML Engineer", "GoodCo", "pytorch", "interested")
+        assert learn.condense_profile(conn)["status"] == "no_llm"
+
+
+def test_condense_profile_insufficient(tmp_db, monkeypatch):
+    monkeypatch.setattr(learn.provider, "available", lambda: True)
+    monkeypatch.setattr(learn.provider, "generate", lambda *a, **k: "x")
+    with db.connect() as conn:
+        _add(conn, "1", "ML Engineer", "GoodCo", "pytorch", "interested")
+        assert learn.condense_profile(conn)["status"] == "insufficient"
+
+
 def test_approve_and_reject_flow(tmp_db):
     with db.connect() as conn:
         db.add_rule(conn, "negative_kw", "blockchain", source="learned", active=0)
