@@ -37,6 +37,21 @@ def test_status_preserved_on_refetch(tmp_db):
         assert row["score"] == 90              # score refreshed
 
 
+def test_filtered_bucket_and_restore(tmp_db):
+    with db.connect() as conn:
+        main, _ = db.upsert_job(conn, J("1", url="http://x/1"), 60, "r")
+        hidden, _ = db.upsert_job(conn, J("2", url="http://x/2"), 55, "r",
+                                  filtered=True, filter_reason="senior title", seniority="senior")
+        assert [r["id"] for r in db.list_jobs(conn)] == [main]            # default: main only
+        assert [r["id"] for r in db.list_jobs(conn, filtered=1)] == [hidden]
+        assert len(db.list_jobs(conn, filtered=None)) == 2               # both
+        assert db.filtered_count(conn) == 1
+
+        db.set_filtered(conn, hidden, False)
+        assert db.filtered_count(conn) == 0
+        assert {r["id"] for r in db.list_jobs(conn)} == {main, hidden}
+
+
 def test_llm_and_cover_setters(tmp_db):
     with db.connect() as conn:
         jid, _ = db.upsert_job(conn, J("1", url="http://x/1"), 60, "r")

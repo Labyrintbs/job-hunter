@@ -10,9 +10,15 @@ cover letter per job, and track every application from a local web dashboard.
   boards (Greenhouse + Lever), and LinkedIn (public guest search, read-only, no
   login), filtered to France.
 - **Score + filter** with a rule-based, junior-tuned matcher: title-based ML
-  relevance gate, internships/alternance excluded, seniority as a soft penalty,
-  Paris/IDF ranked above other-France.
-- **LLM fit-judge** (Claude): 0–100 score + verdict + reasons, junior-calibrated.
+  relevance gate, internships/alternance excluded, Paris/IDF ranked above
+  other-France.
+- **Seniority screen + Filtered bucket**: obvious senior/lead/staff/confirmé
+  titles and postings requiring more than `seniority.max_years` are auto-hidden
+  into a Filtered bucket (never deleted — reviewable and restorable). A
+  junior/new-grad title always overrides the gate; below-`min_score` jobs land
+  there too. `jobhunter list --filtered` or the 🕳 filtered pill in the dashboard.
+- **LLM fit-judge** (Claude): 0–100 score + verdict + reasons + seniority read
+  (`seniority`, `min_years_required`), junior-calibrated.
 - **LaTeX CV auto-tailoring**: reorders your projects/experience by relevance to
   each job, rewrites the "Seeking" tagline, compiles to PDF (`latexmk`).
 - **Cover-letter drafting** (Claude): grounded in your real CV, matches the

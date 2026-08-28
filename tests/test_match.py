@@ -1,4 +1,4 @@
-from jobhunter.match import evaluate, is_relevant
+from jobhunter.match import detect_seniority, is_relevant, min_years_required, screen
 from jobhunter.models import Job
 
 
@@ -9,21 +9,18 @@ def J(title="Machine Learning Engineer", desc="", loc="Paris, Ile-de-France, Fra
 
 
 def test_internship_excluded(config):
-    score, reasons, keep = evaluate(J(title="Stage - Machine Learning"), config)
-    assert keep is False and "excluded" in reasons
+    s = screen(J(title="Stage - Machine Learning"), config)
+    assert s.keep is False and "excluded" in s.filter_reason
 
 
 def test_alternance_excluded(config):
-    _, _, keep = evaluate(J(title="Alternance Data Scientist"), config)
-    assert keep is False
+    assert screen(J(title="Alternance Data Scientist"), config).keep is False
 
 
 def test_non_ml_title_dropped_even_with_ml_boilerplate(config):
-    # ATS boilerplate mentions ML in the description but the role is not ML.
     job = J(title="Product Manager", desc="We are a machine learning company using pytorch.")
     assert is_relevant(job, config) is False
-    _, _, keep = evaluate(job, config)
-    assert keep is False
+    assert screen(job, config).keep is False
 
 
 def test_ml_title_relevant(config):
@@ -33,18 +30,50 @@ def test_ml_title_relevant(config):
 
 
 def test_paris_ranks_above_other_france(config):
-    paris = evaluate(J(loc="Paris, Ile-de-France, France"), config)[0]
-    other = evaluate(J(loc="Bordeaux, Nouvelle-Aquitaine, France"), config)[0]
+    paris = screen(J(loc="Paris, Ile-de-France, France"), config).score
+    other = screen(J(loc="Bordeaux, Nouvelle-Aquitaine, France"), config).score
     assert paris > other
 
 
-def test_seniority_soft_penalty_not_dropped(config):
-    score, reasons, keep = evaluate(J(title="Senior Machine Learning Engineer"), config)
-    assert keep is True
-    assert "soft penalty" in reasons
+def test_senior_title_goes_to_filtered_bucket(config):
+    s = screen(J(title="Senior Machine Learning Engineer"), config)
+    assert s.keep is True            # still stored
+    assert s.filtered is True        # but auto-hidden
+    assert s.seniority == "senior"
+    assert "senior" in s.filter_reason
 
 
-def test_junior_role_survives(config):
-    score, _, keep = evaluate(J(title="Junior Machine Learning Engineer",
-                                desc="1-2 years experience required"), config)
-    assert keep is True and score > 0
+def test_junior_title_survives_even_with_years(config):
+    s = screen(J(title="Junior Machine Learning Engineer",
+                 desc="5+ years of experience required"), config)
+    assert s.keep is True and s.filtered is False   # junior title overrides the gate
+    assert s.seniority == "junior"
+
+
+def test_too_many_years_filtered(config):
+    s = screen(J(title="Machine Learning Engineer",
+                 desc="We need at least 6 years of experience in production ML."), config)
+    assert s.filtered is True and s.min_years == 6
+
+
+def test_min_years_parser():
+    assert min_years_required("5+ years of experience") == 5
+    assert min_years_required("3-5 years experience required") == 3
+    assert min_years_required("minimum 4 years") == 4
+    assert min_years_required("au moins 2 ans d'expérience") == 2
+    assert min_years_required("no requirement here") is None
+    assert min_years_required("founded 8 years ago, great culture") is None  # not experience
+
+
+def test_detect_seniority():
+    assert detect_seniority(J(title="Lead ML Engineer")) == "senior"
+    assert detect_seniority(J(title="Staff Data Scientist")) == "senior"
+    assert detect_seniority(J(title="Junior AI Engineer")) == "junior"
+    assert detect_seniority(J(title="Machine Learning Engineer")) == "unknown"
+
+
+def test_low_score_filtered(config):
+    # ML-relevant by title but weak match + outside France -> below min_score -> Filtered, not dropped.
+    s = screen(J(title="Research Scientist", desc="", loc="London, UK"), config)
+    assert s.keep is True and s.filtered is True
+    assert s.score < config["min_score"]

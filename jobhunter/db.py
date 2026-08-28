@@ -70,6 +70,10 @@ MIGRATIONS = {
         "llm_score": "INTEGER DEFAULT NULL",
         "llm_verdict": "TEXT DEFAULT ''",
         "llm_reasons": "TEXT DEFAULT ''",
+        "seniority": "TEXT DEFAULT ''",
+        "min_years": "INTEGER DEFAULT NULL",
+        "filtered": "INTEGER DEFAULT 0",
+        "filter_reason": "TEXT DEFAULT ''",
     },
     "applications": {
         "cover_letter_path": "TEXT DEFAULT ''",
@@ -107,9 +111,11 @@ def _content_key(job: Job) -> str:
     return f"{job.company.lower()}|{job.title.lower()}|{job.location.lower()}"
 
 
-def upsert_job(conn: sqlite3.Connection, job: Job, score: int, reasons: str) -> tuple[int, bool]:
-    """Insert a job if new. Returns (job_id, is_new). Existing jobs are left untouched
-    except for a refreshed score/reasons, preserving their application status.
+def upsert_job(conn: sqlite3.Connection, job: Job, score: int, reasons: str, *,
+               filtered: bool = False, filter_reason: str = "",
+               seniority: str = "", min_years: int | None = None) -> tuple[int, bool]:
+    """Insert a job if new. Returns (job_id, is_new). Existing jobs keep their
+    application status; their score/reasons and screening flags are refreshed.
     Dedups both on (source, external_id) and on content (WTTJ indexes the same posting
     under several objectIDs)."""
     row = conn.execute(
@@ -125,20 +131,23 @@ def upsert_job(conn: sqlite3.Connection, job: Job, score: int, reasons: str) -> 
         ).fetchone()
     if row:
         conn.execute(
-            "UPDATE jobs SET score = ?, match_reasons = ? WHERE id = ?",
-            (score, reasons, row["id"]),
+            """UPDATE jobs SET score = ?, match_reasons = ?, filtered = ?,
+               filter_reason = ?, seniority = ?, min_years = ? WHERE id = ?""",
+            (score, reasons, int(filtered), filter_reason, seniority, min_years, row["id"]),
         )
         return row["id"], False
 
     cur = conn.execute(
         """INSERT INTO jobs
            (source, external_id, title, company, location, language, url,
-            description, contract_type, posted_at, score, match_reasons)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            description, contract_type, posted_at, score, match_reasons,
+            filtered, filter_reason, seniority, min_years)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             job.source, job.external_id, job.title, job.company, job.location,
             job.language, job.url, job.description, job.contract_type,
             job.posted_at, score, reasons,
+            int(filtered), filter_reason, seniority, min_years,
         ),
     )
     job_id = cur.lastrowid
@@ -146,7 +155,10 @@ def upsert_job(conn: sqlite3.Connection, job: Job, score: int, reasons: str) -> 
     return job_id, True
 
 
-def list_jobs(conn: sqlite3.Connection, status: str | None = None, min_score: int = 0) -> list[sqlite3.Row]:
+def list_jobs(conn: sqlite3.Connection, status: str | None = None, min_score: int = 0,
+              filtered: int | None = 0) -> list[sqlite3.Row]:
+    """filtered=0 (default) shows the main list, filtered=1 the auto-hidden bucket,
+    filtered=None shows both."""
     q = """
         SELECT j.*, a.status, a.notes, a.submitted_url, a.cover_letter_path,
                (SELECT pdf_path FROM cv_artifacts c WHERE c.job_id = j.id
@@ -155,11 +167,32 @@ def list_jobs(conn: sqlite3.Connection, status: str | None = None, min_score: in
         WHERE j.score >= ?
     """
     params: list = [min_score]
+    if filtered is not None:
+        q += " AND COALESCE(j.filtered, 0) = ?"
+        params.append(filtered)
     if status:
         q += " AND a.status = ?"
         params.append(status)
     q += " ORDER BY j.score DESC, j.fetched_at DESC"
     return conn.execute(q, params).fetchall()
+
+
+def set_filtered(conn: sqlite3.Connection, job_id: int, filtered: bool, reason: str = "") -> None:
+    conn.execute(
+        "UPDATE jobs SET filtered = ?, filter_reason = ? WHERE id = ?",
+        (int(filtered), reason, job_id),
+    )
+
+
+def set_seniority(conn: sqlite3.Connection, job_id: int, seniority: str, min_years: int | None) -> None:
+    conn.execute(
+        "UPDATE jobs SET seniority = ?, min_years = ? WHERE id = ?",
+        (seniority, min_years, job_id),
+    )
+
+
+def filtered_count(conn: sqlite3.Connection) -> int:
+    return conn.execute("SELECT COUNT(*) FROM jobs WHERE COALESCE(filtered, 0) = 1").fetchone()[0]
 
 
 def get_job(conn: sqlite3.Connection, job_id: int) -> sqlite3.Row | None:

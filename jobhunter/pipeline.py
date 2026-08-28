@@ -41,21 +41,29 @@ def run_fetch(config: dict | None = None) -> dict:
     seen = 0
     kept = 0
     new_ids: list[int] = []
+    filtered_new = 0
     per_source: dict[str, int] = {}
     with db.connect() as conn:
         for job in jobs:
             seen += 1
-            pts, reasons, keep = match.evaluate(job, config)
-            if not keep:
+            s = match.screen(job, config)
+            if not s.keep:
                 continue
             kept += 1
-            jid, is_new = db.upsert_job(conn, job, pts, reasons)
+            jid, is_new = db.upsert_job(
+                conn, job, s.score, s.reasons,
+                filtered=s.filtered, filter_reason=s.filter_reason,
+                seniority=s.seniority, min_years=s.min_years,
+            )
             if is_new:
-                new_ids.append(jid)
-                per_source[job.source] = per_source.get(job.source, 0) + 1
+                if s.filtered:
+                    filtered_new += 1
+                else:
+                    new_ids.append(jid)
+                    per_source[job.source] = per_source.get(job.source, 0) + 1
 
     return {"fetched": seen, "kept": kept, "new": len(new_ids),
-            "new_ids": new_ids, "new_by_source": per_source}
+            "filtered_new": filtered_new, "new_ids": new_ids, "new_by_source": per_source}
 
 
 def daily_run(judge: bool = True, judge_min_score: int = 40, judge_limit: int = 15) -> dict:
@@ -98,6 +106,8 @@ def judge_one(job_id: int) -> dict:
     result = llm_judge.judge(job)
     with db.connect() as conn:
         db.set_llm_judgment(conn, job_id, result["score"], result["verdict"], result["reasons"])
+        if result.get("seniority") or result.get("min_years") is not None:
+            db.set_seniority(conn, job_id, result.get("seniority", ""), result.get("min_years"))
     return {"job_id": job_id, **result}
 
 

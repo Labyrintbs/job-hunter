@@ -61,6 +61,7 @@
     const tailorCV = (btn, id) => runAction(btn, '/tailor/' + id, d => d.compiled);
     const judgeJob = (btn, id) => runAction(btn, '/judge/' + id, d => !d.error);
     const coverJob = (btn, id) => runAction(btn, '/cover/' + id, d => !d.error);
+    const restoreJob = (btn, id) => runAction(btn, '/filter/restore/' + id, d => d.ok);
   </script>
 </body>
 </html>

@@ -21,10 +21,11 @@ def _startup() -> None:
 
 
 @app.get("/", response_class=HTMLResponse)
-def dashboard(request: Request, status: str | None = None, min_score: int = 0):
+def dashboard(request: Request, status: str | None = None, min_score: int = 0, filtered: int = 0):
     with db.connect() as conn:
-        jobs = db.list_jobs(conn, status=status or None, min_score=min_score)
+        jobs = db.list_jobs(conn, status=status or None, min_score=min_score, filtered=filtered)
         counts = db.status_counts(conn)
+        n_filtered = db.filtered_count(conn)
     return TEMPLATES.TemplateResponse(
         request,
         "dashboard.html",
@@ -34,6 +35,8 @@ def dashboard(request: Request, status: str | None = None, min_score: int = 0):
             "statuses": db.STATUSES,
             "active_status": status or "",
             "min_score": min_score,
+            "filtered": filtered,
+            "n_filtered": n_filtered,
             "total": sum(counts.values()),
             "llm_available": provider.available(),
         },
@@ -56,6 +59,14 @@ def set_status(job_id: int = Form(...), status: str = Form(...)):
     with db.connect() as conn:
         db.update_status(conn, job_id, status)
     return JSONResponse({"ok": True, "job_id": job_id, "status": status})
+
+
+@app.post("/filter/restore/{job_id}")
+def restore_route(job_id: int):
+    """Move a job out of the auto-hidden Filtered bucket back into the main list."""
+    with db.connect() as conn:
+        db.set_filtered(conn, job_id, False, "")
+    return JSONResponse({"ok": True, "job_id": job_id})
 
 
 @app.post("/run/fetch")

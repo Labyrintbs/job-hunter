@@ -25,7 +25,16 @@ Description:
 {description}
 
 Rate the fit and return ONLY a JSON object:
-{{"score": <int 0-100>, "verdict": "<strong|good|stretch|weak>", "reasons": "<= 2 sentences>"}}"""
+{{"score": <int 0-100>, "verdict": "<strong|good|stretch|weak>",
+  "seniority": "<junior|mid|senior>", "min_years": <int required years, 0 if none stated>,
+  "reasons": "<= 2 sentences>"}}"""
+
+
+def _int_or_none(value) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def judge(job: Job) -> dict:
@@ -41,5 +50,7 @@ def judge(job: Job) -> dict:
     return {
         "score": score,
         "verdict": str(data.get("verdict", "")),
+        "seniority": str(data.get("seniority", "")),
+        "min_years": _int_or_none(data.get("min_years")),
         "reasons": str(data.get("reasons", "")),
     }
