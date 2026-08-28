@@ -5,7 +5,7 @@ from .apply import cover_letter
 from .config import load_companies, load_search_config
 from .llm import judge as llm_judge
 from .llm import provider
-from .sources import ats, wttj
+from .sources import ats, linkedin, wttj
 from .tailor import engine as cv_engine
 
 
@@ -16,6 +16,18 @@ def _gather(config: dict) -> list:
         country=(config.get("countries") or ["France"])[0],
     )
     jobs += ats.fetch_all(load_companies())
+
+    li = config.get("linkedin") or {}
+    if li.get("enabled"):
+        try:
+            jobs += linkedin.fetch(
+                query=config["query"],
+                location=li.get("location", "Paris, France"),
+                max_pages=li.get("max_pages", 3),
+                recent_hours=li.get("recent_hours", 168),
+            )
+        except Exception as exc:
+            print(f"  linkedin warn: {exc}")
     return jobs
 
 

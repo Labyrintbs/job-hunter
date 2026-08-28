@@ -6,8 +6,9 @@ cover letter per job, and track every application from a local web dashboard.
 **Draft-and-review by design: it never auto-submits applications.**
 
 ## Features
-- **Fetch** from Welcome to the Jungle (public Algolia backend) and company ATS
-  boards (Greenhouse + Lever), filtered to France at the source.
+- **Fetch** from Welcome to the Jungle (public Algolia backend), company ATS
+  boards (Greenhouse + Lever), and LinkedIn (public guest search, read-only, no
+  login), filtered to France.
 - **Score + filter** with a rule-based, junior-tuned matcher: title-based ML
   relevance gate, internships/alternance excluded, seniority as a soft penalty,
   Paris/IDF ranked above other-France.
@@ -69,6 +70,6 @@ config/, templates/, tests/, data/  (data/ created on first run; git-ignored)
 ```
 
 ## Roadmap
-- LinkedIn / Indeed sources (Playwright, `li_at` cookie; secondary account).
+- Indeed / Glassdoor sources; LinkedIn logged-in enrichment (`li_at` cookie,
+  secondary account) for descriptions.
 - LLM-assisted screening-question answers with a cached Q→A store.
-- Notifications (Telegram/email) on new high-fit jobs.

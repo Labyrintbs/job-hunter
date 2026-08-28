@@ -62,3 +62,10 @@ min_score: 20
 
 # Max hits to request from WTTJ per run.
 max_hits: 100
+
+# LinkedIn public guest search (read-only, no login).
+linkedin:
+  enabled: true
+  location: "Paris, France"
+  recent_hours: 168   # last 7 days
+  max_pages: 3
