@@ -3,8 +3,9 @@ from __future__ import annotations
 import argparse
 
 from . import db, schedule
-from .config import DB_PATH
+from .config import DB_PATH, load_search_config
 from .llm import provider
+from .notify import dispatch as notify_dispatch
 from .pipeline import cover_one, daily_run, judge_all, judge_one, run_fetch, tailor_one
 
 
@@ -38,6 +39,9 @@ def main(argv: list[str] | None = None) -> int:
     p_cron = sub.add_parser("cron", help="manage the daily crontab entry")
     p_cron.add_argument("action", choices=["show", "install", "uninstall"], nargs="?", default="show")
     p_cron.add_argument("--time", default="08:00", help="HH:MM (default 08:00)")
+
+    p_notify = sub.add_parser("notify", help="send a digest of current top jobs to configured channels")
+    p_notify.add_argument("--min-score", type=int, default=None, help="override notifications.min_score")
 
     p_web = sub.add_parser("web", help="run the dashboard")
     p_web.add_argument("--host", default="127.0.0.1")
@@ -118,6 +122,17 @@ def main(argv: list[str] | None = None) -> int:
             cur = schedule.current()
             print(f"current:\n  {cur}" if cur else "not installed")
             print(f"\nwould install:\n  {schedule.cron_line(hour, minute)}")
+        return 0
+
+    if args.command == "notify":
+        db.init_db()
+        cfg = load_search_config()
+        notif = cfg.get("notifications") or {}
+        min_score = args.min_score if args.min_score is not None else notif.get("min_score", 60)
+        with db.connect() as conn:
+            rows = [dict(r) for r in db.list_jobs(conn, min_score=0)]
+        result = notify_dispatch.send(rows, {**cfg, "notifications": {**notif, "min_score": min_score}})
+        print(f"selected={result['selected']} results={result.get('results', {})}")
         return 0
 
     if args.command == "web":

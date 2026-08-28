@@ -19,6 +19,8 @@ cover letter per job, and track every application from a local web dashboard.
   posting's language, never fabricates.
 - **Track**: SQLite with cross-run dedup (by id *and* content); each posting moves
   through a status lifecycle from a table + kanban dashboard.
+- **Notify**: after each scheduled run, a digest of new high-fit jobs goes to the
+  configured channels — File (always on), Telegram, or Email.
 
 ## Setup
 ```bash
@@ -54,9 +56,22 @@ Output is appended to `data/cron.log`.
 
 ## Configuration
 - `config/search.yaml` — query, role/boost keywords, geo, languages, exclude
-  terms, company blocklist, `min_score`, `max_hits`.
+  terms, company blocklist, `min_score`, `max_hits`, `linkedin`, `notifications`.
 - `config/companies.yaml` — ATS boards to pull (`name`, `ats`, `token`).
 - `templates/cv_base.tex` — the base CV the tailoring reorders.
+
+### Notifications
+Set `notifications.channels` in `search.yaml` (e.g. `[file, telegram]`) and provide
+credentials via environment:
+```bash
+# Telegram
+export TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=...
+# Email (SMTP)
+export SMTP_HOST=smtp.example.com SMTP_PORT=587 SMTP_USER=you@example.com \
+       SMTP_PASSWORD=... EMAIL_TO=you@example.com
+```
+Test any time: `jobhunter notify --min-score 60` (File channel needs no setup and
+writes `data/notifications/`).
 
 ## Tests
 ```bash

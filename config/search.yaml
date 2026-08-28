@@ -69,3 +69,10 @@ linkedin:
   location: "Paris, France"
   recent_hours: 168   # last 7 days
   max_pages: 3
+
+# Notify about new jobs after each scheduled run.
+# 'file' always works (writes data/notifications/); telegram/email need env creds.
+notifications:
+  enabled: true
+  min_score: 60       # only notify jobs at/above this effective score
+  channels: [file]    # add: telegram, email

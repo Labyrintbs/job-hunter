@@ -5,6 +5,7 @@ from .apply import cover_letter
 from .config import load_companies, load_search_config
 from .llm import judge as llm_judge
 from .llm import provider
+from .notify import dispatch as notify_dispatch
 from .sources import ats, linkedin, wttj
 from .tailor import engine as cv_engine
 
@@ -82,7 +83,8 @@ def daily_run(judge: bool = True, judge_min_score: int = 40, judge_limit: int = 
     with db.connect() as conn:
         new_rows = [dict(db.get_job(conn, jid)) for jid in stats["new_ids"]]
 
-    return {**stats, "judged": judged, "new_rows": new_rows}
+    notified = notify_dispatch.send(new_rows, config)
+    return {**stats, "judged": judged, "new_rows": new_rows, "notified": notified}
 
 
 def judge_one(job_id: int) -> dict:
