@@ -38,6 +38,7 @@
         {% else %}<span class="muted">—</span>{% endif %}
       </td>
       <td>{% if j["url"] %}<a href="{{ j['url'] }}" target="_blank" rel="noopener">{{ j["title"] }}</a>{% else %}{{ j["title"] }}{% endif %}
+          {% if j["description_full"] %}<span title="full description fetched">📄</span>{% endif %}
           {% if j["seniority"] == "senior" %}<span class="pill" style="font-size:10px; padding:1px 6px; border-color:#a55">senior</span>{% elif j["seniority"] == "junior" %}<span class="pill" style="font-size:10px; padding:1px 6px; border-color:#5a5">junior</span>{% endif %}
           {% if j["min_years"] %}<span class="muted" style="font-size:11px">· {{ j["min_years"] }}+ yrs</span>{% endif %}
           <div class="muted" style="font-size:12px">{{ j["contract_type"] }} · {{ j["language"] }}</div></td>
@@ -71,6 +72,9 @@
       <td style="white-space:nowrap">
         {% if filtered %}
         <button class="ghost" style="padding:4px 8px; font-size:12px; border-color:var(--accent)" onclick="restoreJob(this, {{ j['id'] }})">↩ restore</button>
+        {% endif %}
+        {% if not j["description_full"] %}
+        <button class="ghost" style="padding:4px 7px; font-size:12px;" onclick="enrichJob(this, {{ j['id'] }})" title="fetch the full job description">↓desc</button>
         {% endif %}
         {% if j["cv_pdf"] %}<a href="file://{{ j['cv_pdf'] }}" target="_blank">CV</a>{% endif %}
         <button class="ghost" style="padding:4px 7px; font-size:12px;" onclick="tailorCV(this, {{ j['id'] }})">

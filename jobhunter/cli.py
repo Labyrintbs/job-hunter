@@ -6,7 +6,8 @@ from . import db, schedule
 from .config import DB_PATH, load_search_config
 from .llm import provider
 from .notify import dispatch as notify_dispatch
-from .pipeline import cover_one, daily_run, judge_all, judge_one, run_fetch, tailor_one
+from .pipeline import (cover_one, daily_run, enrich_one, enrich_pending, judge_all,
+                       judge_one, run_fetch, tailor_one)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -37,6 +38,10 @@ def main(argv: list[str] | None = None) -> int:
 
     p_cover = sub.add_parser("cover", help="draft a cover letter (LLM)")
     p_cover.add_argument("job_id", type=int)
+
+    p_enrich = sub.add_parser("enrich", help="fetch full descriptions for engaged jobs")
+    p_enrich.add_argument("job_id", type=int, nargs="?", help="omit to enrich all pending engaged jobs")
+    p_enrich.add_argument("--limit", type=int, default=20)
 
     sub.add_parser("llm-status", help="show which LLM backend is active")
 
@@ -130,9 +135,23 @@ def main(argv: list[str] | None = None) -> int:
         print(f"cover letter: {result['cover_letter']}")
         return 0
 
+    if args.command == "enrich":
+        if args.job_id is not None:
+            result = enrich_one(args.job_id)
+            if result.get("error"):
+                print(f"error: {result['error']}"); return 1
+            print(f"enriched={result['enriched']}"
+                  + (f" chars={result['chars']}" if result.get("enriched") else ""))
+        else:
+            stats = enrich_pending(limit=args.limit)
+            print(f"candidates={stats['candidates']} enriched={stats['enriched']}")
+        return 0
+
     if args.command == "run":
         summary = daily_run(judge=not args.no_judge)
-        print(f"fetched={summary['fetched']} kept={summary['kept']} new={summary['new']} judged={summary['judged']}")
+        print(f"fetched={summary['fetched']} kept={summary['kept']} new={summary['new']} "
+              f"filtered_new={summary.get('filtered_new', 0)} judged={summary['judged']} "
+              f"enriched={summary.get('enriched', 0)}")
         if summary.get("new_by_source"):
             print("  new by source:", dict(summary["new_by_source"]))
         return 0

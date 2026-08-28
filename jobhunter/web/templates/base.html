@@ -65,6 +65,7 @@
     const tailorCV = (btn, id) => runAction(btn, '/tailor/' + id, d => d.compiled);
     const judgeJob = (btn, id) => runAction(btn, '/judge/' + id, d => !d.error);
     const coverJob = (btn, id) => runAction(btn, '/cover/' + id, d => !d.error);
+    const enrichJob = (btn, id) => runAction(btn, '/enrich/' + id, d => d.enriched);
     const restoreJob = (btn, id) => runAction(btn, '/filter/restore/' + id, d => d.ok);
     async function sendFeedback(id, label, reasons) {
       const body = new URLSearchParams({ label, reasons });

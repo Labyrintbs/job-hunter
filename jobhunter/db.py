@@ -77,6 +77,7 @@ MIGRATIONS = {
         "user_label": "TEXT DEFAULT ''",
         "dismiss_reasons": "TEXT DEFAULT ''",
         "labeled_at": "TEXT DEFAULT ''",
+        "description_full": "INTEGER DEFAULT 0",
     },
     "applications": {
         "cover_letter_path": "TEXT DEFAULT ''",
@@ -144,13 +145,14 @@ def upsert_job(conn: sqlite3.Connection, job: Job, score: int, reasons: str, *,
         """INSERT INTO jobs
            (source, external_id, title, company, location, language, url,
             description, contract_type, posted_at, score, match_reasons,
-            filtered, filter_reason, seniority, min_years)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            filtered, filter_reason, seniority, min_years, description_full)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             job.source, job.external_id, job.title, job.company, job.location,
             job.language, job.url, job.description, job.contract_type,
             job.posted_at, score, reasons,
             int(filtered), filter_reason, seniority, min_years,
+            int(len(job.description or "") > 200),
         ),
     )
     job_id = cur.lastrowid
@@ -247,6 +249,31 @@ def labeled_jobs(conn: sqlite3.Connection, label: str) -> list[sqlite3.Row]:
     return conn.execute(
         "SELECT * FROM jobs WHERE COALESCE(user_label, '') = ? ORDER BY labeled_at DESC",
         (label,),
+    ).fetchall()
+
+
+# Statuses that count as "you engaged with this job" for lazy enrichment.
+_ENGAGED_STATUSES = ("shortlisted", "cv_ready", "applied", "responded", "interview", "offer")
+
+
+def set_description(conn: sqlite3.Connection, job_id: int, text: str) -> None:
+    conn.execute(
+        "UPDATE jobs SET description = ?, description_full = 1 WHERE id = ?",
+        (text, job_id),
+    )
+
+
+def jobs_needing_enrichment(conn: sqlite3.Connection, limit: int = 20) -> list[sqlite3.Row]:
+    """Engaged jobs (interested, or moved past 'new') whose description is not yet full."""
+    marks = ",".join("?" for _ in _ENGAGED_STATUSES)
+    return conn.execute(
+        f"""SELECT j.id, j.source, j.external_id, j.url FROM jobs j
+            JOIN applications a ON a.job_id = j.id
+            WHERE COALESCE(j.description_full, 0) = 0
+              AND (COALESCE(j.user_label, '') = 'interested' OR a.status IN ({marks}))
+            ORDER BY j.labeled_at DESC, j.fetched_at DESC
+            LIMIT ?""",
+        (*_ENGAGED_STATUSES, limit),
     ).fetchall()
 
 

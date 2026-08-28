@@ -8,7 +8,7 @@ from fastapi.templating import Jinja2Templates
 
 from .. import db
 from ..llm import provider
-from ..pipeline import cover_one, judge_one, run_fetch, tailor_one
+from ..pipeline import cover_one, enrich_one, judge_one, run_fetch, tailor_one
 
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
@@ -114,3 +114,8 @@ def cover_route(job_id: int):
     if not provider.available():
         return JSONResponse({"error": "no LLM backend"}, status_code=503)
     return JSONResponse(cover_one(job_id))
+
+
+@app.post("/enrich/{job_id}")
+def enrich_route(job_id: int):
+    return JSONResponse(enrich_one(job_id))

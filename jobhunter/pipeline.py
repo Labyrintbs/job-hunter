@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from . import db, match
+from . import db, enrich, match
 from .apply import cover_letter
 from .config import load_companies, load_search_config
 from .llm import judge as llm_judge
@@ -88,11 +88,45 @@ def daily_run(judge: bool = True, judge_min_score: int = 40, judge_limit: int = 
             except Exception as exc:
                 print(f"  judge warn: job {jid} failed: {exc}")
 
+    enriched = enrich_pending(limit=10)["enriched"]
+
     with db.connect() as conn:
         new_rows = [dict(db.get_job(conn, jid)) for jid in stats["new_ids"]]
 
     notified = notify_dispatch.send(new_rows, config)
-    return {**stats, "judged": judged, "new_rows": new_rows, "notified": notified}
+    return {**stats, "judged": judged, "enriched": enriched,
+            "new_rows": new_rows, "notified": notified}
+
+
+def enrich_one(job_id: int) -> dict:
+    """Fetch the full description for one job and store it."""
+    db.init_db()
+    with db.connect() as conn:
+        row = db.get_job(conn, job_id)
+        if not row:
+            return {"job_id": job_id, "error": "not found"}
+        source, ext, url = row["source"], row["external_id"], row["url"]
+    text = enrich.fetch_full_text(source, ext, url)
+    if not text:
+        return {"job_id": job_id, "enriched": False}
+    with db.connect() as conn:
+        db.set_description(conn, job_id, text)
+    return {"job_id": job_id, "enriched": True, "chars": len(text)}
+
+
+def enrich_pending(limit: int = 20) -> dict:
+    """Enrich engaged jobs (interested / past 'new') that lack a full description."""
+    db.init_db()
+    with db.connect() as conn:
+        pending = [dict(r) for r in db.jobs_needing_enrichment(conn, limit)]
+    enriched = 0
+    for r in pending:
+        try:
+            if enrich_one(r["id"]).get("enriched"):
+                enriched += 1
+        except Exception as exc:
+            print(f"  enrich warn: job {r['id']} failed: {exc}")
+    return {"candidates": len(pending), "enriched": enriched}
 
 
 def judge_one(job_id: int) -> dict:

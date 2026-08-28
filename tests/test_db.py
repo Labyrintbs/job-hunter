@@ -78,6 +78,21 @@ def test_interested_rescues_from_filtered(tmp_db):
         assert db.get_job(conn, jid)["user_label"] == ""
 
 
+def test_enrichment_selection_and_set_description(tmp_db):
+    with db.connect() as conn:
+        idle, _ = db.upsert_job(conn, J("1", url="http://x/1"), 60, "r")   # new, untouched
+        want, _ = db.upsert_job(conn, J("2", url="http://x/2"), 60, "r")
+        db.set_feedback(conn, want, "interested")                          # engaged via label
+        short, _ = db.upsert_job(conn, J("3", url="http://x/3"), 60, "r")
+        db.update_status(conn, short, "shortlisted")                       # engaged via status
+
+        assert {r["id"] for r in db.jobs_needing_enrichment(conn)} == {want, short}
+
+        db.set_description(conn, want, "x" * 300)
+        assert {r["id"] for r in db.jobs_needing_enrichment(conn)} == {short}   # want now full
+        assert db.get_job(conn, want)["description_full"] == 1
+
+
 def test_llm_and_cover_setters(tmp_db):
     with db.connect() as conn:
         jid, _ = db.upsert_job(conn, J("1", url="http://x/1"), 60, "r")
