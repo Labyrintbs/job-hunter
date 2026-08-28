@@ -32,17 +32,20 @@ def _gather(config: dict) -> list:
     return jobs
 
 
-def run_fetch(config: dict | None = None) -> dict:
+def run_fetch(config: dict | None = None, jobs: list | None = None) -> dict:
     config = config or load_search_config()
     db.init_db()
 
-    jobs = _gather(config)
+    if jobs is None:
+        jobs = _gather(config)
 
     seen = 0
     kept = 0
     new_ids: list[int] = []
     filtered_new = 0
     per_source: dict[str, int] = {}
+    # Geography of ALL new postings this run (filtered included) = the market signal.
+    tier_new = {"idf": 0, "france": 0, "remote": 0, "outside": 0, "unknown": 0}
     with db.connect() as conn:
         config = {**config, "_active_rules": [dict(r) for r in db.active_rules(conn)]}
         for job in jobs:
@@ -51,12 +54,14 @@ def run_fetch(config: dict | None = None) -> dict:
             if not s.keep:
                 continue
             kept += 1
+            tier = match.geo_tier(job.location, config)
             jid, is_new = db.upsert_job(
                 conn, job, s.score, s.reasons,
                 filtered=s.filtered, filter_reason=s.filter_reason,
-                seniority=s.seniority, min_years=s.min_years,
+                seniority=s.seniority, min_years=s.min_years, geo_tier=tier,
             )
             if is_new:
+                tier_new[tier] = tier_new.get(tier, 0) + 1
                 for rid in s.matched_rules:
                     db.bump_rule_hits(conn, rid)
                 if s.filtered:
@@ -65,8 +70,14 @@ def run_fetch(config: dict | None = None) -> dict:
                     new_ids.append(jid)
                     per_source[job.source] = per_source.get(job.source, 0) + 1
 
-    return {"fetched": seen, "kept": kept, "new": len(new_ids),
-            "filtered_new": filtered_new, "new_ids": new_ids, "new_by_source": per_source}
+        stats = {
+            "fetched": seen, "kept": kept, "new": len(new_ids),
+            "filtered_new": filtered_new, "new_ids": new_ids, "new_by_source": per_source,
+            "new_idf": tier_new["idf"], "new_france": tier_new["france"],
+            "new_remote": tier_new["remote"], "new_outside": tier_new["outside"],
+        }
+        db.add_fetch_run(conn, stats)
+    return stats
 
 
 def daily_run(judge: bool = True, judge_min_score: int = 40, judge_limit: int = 15) -> dict:

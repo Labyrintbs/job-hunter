@@ -3,5 +3,7 @@ __pycache__/
 *.pyc
 data/*.db
 data/cv/
+data/export/
+data/notifications/
 config/secrets.yaml
 .DS_Store

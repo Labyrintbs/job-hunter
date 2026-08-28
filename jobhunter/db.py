@@ -74,7 +74,54 @@ CREATE TABLE IF NOT EXISTS preference_profile (
     n_neg      INTEGER DEFAULT 0,
     created_at TEXT DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS fetch_runs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    ran_at      TEXT DEFAULT (datetime('now')),
+    fetched     INTEGER DEFAULT 0,
+    kept        INTEGER DEFAULT 0,
+    new         INTEGER DEFAULT 0,
+    filtered_new INTEGER DEFAULT 0,
+    by_source   TEXT DEFAULT '',        -- JSON {source: new_count}
+    new_idf     INTEGER DEFAULT 0,
+    new_france  INTEGER DEFAULT 0,
+    new_remote  INTEGER DEFAULT 0,
+    new_outside INTEGER DEFAULT 0
+);
+
+-- Grafana/Metabase read these directly. Views are recreated each init to stay current.
+DROP VIEW IF EXISTS v_new_jobs_by_day;
+CREATE VIEW v_new_jobs_by_day AS
+    SELECT date(fetched_at) AS day,
+           COALESCE(NULLIF(geo_tier,''),'unknown') AS geo_tier,
+           COUNT(*) AS n
+    FROM jobs GROUP BY day, geo_tier;
+
+DROP VIEW IF EXISTS v_market_by_run;
+CREATE VIEW v_market_by_run AS
+    SELECT date(ran_at) AS day, COUNT(*) AS runs,
+           SUM(new) AS new, SUM(filtered_new) AS filtered_new,
+           SUM(new_idf) AS new_idf, SUM(new_france) AS new_france,
+           SUM(new_remote) AS new_remote, SUM(new_outside) AS new_outside
+    FROM fetch_runs GROUP BY day;
+
+DROP VIEW IF EXISTS v_top_companies;
+CREATE VIEW v_top_companies AS
+    SELECT company, COUNT(*) AS n,
+           SUM(CASE WHEN COALESCE(filtered,0)=0 THEN 1 ELSE 0 END) AS n_active
+    FROM jobs GROUP BY company ORDER BY n DESC;
+
+DROP VIEW IF EXISTS v_score_seniority_mix;
+CREATE VIEW v_score_seniority_mix AS
+    SELECT COALESCE(NULLIF(seniority,''),'unknown') AS seniority,
+           COUNT(*) AS n, ROUND(AVG(score),1) AS avg_score,
+           SUM(CASE WHEN score>=60 THEN 1 ELSE 0 END) AS n_score_60plus,
+           SUM(CASE WHEN score>=40 AND score<60 THEN 1 ELSE 0 END) AS n_score_40_59,
+           SUM(CASE WHEN score<40 THEN 1 ELSE 0 END) AS n_score_lt40
+    FROM jobs GROUP BY seniority;
 """
+
+VIEW_NAMES = ["v_new_jobs_by_day", "v_market_by_run", "v_top_companies", "v_score_seniority_mix"]
 
 
 def get_connection(db_path: Path | None = None) -> sqlite3.Connection:
@@ -100,6 +147,8 @@ MIGRATIONS = {
         "labeled_at": "TEXT DEFAULT ''",
         "description_full": "INTEGER DEFAULT 0",
         "was_filtered": "INTEGER DEFAULT 0",
+        "geo_tier": "TEXT DEFAULT ''",
+        "last_seen": "TEXT DEFAULT ''",
     },
     "applications": {
         "cover_letter_path": "TEXT DEFAULT ''",
@@ -115,10 +164,27 @@ def _migrate(conn: sqlite3.Connection) -> None:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
 
 
+def _backfill_geo_tier(conn: sqlite3.Connection) -> None:
+    """Populate geo_tier for pre-existing rows (new rows get it at upsert time)."""
+    rows = conn.execute("SELECT id, location FROM jobs WHERE COALESCE(geo_tier,'') = ''").fetchall()
+    if not rows:
+        return
+    from . import match
+    from .config import load_search_config
+    try:
+        config = load_search_config()
+    except Exception:
+        config = {"locations": ["paris", "ile-de-france", "île-de-france"], "allow_remote_france": True}
+    for r in rows:
+        conn.execute("UPDATE jobs SET geo_tier = ? WHERE id = ?",
+                     (match.geo_tier(r["location"], config), r["id"]))
+
+
 def init_db(db_path: Path | None = None) -> None:
     with get_connection(db_path) as conn:
         conn.executescript(SCHEMA)
         _migrate(conn)
+        _backfill_geo_tier(conn)
 
 
 @contextmanager
@@ -139,9 +205,11 @@ def _content_key(job: Job) -> str:
 
 def upsert_job(conn: sqlite3.Connection, job: Job, score: int, reasons: str, *,
                filtered: bool = False, filter_reason: str = "",
-               seniority: str = "", min_years: int | None = None) -> tuple[int, bool]:
+               seniority: str = "", min_years: int | None = None,
+               geo_tier: str = "") -> tuple[int, bool]:
     """Insert a job if new. Returns (job_id, is_new). Existing jobs keep their
-    application status; their score/reasons and screening flags are refreshed.
+    application status; their score/reasons and screening flags are refreshed, and
+    last_seen is stamped every time the job is seen (for staleness / market signals).
     Dedups both on (source, external_id) and on content (WTTJ indexes the same posting
     under several objectIDs)."""
     row = conn.execute(
@@ -158,9 +226,10 @@ def upsert_job(conn: sqlite3.Connection, job: Job, score: int, reasons: str, *,
     if row:
         conn.execute(
             """UPDATE jobs SET score = ?, match_reasons = ?, filtered = ?,
-               filter_reason = ?, seniority = ?, min_years = ?,
+               filter_reason = ?, seniority = ?, min_years = ?, geo_tier = ?,
+               last_seen = datetime('now'),
                was_filtered = CASE WHEN ? THEN 1 ELSE was_filtered END WHERE id = ?""",
-            (score, reasons, int(filtered), filter_reason, seniority, min_years,
+            (score, reasons, int(filtered), filter_reason, seniority, min_years, geo_tier,
              int(filtered), row["id"]),
         )
         return row["id"], False
@@ -169,19 +238,38 @@ def upsert_job(conn: sqlite3.Connection, job: Job, score: int, reasons: str, *,
         """INSERT INTO jobs
            (source, external_id, title, company, location, language, url,
             description, contract_type, posted_at, score, match_reasons,
-            filtered, filter_reason, seniority, min_years, description_full, was_filtered)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            filtered, filter_reason, seniority, min_years, description_full, was_filtered,
+            geo_tier, last_seen)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))""",
         (
             job.source, job.external_id, job.title, job.company, job.location,
             job.language, job.url, job.description, job.contract_type,
             job.posted_at, score, reasons,
             int(filtered), filter_reason, seniority, min_years,
-            int(len(job.description or "") > 200), int(filtered),
+            int(len(job.description or "") > 200), int(filtered), geo_tier,
         ),
     )
     job_id = cur.lastrowid
     conn.execute("INSERT INTO applications (job_id, status) VALUES (?, 'new')", (job_id,))
     return job_id, True
+
+
+def add_fetch_run(conn: sqlite3.Connection, stats: dict) -> int:
+    """Persist one fetch run's aggregate counts (the market time-series)."""
+    import json
+    cur = conn.execute(
+        """INSERT INTO fetch_runs
+           (fetched, kept, new, filtered_new, by_source,
+            new_idf, new_france, new_remote, new_outside)
+           VALUES (?,?,?,?,?,?,?,?,?)""",
+        (
+            stats.get("fetched", 0), stats.get("kept", 0), stats.get("new", 0),
+            stats.get("filtered_new", 0), json.dumps(stats.get("new_by_source", {})),
+            stats.get("new_idf", 0), stats.get("new_france", 0),
+            stats.get("new_remote", 0), stats.get("new_outside", 0),
+        ),
+    )
+    return cur.lastrowid
 
 
 def list_jobs(conn: sqlite3.Connection, status: str | None = None, min_score: int = 0,

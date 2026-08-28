@@ -78,14 +78,32 @@ def is_excluded(job: Job, config: dict) -> str | None:
     return None
 
 
+_REMOTE_TERMS = ("remote", "télétravail", "teletravail", "full remote", "100% remote")
+
+
+def geo_tier(location: str, config: dict) -> str:
+    """Coarse geography bucket for analytics: idf | remote | france | outside | unknown.
+    IDF wins first (it's the application focus); remote is checked before generic France."""
+    loc = (location or "").lower()
+    if not loc:
+        return "unknown"
+    if any(l.lower() in loc for l in config.get("locations", [])):
+        return "idf"
+    if any(t in loc for t in _REMOTE_TERMS):
+        return "remote"
+    if "france" in loc:
+        return "france"
+    return "outside"
+
+
 def _geo_tier(job: Job, config: dict) -> tuple[int, str]:
     """Returns (bonus_points, reason). Paris/IDF ranks above other-France (mobility)."""
-    loc = job.location.lower()
-    if any(l.lower() in loc for l in config.get("locations", [])):
+    tier = geo_tier(job.location, config)
+    if tier == "idf":
         return 20, f"geo: Paris/IDF ({job.location})"
-    if not loc:
+    if tier == "unknown":
         return 5, "geo: unspecified"
-    if "france" in loc:
+    if tier in ("france", "remote"):
         bonus = 8 if config.get("allow_remote_france") else 0
         return bonus, f"geo: other-France mobility ({job.location})"
     return -5, f"geo: outside France ({job.location})"

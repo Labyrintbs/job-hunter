@@ -3,10 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from .. import db, learn
+from .. import db, export as export_mod, learn
 from ..llm import provider
 from ..pipeline import cover_one, enrich_one, judge_one, run_fetch, tailor_one
 
@@ -155,6 +155,17 @@ def rules_reject_route(rule_id: int):
     with db.connect() as conn:
         db.delete_rule(conn, rule_id)
     return JSONResponse({"ok": True, "rule_id": rule_id})
+
+
+@app.get("/export/{view}.csv")
+def export_csv_route(view: str):
+    """CSV for a single analytics view (for a Grafana Infinity/CSV datasource)."""
+    try:
+        with db.connect() as conn:
+            rows = export_mod.view_rows(conn, view)
+    except ValueError as exc:
+        return PlainTextResponse(str(exc), status_code=404)
+    return PlainTextResponse(export_mod.to_csv(rows), media_type="text/csv")
 
 
 @app.post("/profile/update")

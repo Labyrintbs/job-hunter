@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 
-from . import db, learn, schedule
+from . import db, export as export_mod, learn, schedule
 from .config import DB_PATH, load_search_config
 from .llm import provider
 from .notify import dispatch as notify_dispatch
@@ -67,6 +67,11 @@ def main(argv: list[str] | None = None) -> int:
     p_profile.add_argument("action", choices=["show", "update"], default="show", nargs="?")
 
     sub.add_parser("metrics", help="screening calibration (false-negative rate, etc.)")
+
+    p_export = sub.add_parser("export", help="export analytics views (CSV/JSON) for Grafana/Metabase")
+    p_export.add_argument("--view", default="all", choices=["all", *db.VIEW_NAMES])
+    p_export.add_argument("--format", default="csv", choices=["csv", "json"])
+    p_export.add_argument("--out", default=None, help="output dir (default data/export/)")
 
     p_web = sub.add_parser("web", help="run the dashboard")
     p_web.add_argument("--host", default="127.0.0.1")
@@ -276,6 +281,15 @@ def main(argv: list[str] | None = None) -> int:
         print(f"preference profile:        {'set' if prof else 'none'}")
         if m["false_negative_rate"] >= 0.3:
             print("\n⚠ screen may be too aggressive — review the Filtered bucket / seniority.max_years.")
+        return 0
+
+    if args.command == "export":
+        from .config import DATA_DIR
+        out = args.out or (DATA_DIR / "export")
+        paths = export_mod.export(out, view=args.view, fmt=args.format)
+        for p in paths:
+            print(p)
+        print(f"\n{len(paths)} file(s) written to {out}")
         return 0
 
     if args.command == "web":

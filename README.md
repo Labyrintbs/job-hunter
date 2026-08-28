@@ -44,6 +44,9 @@ cover letter per job, and track every application from a local web dashboard.
   your evidence only. CLI: `jobhunter profile show|update`.
 - **Track**: SQLite with cross-run dedup (by id *and* content); each posting moves
   through a status lifecycle from a table + kanban dashboard.
+- **Market trends**: every fetch records an aggregate snapshot (`fetch_runs`) and
+  stamps each job's `last_seen`; jobs carry a `geo_tier` (idf/france/remote/outside).
+  Grafana/Metabase-ready SQL views + `jobhunter export` (CSV/JSON). See *Market trends* below.
 - **Notify**: after each scheduled run, a digest of new high-fit jobs goes to the
   configured channels — File (always on), Telegram, or Email.
 
@@ -78,6 +81,20 @@ $P -m jobhunter.cli cron uninstall      # remove it
 Installing is opt-in because the daily run makes LLM calls. Only the tagged
 `# jobhunter-daily` line is ever touched; your other cron jobs are preserved.
 Output is appended to `data/cron.log`.
+
+## Market trends (Grafana / Metabase)
+Trend data accumulates automatically: each `fetch`/`run` inserts a `fetch_runs` row
+and refreshes every job's `last_seen`. Four SQL views are the query surface:
+`v_new_jobs_by_day` (volume + IDF share via `geo_tier`), `v_market_by_run`,
+`v_top_companies`, `v_score_seniority_mix`.
+
+SQLite stays the source of truth — point a BI tool at it:
+- **Metabase** reads `data/jobhunter.db` natively → query the views directly.
+- **Grafana** needs the `frser-sqlite-datasource` plugin for direct SQLite, **or** the
+  no-plugin path: run `jobhunter web` and add a CSV/Infinity datasource at
+  `http://127.0.0.1:8000/export/<view>.csv`.
+- **Files**: `jobhunter export [--view <name>] [--format csv|json] [--out DIR]` dumps
+  one file per view (default `data/export/`).
 
 ## Configuration
 - `config/search.yaml` — query, role/boost keywords, geo, languages, exclude
