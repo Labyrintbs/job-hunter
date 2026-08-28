@@ -21,11 +21,18 @@ def _startup() -> None:
 
 
 @app.get("/", response_class=HTMLResponse)
-def dashboard(request: Request, status: str | None = None, min_score: int = 0, filtered: int = 0):
+def dashboard(request: Request, status: str | None = None, min_score: int = 0,
+              filtered: int = 0, dismissed: int = 0):
     with db.connect() as conn:
-        jobs = db.list_jobs(conn, status=status or None, min_score=min_score, filtered=filtered)
+        if dismissed:
+            jobs = db.list_jobs(conn, status=status or None, min_score=min_score,
+                                filtered=None, dismissed=True)
+        else:
+            jobs = db.list_jobs(conn, status=status or None, min_score=min_score,
+                                filtered=filtered, dismissed=False)
         counts = db.status_counts(conn)
         n_filtered = db.filtered_count(conn)
+        n_dismissed = db.dismissed_count(conn)
     return TEMPLATES.TemplateResponse(
         request,
         "dashboard.html",
@@ -36,7 +43,10 @@ def dashboard(request: Request, status: str | None = None, min_score: int = 0, f
             "active_status": status or "",
             "min_score": min_score,
             "filtered": filtered,
+            "dismissed": dismissed,
             "n_filtered": n_filtered,
+            "n_dismissed": n_dismissed,
+            "dismiss_reasons": db.DISMISS_REASONS,
             "total": sum(counts.values()),
             "llm_available": provider.available(),
         },
@@ -67,6 +77,18 @@ def restore_route(job_id: int):
     with db.connect() as conn:
         db.set_filtered(conn, job_id, False, "")
     return JSONResponse({"ok": True, "job_id": job_id})
+
+
+@app.post("/feedback/{job_id}")
+def feedback_route(job_id: int, label: str = Form(...), reasons: str = Form("")):
+    """Explicit judgment: 'interested' (also rescues from Filtered), 'dismissed'
+    (with reason chips), or '' to clear."""
+    try:
+        with db.connect() as conn:
+            db.set_feedback(conn, job_id, label, reasons)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    return JSONResponse({"ok": True, "job_id": job_id, "label": label})
 
 
 @app.post("/run/fetch")

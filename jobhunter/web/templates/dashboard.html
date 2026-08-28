@@ -7,10 +7,11 @@
   {% endfor %}
   {% if active_status %}<a class="pill" href="/">✕ clear</a>{% endif %}
   <span class="grow"></span>
-  {% if filtered %}
+  {% if filtered or dismissed %}
     <a class="pill" href="/" style="border-color:var(--accent)">← back to main list</a>
   {% else %}
     <a class="pill" href="/?filtered=1" title="auto-hidden: senior / too many years / low score">🕳 filtered · {{ n_filtered }}</a>
+    <a class="pill" href="/?dismissed=1" title="jobs you explicitly rejected">👎 dismissed · {{ n_dismissed }}</a>
   {% endif %}
   <form method="get" style="margin:0; display:flex; gap:8px; align-items:center;">
     <label class="muted">min score</label>
@@ -22,7 +23,7 @@
 
 <table>
   <thead>
-    <tr><th>Score</th><th>LLM</th><th>Role</th><th>Company</th><th>Location</th><th>Why</th><th>Status</th><th>Docs</th></tr>
+    <tr><th>Score</th><th>LLM</th><th>Role</th><th>Company</th><th>Location</th><th>Why</th><th>You</th><th>Status</th><th>Docs</th></tr>
   </thead>
   <tbody>
   {% for j in jobs %}
@@ -43,6 +44,23 @@
       <td>{{ j["company"] }}</td>
       <td class="muted">{{ j["location"] }}</td>
       <td class="reasons">{% if filtered and j["filter_reason"] %}<span style="color:#c88">{{ j["filter_reason"] }}</span><br>{% endif %}{{ j["match_reasons"] }}</td>
+      <td class="feedback">
+        {% if dismissed %}
+          <div class="muted" style="font-size:11px">{{ j["dismiss_reasons"] }}</div>
+          <button class="ghost" style="padding:3px 8px; font-size:12px" onclick="clearFeedback({{ j['id'] }})">↩ undo</button>
+        {% else %}
+          <div style="display:flex; gap:4px">
+            <button class="ghost{% if j['user_label']=='interested' %} on{% endif %}" style="padding:3px 8px" onclick="markInterested(this, {{ j['id'] }})" title="interested{% if filtered %} — restores to main list{% endif %}">👍</button>
+            <button class="ghost" style="padding:3px 8px" onclick="toggleChips({{ j['id'] }})" title="dismiss with a reason">👎</button>
+          </div>
+          <div id="chips-{{ j['id'] }}" class="chipbar" style="display:none">
+            {% for r in dismiss_reasons %}
+              <button class="chip" onclick="dismissJob({{ j['id'] }}, '{{ r }}')">{{ r.replace('_', ' ') }}</button>
+            {% endfor %}
+          </div>
+          {% if j['user_label']=='interested' %}<span class="pill" style="border-color:#5a5; color:#8d8; font-size:10px">interested</span>{% endif %}
+        {% endif %}
+      </td>
       <td>
         <select onchange="setStatus(this, {{ j['id'] }})">
           {% for s in statuses %}
@@ -67,7 +85,7 @@
       </td>
     </tr>
   {% else %}
-    <tr><td colspan="7" class="muted">No jobs yet. Click “Fetch new jobs”.</td></tr>
+    <tr><td colspan="9" class="muted">{% if dismissed %}No dismissed jobs.{% elif filtered %}Nothing in the Filtered bucket.{% else %}No jobs yet. Click “Fetch new jobs”.{% endif %}</td></tr>
   {% endfor %}
   </tbody>
 </table>

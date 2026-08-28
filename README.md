@@ -23,6 +23,11 @@ cover letter per job, and track every application from a local web dashboard.
   each job, rewrites the "Seeking" tagline, compiles to PDF (`latexmk`).
 - **Cover-letter drafting** (Claude): grounded in your real CV, matches the
   posting's language, never fabricates.
+- **Feedback (explicit-only)**: 👍 interested / 👎 dismiss with fixed reason chips
+  (`too_senior`, `wrong_domain`, `location`, …). Dismissed jobs leave the main list
+  into a Dismissed view; 👍 rescues a job from the Filtered bucket. This is the
+  clean ground-truth signal the learning phases (4/5) will mine. CLI:
+  `jobhunter feedback <id> --label dismissed --reasons too_senior,location`.
 - **Track**: SQLite with cross-run dedup (by id *and* content); each posting moves
   through a status lifecycle from a table + kanban dashboard.
 - **Notify**: after each scheduled run, a digest of new high-fit jobs goes to the

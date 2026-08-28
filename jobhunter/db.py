@@ -74,6 +74,9 @@ MIGRATIONS = {
         "min_years": "INTEGER DEFAULT NULL",
         "filtered": "INTEGER DEFAULT 0",
         "filter_reason": "TEXT DEFAULT ''",
+        "user_label": "TEXT DEFAULT ''",
+        "dismiss_reasons": "TEXT DEFAULT ''",
+        "labeled_at": "TEXT DEFAULT ''",
     },
     "applications": {
         "cover_letter_path": "TEXT DEFAULT ''",
@@ -156,9 +159,10 @@ def upsert_job(conn: sqlite3.Connection, job: Job, score: int, reasons: str, *,
 
 
 def list_jobs(conn: sqlite3.Connection, status: str | None = None, min_score: int = 0,
-              filtered: int | None = 0) -> list[sqlite3.Row]:
+              filtered: int | None = 0, dismissed: bool | None = False) -> list[sqlite3.Row]:
     """filtered=0 (default) shows the main list, filtered=1 the auto-hidden bucket,
-    filtered=None shows both."""
+    filtered=None shows both. dismissed=False (default) hides jobs you rejected,
+    dismissed=True shows only those, dismissed=None ignores the label."""
     q = """
         SELECT j.*, a.status, a.notes, a.submitted_url, a.cover_letter_path,
                (SELECT pdf_path FROM cv_artifacts c WHERE c.job_id = j.id
@@ -170,6 +174,10 @@ def list_jobs(conn: sqlite3.Connection, status: str | None = None, min_score: in
     if filtered is not None:
         q += " AND COALESCE(j.filtered, 0) = ?"
         params.append(filtered)
+    if dismissed is True:
+        q += " AND COALESCE(j.user_label, '') = 'dismissed'"
+    elif dismissed is False:
+        q += " AND COALESCE(j.user_label, '') != 'dismissed'"
     if status:
         q += " AND a.status = ?"
         params.append(status)
@@ -192,7 +200,54 @@ def set_seniority(conn: sqlite3.Connection, job_id: int, seniority: str, min_yea
 
 
 def filtered_count(conn: sqlite3.Connection) -> int:
-    return conn.execute("SELECT COUNT(*) FROM jobs WHERE COALESCE(filtered, 0) = 1").fetchone()[0]
+    return conn.execute(
+        "SELECT COUNT(*) FROM jobs WHERE COALESCE(filtered, 0) = 1 "
+        "AND COALESCE(user_label, '') != 'dismissed'"
+    ).fetchone()[0]
+
+
+FEEDBACK_LABELS = ("interested", "dismissed", "")
+# Fixed vocabulary so Phase-4 learning can aggregate reasons deterministically.
+DISMISS_REASONS = ["too_senior", "wrong_domain", "location", "contract", "company",
+                   "stack_mismatch", "seniority_ok_but_weak", "other"]
+
+
+def set_feedback(conn: sqlite3.Connection, job_id: int, label: str, reasons: str = "") -> None:
+    """Record your explicit judgment. Marking a job 'interested' also rescues it from
+    the auto-Filtered bucket (an explicit positive overrides the heuristic)."""
+    if label not in FEEDBACK_LABELS:
+        raise ValueError(f"unknown feedback label: {label}")
+    if label == "dismissed":
+        conn.execute(
+            "UPDATE jobs SET user_label = 'dismissed', dismiss_reasons = ?, "
+            "labeled_at = datetime('now') WHERE id = ?",
+            (reasons, job_id),
+        )
+    elif label == "interested":
+        conn.execute(
+            "UPDATE jobs SET user_label = 'interested', dismiss_reasons = '', "
+            "filtered = 0, filter_reason = '', labeled_at = datetime('now') WHERE id = ?",
+            (job_id,),
+        )
+    else:
+        conn.execute(
+            "UPDATE jobs SET user_label = '', dismiss_reasons = '', labeled_at = '' WHERE id = ?",
+            (job_id,),
+        )
+
+
+def dismissed_count(conn: sqlite3.Connection) -> int:
+    return conn.execute(
+        "SELECT COUNT(*) FROM jobs WHERE COALESCE(user_label, '') = 'dismissed'"
+    ).fetchone()[0]
+
+
+def labeled_jobs(conn: sqlite3.Connection, label: str) -> list[sqlite3.Row]:
+    """All jobs carrying an explicit label ('interested' or 'dismissed'), for learning."""
+    return conn.execute(
+        "SELECT * FROM jobs WHERE COALESCE(user_label, '') = ? ORDER BY labeled_at DESC",
+        (label,),
+    ).fetchall()
 
 
 def get_job(conn: sqlite3.Connection, job_id: int) -> sqlite3.Row | None:

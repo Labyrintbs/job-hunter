@@ -52,6 +52,32 @@ def test_filtered_bucket_and_restore(tmp_db):
         assert {r["id"] for r in db.list_jobs(conn)} == {main, hidden}
 
 
+def test_feedback_dismiss_hides_from_main(tmp_db):
+    with db.connect() as conn:
+        keep, _ = db.upsert_job(conn, J("1", url="http://x/1"), 60, "r")
+        drop, _ = db.upsert_job(conn, J("2", url="http://x/2"), 60, "r")
+        db.set_feedback(conn, drop, "dismissed", "too_senior,location")
+        assert [r["id"] for r in db.list_jobs(conn)] == [keep]          # dismissed hidden
+        dismissed = db.list_jobs(conn, filtered=None, dismissed=True)
+        assert [r["id"] for r in dismissed] == [drop]
+        assert dismissed[0]["dismiss_reasons"] == "too_senior,location"
+        assert db.dismissed_count(conn) == 1
+        assert [r["id"] for r in db.labeled_jobs(conn, "dismissed")] == [drop]
+
+
+def test_interested_rescues_from_filtered(tmp_db):
+    with db.connect() as conn:
+        jid, _ = db.upsert_job(conn, J("1", url="http://x/1"), 55, "r",
+                               filtered=True, filter_reason="senior title", seniority="senior")
+        assert db.filtered_count(conn) == 1
+        db.set_feedback(conn, jid, "interested")
+        assert db.filtered_count(conn) == 0                              # rescued
+        row = db.get_job(conn, jid)
+        assert row["filtered"] == 0 and row["user_label"] == "interested"
+        db.set_feedback(conn, jid, "")                                   # clear
+        assert db.get_job(conn, jid)["user_label"] == ""
+
+
 def test_llm_and_cover_setters(tmp_db):
     with db.connect() as conn:
         jid, _ = db.upsert_job(conn, J("1", url="http://x/1"), 60, "r")

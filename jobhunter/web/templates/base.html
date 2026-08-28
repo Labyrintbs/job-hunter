@@ -27,6 +27,10 @@
     .muted { color:var(--muted); }
     .reasons { color:var(--muted); font-size:12px; max-width:340px; }
     .filters { display:flex; gap:10px; align-items:center; margin-bottom:16px; flex-wrap:wrap; }
+    button.ghost.on { border-color:#5a5; color:#8d8; }
+    .chipbar { display:flex; flex-wrap:wrap; gap:4px; margin-top:5px; max-width:220px; }
+    .chip { background:transparent; color:var(--muted); border:1px solid var(--line); border-radius:999px; padding:2px 8px; font-size:11px; font-weight:500; cursor:pointer; }
+    .chip:hover { border-color:#c66; color:#e99; }
   </style>
 </head>
 <body>
@@ -62,6 +66,19 @@
     const judgeJob = (btn, id) => runAction(btn, '/judge/' + id, d => !d.error);
     const coverJob = (btn, id) => runAction(btn, '/cover/' + id, d => !d.error);
     const restoreJob = (btn, id) => runAction(btn, '/filter/restore/' + id, d => d.ok);
+    async function sendFeedback(id, label, reasons) {
+      const body = new URLSearchParams({ label, reasons });
+      const r = await fetch('/feedback/' + id, { method:'POST', body });
+      if (r.ok) location.reload();
+      return r.ok;
+    }
+    const markInterested = (btn, id) => sendFeedback(id, 'interested', '');
+    const dismissJob = (id, reason) => sendFeedback(id, 'dismissed', reason);
+    const clearFeedback = (id) => sendFeedback(id, '', '');
+    function toggleChips(id) {
+      const e = document.getElementById('chips-' + id);
+      e.style.display = e.style.display === 'none' ? 'flex' : 'none';
+    }
   </script>
 </body>
 </html>

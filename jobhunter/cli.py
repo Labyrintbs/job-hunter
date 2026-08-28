@@ -20,6 +20,12 @@ def main(argv: list[str] | None = None) -> int:
     p_list.add_argument("--status", default=None)
     p_list.add_argument("--min-score", type=int, default=0)
     p_list.add_argument("--filtered", action="store_true", help="show the auto-hidden Filtered bucket")
+    p_list.add_argument("--dismissed", action="store_true", help="show jobs you explicitly dismissed")
+
+    p_fb = sub.add_parser("feedback", help="record your judgment on a job")
+    p_fb.add_argument("job_id", type=int)
+    p_fb.add_argument("--label", choices=["interested", "dismissed", "clear"], required=True)
+    p_fb.add_argument("--reasons", default="", help="comma tags for dismissal (e.g. too_senior,location)")
 
     p_tailor = sub.add_parser("tailor", help="generate + compile a tailored CV")
     p_tailor.add_argument("job_id", type=int)
@@ -66,13 +72,31 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "list":
         db.init_db()
         with db.connect() as conn:
-            rows = db.list_jobs(conn, status=args.status, min_score=args.min_score,
-                                filtered=1 if args.filtered else 0)
+            if args.dismissed:
+                rows = db.list_jobs(conn, status=args.status, min_score=args.min_score,
+                                    filtered=None, dismissed=True)
+            else:
+                rows = db.list_jobs(conn, status=args.status, min_score=args.min_score,
+                                    filtered=1 if args.filtered else 0, dismissed=False)
             for r in rows:
-                tail = f"  <{r['filter_reason']}>" if args.filtered and r["filter_reason"] else ""
+                if args.dismissed and r["dismiss_reasons"]:
+                    tail = f"  <{r['dismiss_reasons']}>"
+                elif args.filtered and r["filter_reason"]:
+                    tail = f"  <{r['filter_reason']}>"
+                else:
+                    tail = ""
                 print(f"[{r['score']:3d}] {r['status']:11s} {r['title'][:55]:55s} @ {r['company'][:25]:25s} {r['location'][:20]}{tail}")
-            label = "filtered jobs" if args.filtered else "jobs"
+            label = "dismissed jobs" if args.dismissed else ("filtered jobs" if args.filtered else "jobs")
             print(f"\n{len(rows)} {label}")
+        return 0
+
+    if args.command == "feedback":
+        db.init_db()
+        label = "" if args.label == "clear" else args.label
+        with db.connect() as conn:
+            db.set_feedback(conn, args.job_id, label, args.reasons)
+        print(f"job {args.job_id}: label={label or 'cleared'}"
+              + (f" reasons={args.reasons}" if args.reasons else ""))
         return 0
 
     if args.command == "tailor":
