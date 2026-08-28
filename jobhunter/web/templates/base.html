@@ -39,6 +39,7 @@
     <nav>
       <a href="/" class="{% if request.url.path == '/' %}active{% endif %}">Table</a>
       <a href="/kanban" class="{% if request.url.path == '/kanban' %}active{% endif %}">Kanban</a>
+      <a href="/rules" class="{% if request.url.path == '/rules' %}active{% endif %}">Rules</a>
     </nav>
     <span class="grow"></span>
     <form method="post" action="/run/fetch" style="margin:0">
@@ -80,6 +81,8 @@
       const e = document.getElementById('chips-' + id);
       e.style.display = e.style.display === 'none' ? 'flex' : 'none';
     }
+    const approveRule = (btn, id) => runAction(btn, '/rules/' + id + '/approve', d => d.ok);
+    const rejectRule = (btn, id) => runAction(btn, '/rules/' + id + '/reject', d => d.ok);
   </script>
 </body>
 </html>

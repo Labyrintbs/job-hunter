@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 
-from . import db, schedule
+from . import db, learn, schedule
 from .config import DB_PATH, load_search_config
 from .llm import provider
 from .notify import dispatch as notify_dispatch
@@ -54,6 +54,14 @@ def main(argv: list[str] | None = None) -> int:
 
     p_notify = sub.add_parser("notify", help="send a digest of current top jobs to configured channels")
     p_notify.add_argument("--min-score", type=int, default=None, help="override notifications.min_score")
+
+    p_rules = sub.add_parser("rules", help="learn / review filter rules from your feedback")
+    p_rules.add_argument("action", choices=["mine", "list", "approve", "reject", "add"], default="list", nargs="?")
+    p_rules.add_argument("rule_id", type=int, nargs="?", help="rule id for approve/reject")
+    p_rules.add_argument("--show", choices=["all", "pending", "active"], default="all")
+    p_rules.add_argument("--kind", choices=list(db.RULE_KINDS), help="for add")
+    p_rules.add_argument("--value", help="for add")
+    p_rules.add_argument("--weight", type=int, default=20)
 
     p_web = sub.add_parser("web", help="run the dashboard")
     p_web.add_argument("--host", default="127.0.0.1")
@@ -181,6 +189,49 @@ def main(argv: list[str] | None = None) -> int:
             rows = [dict(r) for r in db.list_jobs(conn, min_score=0)]
         result = notify_dispatch.send(rows, {**cfg, "notifications": {**notif, "min_score": min_score}})
         print(f"selected={result['selected']} results={result.get('results', {})}")
+        return 0
+
+    if args.command == "rules":
+        db.init_db()
+        if args.action == "mine":
+            with db.connect() as conn:
+                result = learn.mine_rules(conn)
+            if result["status"] == "insufficient":
+                print(f"not enough feedback yet: {result['dismissed']} dismissed "
+                      f"(need {result['need']}). Dismiss more jobs, then re-run.")
+                return 0
+            print(f"from {result['dismissed']} dismissed / {result['interested']} interested: "
+                  f"{result['suggested']} candidates, {result['new']} new (inactive, pending your approval)")
+            for c in result["rules"][:15]:
+                print(f"  [{c['score']:.2f}] {c['kind']:13s} {c['value']:30s} ({c['evidence']})")
+            print("\napprove with: jobhunter rules approve <id>   (see: jobhunter rules list)")
+            return 0
+        if args.action in ("approve", "reject"):
+            if args.rule_id is None:
+                print(f"{args.action} needs a rule id"); return 1
+            with db.connect() as conn:
+                if args.action == "approve":
+                    db.set_rule_active(conn, args.rule_id, 1)
+                else:
+                    db.delete_rule(conn, args.rule_id)
+            print(f"rule {args.rule_id} {'approved (active)' if args.action == 'approve' else 'rejected (deleted)'}")
+            return 0
+        if args.action == "add":
+            if not args.kind or not args.value:
+                print("add needs --kind and --value"); return 1
+            with db.connect() as conn:
+                ok = db.add_rule(conn, args.kind, args.value, source="manual",
+                                 weight=args.weight, evidence="manual", active=1)
+            print("added (active)" if ok else "already exists")
+            return 0
+        active = {"pending": 0, "active": 1, "all": None}[args.show]
+        with db.connect() as conn:
+            rows = db.list_rules(conn, active=active)
+        for r in rows:
+            mark = "✓" if r["active"] else "·"
+            print(f"  {mark} #{r['id']:<3d} [{r['source']:7s}] {r['kind']:13s} {r['value']:30s} "
+                  f"w={r['weight']:<3d} hits={r['hit_count']:<3d} {r['evidence']}")
+        print(f"\n{len(rows)} rules ({args.show})")
         return 0
 
     if args.command == "web":

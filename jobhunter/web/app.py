@@ -6,7 +6,7 @@ from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from .. import db
+from .. import db, learn
 from ..llm import provider
 from ..pipeline import cover_one, enrich_one, judge_one, run_fetch, tailor_one
 
@@ -119,3 +119,36 @@ def cover_route(job_id: int):
 @app.post("/enrich/{job_id}")
 def enrich_route(job_id: int):
     return JSONResponse(enrich_one(job_id))
+
+
+@app.get("/rules", response_class=HTMLResponse)
+def rules_page(request: Request):
+    with db.connect() as conn:
+        pending = db.list_rules(conn, active=0)
+        active = db.list_rules(conn, active=1)
+        n_dismissed = db.dismissed_count(conn)
+    return TEMPLATES.TemplateResponse(
+        request, "rules.html",
+        {"pending": pending, "active": active, "n_dismissed": n_dismissed},
+    )
+
+
+@app.post("/rules/mine")
+def rules_mine_route():
+    with db.connect() as conn:
+        learn.mine_rules(conn)
+    return RedirectResponse(url="/rules", status_code=303)
+
+
+@app.post("/rules/{rule_id}/approve")
+def rules_approve_route(rule_id: int):
+    with db.connect() as conn:
+        db.set_rule_active(conn, rule_id, 1)
+    return JSONResponse({"ok": True, "rule_id": rule_id})
+
+
+@app.post("/rules/{rule_id}/reject")
+def rules_reject_route(rule_id: int):
+    with db.connect() as conn:
+        db.delete_rule(conn, rule_id)
+    return JSONResponse({"ok": True, "rule_id": rule_id})

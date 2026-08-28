@@ -33,6 +33,11 @@ cover letter per job, and track every application from a local web dashboard.
   into a Dismissed view; 👍 rescues a job from the Filtered bucket. This is the
   clean ground-truth signal the learning phases (4/5) will mine. CLI:
   `jobhunter feedback <id> --label dismissed --reasons too_senior,location`.
+- **Learn filter rules (approval-gated)**: a transparent miner reads your dismissed
+  (negatives) vs interested (positives) jobs and proposes discriminative keyword /
+  company rules by document-frequency difference — each with its evidence. Rules
+  land **inactive**; nothing filters your jobs until you approve it in the Rules
+  page (or `jobhunter rules approve <id>`). CLI: `jobhunter rules mine|list|approve|reject|add`.
 - **Track**: SQLite with cross-run dedup (by id *and* content); each posting moves
   through a status lifecycle from a table + kanban dashboard.
 - **Notify**: after each scheduled run, a digest of new high-fit jobs goes to the

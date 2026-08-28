@@ -53,6 +53,19 @@ CREATE TABLE IF NOT EXISTS cv_artifacts (
     base_version TEXT DEFAULT '',
     generated_at TEXT DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS filter_rules (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind       TEXT NOT NULL,          -- negative_kw | company_block
+    value      TEXT NOT NULL,
+    source     TEXT NOT NULL DEFAULT 'learned',   -- learned | manual
+    weight     INTEGER DEFAULT 15,
+    active      INTEGER DEFAULT 0,      -- learned rules start inactive; you approve them
+    evidence   TEXT DEFAULT '',
+    hit_count  INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(kind, value)
+);
 """
 
 
@@ -324,6 +337,53 @@ def set_cover_letter(conn: sqlite3.Connection, job_id: int, path: str) -> None:
         "UPDATE applications SET cover_letter_path = ? WHERE job_id = ?",
         (path, job_id),
     )
+
+
+RULE_KINDS = ("negative_kw", "company_block")
+
+
+def add_rule(conn: sqlite3.Connection, kind: str, value: str, source: str = "learned",
+             weight: int = 15, evidence: str = "", active: int = 0) -> bool:
+    """Insert a rule. Learned rules default inactive (approval required). Returns True
+    if newly inserted, False if a rule with the same (kind, value) already existed."""
+    if kind not in RULE_KINDS:
+        raise ValueError(f"unknown rule kind: {kind}")
+    cur = conn.execute(
+        """INSERT OR IGNORE INTO filter_rules (kind, value, source, weight, evidence, active)
+           VALUES (?,?,?,?,?,?)""",
+        (kind, value.lower().strip(), source, weight, evidence, int(active)),
+    )
+    return cur.rowcount > 0
+
+
+def list_rules(conn: sqlite3.Connection, active: int | None = None,
+               source: str | None = None) -> list[sqlite3.Row]:
+    q = "SELECT * FROM filter_rules WHERE 1=1"
+    params: list = []
+    if active is not None:
+        q += " AND active = ?"
+        params.append(active)
+    if source is not None:
+        q += " AND source = ?"
+        params.append(source)
+    q += " ORDER BY active DESC, hit_count DESC, id DESC"
+    return conn.execute(q, params).fetchall()
+
+
+def active_rules(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    return conn.execute("SELECT * FROM filter_rules WHERE active = 1").fetchall()
+
+
+def set_rule_active(conn: sqlite3.Connection, rule_id: int, active: int) -> None:
+    conn.execute("UPDATE filter_rules SET active = ? WHERE id = ?", (int(active), rule_id))
+
+
+def delete_rule(conn: sqlite3.Connection, rule_id: int) -> None:
+    conn.execute("DELETE FROM filter_rules WHERE id = ?", (rule_id,))
+
+
+def bump_rule_hits(conn: sqlite3.Connection, rule_id: int, n: int = 1) -> None:
+    conn.execute("UPDATE filter_rules SET hit_count = hit_count + ? WHERE id = ?", (n, rule_id))
 
 
 def status_counts(conn: sqlite3.Connection) -> dict[str, int]:
