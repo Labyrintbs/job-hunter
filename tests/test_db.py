@@ -93,6 +93,19 @@ def test_enrichment_selection_and_set_description(tmp_db):
         assert db.get_job(conn, want)["description_full"] == 1
 
 
+def test_was_filtered_persists_and_false_negative_stats(tmp_db):
+    with db.connect() as conn:
+        jid, _ = db.upsert_job(conn, J("1", url="http://x/1"), 55, "r",
+                               filtered=True, filter_reason="senior title", seniority="senior")
+        assert db.get_job(conn, jid)["was_filtered"] == 1
+        db.set_feedback(conn, jid, "interested")               # rescue clears filtered
+        row = db.get_job(conn, jid)
+        assert row["filtered"] == 0 and row["was_filtered"] == 1   # history retained
+        stats = db.false_negative_stats(conn)
+        assert stats["interested"] == 1 and stats["false_negatives"] == 1
+        assert stats["false_negative_rate"] == 1.0
+
+
 def test_llm_and_cover_setters(tmp_db):
     with db.connect() as conn:
         jid, _ = db.upsert_job(conn, J("1", url="http://x/1"), 60, "r")

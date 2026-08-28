@@ -107,17 +107,31 @@ writes `data/notifications/`).
 ```
 jobhunter/
   sources/wttj.py, sources/ats.py   fetch (WTTJ Algolia; Greenhouse/Lever)
-  match.py                          rule-based junior-tuned scoring + relevance gate
+  match.py                          scoring + relevance/seniority gate; applies approved rules
+  enrich.py                         lazy full-description fetch for engaged jobs
+  learn.py                          rule miner + LLM preference-profile condenser
   llm/provider.py                   Claude seam (API key or claude CLI)
-  llm/judge.py, apply/cover_letter.py   LLM fit-judge + cover letter
+  llm/judge.py, apply/cover_letter.py   LLM fit-judge (profile-injected) + cover letter
   tailor/snippet_bank.py, tailor/engine.py   parse + reorder + compile CV
-  db.py                             SQLite: jobs / applications / cv_artifacts
-  pipeline.py                       fetch / judge / tailor / cover orchestration
-  cli.py, web/                      CLI + FastAPI/Jinja dashboard (table + kanban)
+  db.py                             SQLite: jobs / applications / cv_artifacts / filter_rules / preference_profile
+  pipeline.py                       fetch / enrich / judge / tailor / cover orchestration
+  cli.py, web/                      CLI + FastAPI/Jinja dashboard (table + kanban + rules)
 config/, templates/, tests/, data/  (data/ created on first run; git-ignored)
 ```
+
+## The feedback loop (how filtering sharpens over time)
+1. **Screen** — obvious senior/mismatch jobs auto-hide into the Filtered bucket.
+2. **Judge** you — 👍/👎 with reasons; explicit-only ground truth.
+3. **Enrich** — engaged jobs get their full description fetched.
+4. **Learn** — `rules mine` proposes keyword/company rules (approval-gated);
+   `profile update` distills a Prefer/Avoid block.
+5. **Apply** — approved rules feed `match.screen`; the profile feeds the LLM judge.
+6. **Calibrate** — `jobhunter metrics` reports the false-negative rate (interested
+   jobs the screen had hidden); if it climbs, loosen `seniority.max_years` or drop a rule.
 
 ## Roadmap
 - Indeed / Glassdoor sources; LinkedIn logged-in enrichment (`li_at` cookie,
   secondary account) for descriptions.
 - LLM-assisted screening-question answers with a cached Q→A store.
+- Auto-suggest a `seniority.max_years` bump when the false-negative rate is high.
+- Weekly digest of rule hit-counts + profile drift.

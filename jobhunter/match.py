@@ -13,7 +13,7 @@ title always wins, so a "5 years" mention in a junior posting can't push it out.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .models import Job
 
@@ -139,6 +139,24 @@ def is_relevant(job: Job, config: dict) -> bool:
     return bool(q) and all(w in title for w in q.split())
 
 
+def _apply_rules(job: Job, config: dict) -> tuple[list[str], list[int]]:
+    """Approved learned rules (config['_active_rules']) that match this job.
+    Returns (human reasons, matched rule ids)."""
+    text = _text(job)
+    company = job.company.lower().strip()
+    flags: list[str] = []
+    matched: list[int] = []
+    for rule in config.get("_active_rules", []):
+        kind, value = rule["kind"], rule["value"]
+        if kind == "negative_kw" and value in text:
+            flags.append(f"rule: '{value}'")
+            matched.append(rule["id"])
+        elif kind == "company_block" and value == company:
+            flags.append(f"rule: company '{value}'")
+            matched.append(rule["id"])
+    return flags, matched
+
+
 @dataclass
 class Screening:
     score: int
@@ -148,11 +166,13 @@ class Screening:
     filter_reason: str
     seniority: str
     min_years: int | None
+    matched_rules: list[int] = field(default_factory=list)
 
 
 def screen(job: Job, config: dict) -> Screening:
     """Triage one job. keep=False => not stored (excluded / not ML-relevant).
-    filtered=True => stored but auto-hidden (senior / too many years / below min_score)."""
+    filtered=True => stored but auto-hidden (senior / too many years / below min_score
+    / matched an approved learned rule)."""
     excl = is_excluded(job, config)
     if excl:
         return Screening(0, excl, keep=False, filtered=False, filter_reason=excl,
@@ -177,6 +197,9 @@ def screen(job: Job, config: dict) -> Screening:
     if pts < config.get("min_score", 0):
         flags.append(f"score<{config.get('min_score', 0)}")
 
+    rule_flags, matched = _apply_rules(job, config)
+    flags += rule_flags
+
     return Screening(
         score=pts,
         reasons="; ".join(reasons),
@@ -185,6 +208,7 @@ def screen(job: Job, config: dict) -> Screening:
         filter_reason="; ".join(flags),
         seniority=seniority,
         min_years=min_years,
+        matched_rules=matched,
     )
 
 

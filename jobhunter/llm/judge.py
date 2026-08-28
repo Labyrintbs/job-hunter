@@ -16,7 +16,7 @@ SYSTEM = (
 
 PROMPT = """CANDIDATE PROFILE:
 {profile}
-
+{preferences}
 JOB POSTING:
 Title: {title}
 Company: {company}
@@ -37,9 +37,14 @@ def _int_or_none(value) -> int | None:
         return None
 
 
-def judge(job: Job) -> dict:
+def judge(job: Job, preferences: str = "") -> dict:
+    pref_block = ""
+    if preferences:
+        pref_block = ("\nLEARNED PREFERENCES (from the candidate's own accept/reject history — "
+                      "weigh these):\n" + preferences.strip() + "\n")
     prompt = PROMPT.format(
         profile=profile_text()[:6000],
+        preferences=pref_block,
         title=job.title,
         company=job.company,
         location=job.location,

@@ -99,6 +99,7 @@ MIGRATIONS = {
         "dismiss_reasons": "TEXT DEFAULT ''",
         "labeled_at": "TEXT DEFAULT ''",
         "description_full": "INTEGER DEFAULT 0",
+        "was_filtered": "INTEGER DEFAULT 0",
     },
     "applications": {
         "cover_letter_path": "TEXT DEFAULT ''",
@@ -157,8 +158,10 @@ def upsert_job(conn: sqlite3.Connection, job: Job, score: int, reasons: str, *,
     if row:
         conn.execute(
             """UPDATE jobs SET score = ?, match_reasons = ?, filtered = ?,
-               filter_reason = ?, seniority = ?, min_years = ? WHERE id = ?""",
-            (score, reasons, int(filtered), filter_reason, seniority, min_years, row["id"]),
+               filter_reason = ?, seniority = ?, min_years = ?,
+               was_filtered = CASE WHEN ? THEN 1 ELSE was_filtered END WHERE id = ?""",
+            (score, reasons, int(filtered), filter_reason, seniority, min_years,
+             int(filtered), row["id"]),
         )
         return row["id"], False
 
@@ -166,14 +169,14 @@ def upsert_job(conn: sqlite3.Connection, job: Job, score: int, reasons: str, *,
         """INSERT INTO jobs
            (source, external_id, title, company, location, language, url,
             description, contract_type, posted_at, score, match_reasons,
-            filtered, filter_reason, seniority, min_years, description_full)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            filtered, filter_reason, seniority, min_years, description_full, was_filtered)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             job.source, job.external_id, job.title, job.company, job.location,
             job.language, job.url, job.description, job.contract_type,
             job.posted_at, score, reasons,
             int(filtered), filter_reason, seniority, min_years,
-            int(len(job.description or "") > 200),
+            int(len(job.description or "") > 200), int(filtered),
         ),
     )
     job_id = cur.lastrowid
@@ -407,6 +410,28 @@ def current_profile(conn: sqlite3.Connection) -> sqlite3.Row | None:
     return conn.execute(
         "SELECT * FROM preference_profile ORDER BY id DESC LIMIT 1"
     ).fetchone()
+
+
+def false_negative_stats(conn: sqlite3.Connection) -> dict:
+    """Calibration signal: of the jobs you marked interested, how many had been
+    auto-filtered? A high rate means the screen is too aggressive."""
+    interested = conn.execute(
+        "SELECT COUNT(*) FROM jobs WHERE COALESCE(user_label,'') = 'interested'"
+    ).fetchone()[0]
+    fn = conn.execute(
+        "SELECT COUNT(*) FROM jobs WHERE COALESCE(user_label,'') = 'interested' "
+        "AND COALESCE(was_filtered,0) = 1"
+    ).fetchone()[0]
+    dismissed_in_main = conn.execute(
+        "SELECT COUNT(*) FROM jobs WHERE COALESCE(user_label,'') = 'dismissed' "
+        "AND COALESCE(was_filtered,0) = 0"
+    ).fetchone()[0]
+    return {
+        "interested": interested,
+        "false_negatives": fn,
+        "false_negative_rate": round(fn / interested, 2) if interested else 0.0,
+        "dismissed_escaped_screen": dismissed_in_main,
+    }
 
 
 def status_counts(conn: sqlite3.Connection) -> dict[str, int]:

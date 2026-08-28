@@ -128,10 +128,11 @@ def rules_page(request: Request):
         active = db.list_rules(conn, active=1)
         n_dismissed = db.dismissed_count(conn)
         profile = db.current_profile(conn)
+        metrics = db.false_negative_stats(conn)
     return TEMPLATES.TemplateResponse(
         request, "rules.html",
         {"pending": pending, "active": active, "n_dismissed": n_dismissed,
-         "profile": profile, "llm_available": provider.available()},
+         "profile": profile, "metrics": metrics, "llm_available": provider.available()},
     )
 
 

@@ -66,6 +66,8 @@ def main(argv: list[str] | None = None) -> int:
     p_profile = sub.add_parser("profile", help="show / update the learned preference profile")
     p_profile.add_argument("action", choices=["show", "update"], default="show", nargs="?")
 
+    sub.add_parser("metrics", help="screening calibration (false-negative rate, etc.)")
+
     p_web = sub.add_parser("web", help="run the dashboard")
     p_web.add_argument("--host", default="127.0.0.1")
     p_web.add_argument("--port", type=int, default=8000)
@@ -259,6 +261,21 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(f"# preference profile (from {row['n_pos']} interested / {row['n_neg']} dismissed, {row['created_at']})\n")
             print(row["text"])
+        return 0
+
+    if args.command == "metrics":
+        db.init_db()
+        with db.connect() as conn:
+            m = db.false_negative_stats(conn)
+            n_active = len(db.active_rules(conn))
+            prof = db.current_profile(conn)
+        print(f"interested jobs:           {m['interested']}")
+        print(f"  of those auto-filtered:  {m['false_negatives']}  (false-negative rate {m['false_negative_rate']})")
+        print(f"dismissed but passed screen: {m['dismissed_escaped_screen']}")
+        print(f"active learned rules:      {n_active}")
+        print(f"preference profile:        {'set' if prof else 'none'}")
+        if m["false_negative_rate"] >= 0.3:
+            print("\n⚠ screen may be too aggressive — review the Filtered bucket / seniority.max_years.")
         return 0
 
     if args.command == "web":

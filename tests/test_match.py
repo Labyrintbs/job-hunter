@@ -77,3 +77,20 @@ def test_low_score_filtered(config):
     s = screen(J(title="Research Scientist", desc="", loc="London, UK"), config)
     assert s.keep is True and s.filtered is True
     assert s.score < config["min_score"]
+
+
+def test_active_negative_kw_rule_filters(config):
+    cfg = {**config, "_active_rules": [{"id": 7, "kind": "negative_kw", "value": "blockchain"}]}
+    s = screen(J(title="Machine Learning Engineer", desc="we build on blockchain"), cfg)
+    assert s.filtered is True and 7 in s.matched_rules and "rule: 'blockchain'" in s.filter_reason
+
+
+def test_active_company_block_rule_filters(config):
+    cfg = {**config, "_active_rules": [{"id": 3, "kind": "company_block", "value": "badcorp"}]}
+    s = screen(J(company="BadCorp"), cfg)
+    assert s.filtered is True and 3 in s.matched_rules
+
+
+def test_no_active_rules_leaves_job_alone(config):
+    s = screen(J(title="Machine Learning Engineer", desc="great role"), config)
+    assert s.filtered is False and s.matched_rules == []

@@ -44,6 +44,7 @@ def run_fetch(config: dict | None = None) -> dict:
     filtered_new = 0
     per_source: dict[str, int] = {}
     with db.connect() as conn:
+        config = {**config, "_active_rules": [dict(r) for r in db.active_rules(conn)]}
         for job in jobs:
             seen += 1
             s = match.screen(job, config)
@@ -56,6 +57,8 @@ def run_fetch(config: dict | None = None) -> dict:
                 seniority=s.seniority, min_years=s.min_years,
             )
             if is_new:
+                for rid in s.matched_rules:
+                    db.bump_rule_hits(conn, rid)
                 if s.filtered:
                     filtered_new += 1
                 else:
@@ -137,7 +140,8 @@ def judge_one(job_id: int) -> dict:
         if not row:
             return {"job_id": job_id, "error": "not found"}
         job = db.job_from_row(row)
-    result = llm_judge.judge(job)
+        profile = db.current_profile(conn)
+    result = llm_judge.judge(job, preferences=profile["text"] if profile else "")
     with db.connect() as conn:
         db.set_llm_judgment(conn, job_id, result["score"], result["verdict"], result["reasons"])
         if result.get("seniority") or result.get("min_years") is not None:
