@@ -52,6 +52,11 @@ cover letter per job, and track every application from a local web dashboard.
 - **Market trends**: every fetch records an aggregate snapshot (`fetch_runs`) and
   stamps each job's `last_seen`; jobs carry a `geo_tier` (idf/france/remote/outside).
   Grafana/Metabase-ready SQL views + `jobhunter export` (CSV/JSON). See *Market trends* below.
+- **Stale/ghost flag**: a posting not seen in `staleness_days` (default 14, measured
+  against the latest fetch run — so a fetch gap never false-flags) is marked stale, so
+  you don't waste time on delisted jobs. `⚠ stale` badge + view in the dashboard,
+  `jobhunter list --stale`, a count in `jobhunter metrics`; stale jobs are dropped from
+  notifications.
 - **Notify**: after each scheduled run, a digest of new high-fit jobs goes to the
   configured channels — File (always on), Telegram, or Email.
 

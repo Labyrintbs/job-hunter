@@ -66,6 +66,10 @@ seniority:
 # Below this rule-based score (0-100) a job goes to the Filtered bucket, not the main list.
 min_score: 20
 
+# A job not seen in this many days of fetching (relative to the latest fetch run) is
+# flagged stale/ghost — the posting has likely been taken down.
+staleness_days: 14
+
 # Max hits to request from WTTJ per run.
 max_hits: 100
 

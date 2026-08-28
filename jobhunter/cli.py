@@ -22,6 +22,7 @@ def main(argv: list[str] | None = None) -> int:
     p_list.add_argument("--min-score", type=int, default=0)
     p_list.add_argument("--filtered", action="store_true", help="show the auto-hidden Filtered bucket")
     p_list.add_argument("--dismissed", action="store_true", help="show jobs you explicitly dismissed")
+    p_list.add_argument("--stale", action="store_true", help="show only stale/ghost jobs (not seen recently)")
 
     p_fb = sub.add_parser("feedback", help="record your judgment on a job")
     p_fb.add_argument("job_id", type=int)
@@ -100,22 +101,31 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "list":
         db.init_db()
+        days = load_search_config().get("staleness_days", 14)
         with db.connect() as conn:
             if args.dismissed:
                 rows = db.list_jobs(conn, status=args.status, min_score=args.min_score,
-                                    filtered=None, dismissed=True)
+                                    filtered=None, dismissed=True, staleness_days=days)
+            elif args.stale:
+                rows = [r for r in db.list_jobs(conn, status=args.status, min_score=args.min_score,
+                                                filtered=None, dismissed=None, staleness_days=days)
+                        if r["is_stale"]]
             else:
                 rows = db.list_jobs(conn, status=args.status, min_score=args.min_score,
-                                    filtered=1 if args.filtered else 0, dismissed=False)
+                                    filtered=1 if args.filtered else 0, dismissed=False,
+                                    staleness_days=days)
             for r in rows:
-                if args.dismissed and r["dismiss_reasons"]:
+                if args.stale:
+                    tail = f"  <not seen {r['days_since_seen']}d>"
+                elif args.dismissed and r["dismiss_reasons"]:
                     tail = f"  <{r['dismiss_reasons']}>"
                 elif args.filtered and r["filter_reason"]:
                     tail = f"  <{r['filter_reason']}>"
                 else:
                     tail = ""
                 print(f"[{r['score']:3d}] {r['status']:11s} {r['title'][:55]:55s} @ {r['company'][:25]:25s} {r['location'][:20]}{tail}")
-            label = "dismissed jobs" if args.dismissed else ("filtered jobs" if args.filtered else "jobs")
+            label = ("stale jobs" if args.stale else "dismissed jobs" if args.dismissed
+                     else "filtered jobs" if args.filtered else "jobs")
             print(f"\n{len(rows)} {label}")
         return 0
 
@@ -201,8 +211,10 @@ def main(argv: list[str] | None = None) -> int:
         cfg = load_search_config()
         notif = cfg.get("notifications") or {}
         min_score = args.min_score if args.min_score is not None else notif.get("min_score", 60)
+        days = cfg.get("staleness_days", 14)
         with db.connect() as conn:
-            rows = [dict(r) for r in db.list_jobs(conn, min_score=0)]
+            rows = [dict(r) for r in db.list_jobs(conn, min_score=0, staleness_days=days)
+                    if not r["is_stale"]]   # don't notify about postings likely taken down
         result = notify_dispatch.send(rows, {**cfg, "notifications": {**notif, "min_score": min_score}})
         print(f"selected={result['selected']} results={result.get('results', {})}")
         return 0
@@ -276,13 +288,16 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "metrics":
         db.init_db()
+        days = load_search_config().get("staleness_days", 14)
         with db.connect() as conn:
             m = db.false_negative_stats(conn)
             n_active = len(db.active_rules(conn))
             prof = db.current_profile(conn)
+            n_stale = db.stale_count(conn, days)
         print(f"interested jobs:           {m['interested']}")
         print(f"  of those auto-filtered:  {m['false_negatives']}  (false-negative rate {m['false_negative_rate']})")
         print(f"dismissed but passed screen: {m['dismissed_escaped_screen']}")
+        print(f"stale/ghost jobs (>{days}d):   {n_stale}")
         print(f"active learned rules:      {n_active}")
         print(f"preference profile:        {'set' if prof else 'none'}")
         if m["false_negative_rate"] >= 0.3:

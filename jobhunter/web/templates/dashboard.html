@@ -7,11 +7,12 @@
   {% endfor %}
   {% if active_status %}<a class="pill" href="/">✕ clear</a>{% endif %}
   <span class="grow"></span>
-  {% if filtered or dismissed %}
+  {% if filtered or dismissed or stale %}
     <a class="pill" href="/" style="border-color:var(--accent)">← back to main list</a>
   {% else %}
     <a class="pill" href="/?filtered=1" title="auto-hidden: senior / too many years / low score">🕳 filtered · {{ n_filtered }}</a>
     <a class="pill" href="/?dismissed=1" title="jobs you explicitly rejected">👎 dismissed · {{ n_dismissed }}</a>
+    <a class="pill" href="/?stale=1" title="not seen in recent fetches — posting likely taken down"{% if n_stale %} style="border-color:#c88"{% endif %}>⚠ stale · {{ n_stale }}</a>
   {% endif %}
   <form method="get" style="margin:0; display:flex; gap:8px; align-items:center;">
     <label class="muted">min score</label>
@@ -41,6 +42,7 @@
           {% if j["description_full"] %}<span title="full description fetched">📄</span>{% endif %}
           {% if j["seniority"] == "senior" %}<span class="pill" style="font-size:10px; padding:1px 6px; border-color:#a55">senior</span>{% elif j["seniority"] == "junior" %}<span class="pill" style="font-size:10px; padding:1px 6px; border-color:#5a5">junior</span>{% endif %}
           {% if j["min_years"] %}<span class="muted" style="font-size:11px">· {{ j["min_years"] }}+ yrs</span>{% endif %}
+          {% if j["is_stale"] %}<span class="pill" style="font-size:10px; padding:1px 6px; border-color:#c88; color:#c88" title="not seen for {{ j['days_since_seen'] }} days — likely delisted">⚠ stale {{ j['days_since_seen'] }}d</span>{% endif %}
           <div class="muted" style="font-size:12px">{{ j["contract_type"] }} · {{ j["language"] }}</div></td>
       <td>{{ j["company"] }}</td>
       <td class="muted">{{ j["location"] }}</td>
@@ -90,7 +92,7 @@
       </td>
     </tr>
   {% else %}
-    <tr><td colspan="9" class="muted">{% if dismissed %}No dismissed jobs.{% elif filtered %}Nothing in the Filtered bucket.{% else %}No jobs yet. Click “Fetch new jobs”.{% endif %}</td></tr>
+    <tr><td colspan="9" class="muted">{% if dismissed %}No dismissed jobs.{% elif filtered %}Nothing in the Filtered bucket.{% elif stale %}No stale jobs — all postings are still appearing.{% else %}No jobs yet. Click “Fetch new jobs”.{% endif %}</td></tr>
   {% endfor %}
   </tbody>
 </table>

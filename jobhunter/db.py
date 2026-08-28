@@ -277,21 +277,29 @@ def add_fetch_run(conn: sqlite3.Connection, stats: dict) -> int:
 
 
 def list_jobs(conn: sqlite3.Connection, status: str | None = None, min_score: int = 0,
-              filtered: int | None = 0, dismissed: bool | None = False) -> list[sqlite3.Row]:
+              filtered: int | None = 0, dismissed: bool | None = False,
+              staleness_days: int = 14) -> list[sqlite3.Row]:
     """filtered=0 (default) shows the main list, filtered=1 the auto-hidden bucket,
     filtered=None shows both. dismissed=False (default) hides jobs you rejected,
-    dismissed=True shows only those, dismissed=None ignores the label."""
+    dismissed=True shows only those, dismissed=None ignores the label.
+    Adds computed `is_stale` / `days_since_seen` (relative to the latest fetch run)."""
     q = """
         SELECT j.*, a.status, a.notes, a.submitted_url, a.cover_letter_path,
                (SELECT pdf_path FROM cv_artifacts c WHERE c.job_id = j.id
                 ORDER BY c.generated_at DESC LIMIT 1) AS cv_pdf,
                (SELECT origin FROM cv_artifacts c WHERE c.job_id = j.id
                 ORDER BY c.generated_at DESC LIMIT 1) AS cv_origin,
-               (SELECT COUNT(*) FROM cv_artifacts c WHERE c.job_id = j.id) AS cv_versions
+               (SELECT COUNT(*) FROM cv_artifacts c WHERE c.job_id = j.id) AS cv_versions,
+               CAST(julianday((SELECT MAX(ran_at) FROM fetch_runs))
+                    - julianday(NULLIF(j.last_seen, '')) AS INTEGER) AS days_since_seen,
+               CASE WHEN COALESCE(j.last_seen, '') <> ''
+                     AND (julianday((SELECT MAX(ran_at) FROM fetch_runs))
+                          - julianday(j.last_seen)) > ?
+                    THEN 1 ELSE 0 END AS is_stale
         FROM jobs j JOIN applications a ON a.job_id = j.id
         WHERE j.score >= ?
     """
-    params: list = [min_score]
+    params: list = [staleness_days, min_score]
     if filtered is not None:
         q += " AND COALESCE(j.filtered, 0) = ?"
         params.append(filtered)
@@ -360,6 +368,15 @@ def set_feedback(conn: sqlite3.Connection, job_id: int, label: str, reasons: str
 def dismissed_count(conn: sqlite3.Connection) -> int:
     return conn.execute(
         "SELECT COUNT(*) FROM jobs WHERE COALESCE(user_label, '') = 'dismissed'"
+    ).fetchone()[0]
+
+
+def stale_count(conn: sqlite3.Connection, staleness_days: int = 14) -> int:
+    """Jobs not seen in `staleness_days` relative to the latest fetch run (likely delisted)."""
+    return conn.execute(
+        "SELECT COUNT(*) FROM jobs WHERE COALESCE(last_seen, '') <> '' "
+        "AND (julianday((SELECT MAX(ran_at) FROM fetch_runs)) - julianday(last_seen)) > ?",
+        (staleness_days,),
     ).fetchone()[0]
 
 

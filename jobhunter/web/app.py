@@ -7,6 +7,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Red
 from fastapi.templating import Jinja2Templates
 
 from .. import db, export as export_mod, learn
+from ..config import load_search_config
 from ..llm import provider
 from ..pipeline import cover_one, enrich_one, import_revised_cv, judge_one, run_fetch, tailor_one
 
@@ -22,17 +23,21 @@ def _startup() -> None:
 
 @app.get("/", response_class=HTMLResponse)
 def dashboard(request: Request, status: str | None = None, min_score: int = 0,
-              filtered: int = 0, dismissed: int = 0):
+              filtered: int = 0, dismissed: int = 0, stale: int = 0):
+    days = load_search_config().get("staleness_days", 14)
     with db.connect() as conn:
         if dismissed:
             jobs = db.list_jobs(conn, status=status or None, min_score=min_score,
-                                filtered=None, dismissed=True)
+                                filtered=None, dismissed=True, staleness_days=days)
         else:
             jobs = db.list_jobs(conn, status=status or None, min_score=min_score,
-                                filtered=filtered, dismissed=False)
+                                filtered=filtered, dismissed=False, staleness_days=days)
+        if stale:
+            jobs = [j for j in jobs if j["is_stale"]]
         counts = db.status_counts(conn)
         n_filtered = db.filtered_count(conn)
         n_dismissed = db.dismissed_count(conn)
+        n_stale = db.stale_count(conn, days)
     return TEMPLATES.TemplateResponse(
         request,
         "dashboard.html",
@@ -44,8 +49,10 @@ def dashboard(request: Request, status: str | None = None, min_score: int = 0,
             "min_score": min_score,
             "filtered": filtered,
             "dismissed": dismissed,
+            "stale": stale,
             "n_filtered": n_filtered,
             "n_dismissed": n_dismissed,
+            "n_stale": n_stale,
             "dismiss_reasons": db.DISMISS_REASONS,
             "total": sum(counts.values()),
             "llm_available": provider.available(),
