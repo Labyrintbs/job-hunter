@@ -1,6 +1,7 @@
 # Company ATS boards to pull directly (public JSON, France-filtered at source).
-# ats: greenhouse | lever ; token = the board slug in the ATS URL.
-# Verified live; extend freely with any Paris employer you care about.
+# ats: greenhouse | lever | ashby | smartrecruiters | recruitee | workable
+# token = the board slug in the ATS URL. Run `jobhunter discover` to auto-detect
+# the ATS for companies already in your DB and propose additions here.
 companies:
   - { name: Dataiku, ats: greenhouse, token: dataiku }
   - { name: Shift Technology, ats: greenhouse, token: shifttechnology }

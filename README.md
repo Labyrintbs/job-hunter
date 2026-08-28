@@ -7,8 +7,9 @@ cover letter per job, and track every application from a local web dashboard.
 
 ## Features
 - **Fetch** from Welcome to the Jungle (public Algolia backend), company ATS
-  boards (Greenhouse + Lever), and LinkedIn (public guest search, read-only, no
-  login), filtered to France.
+  boards (Greenhouse, Lever, Ashby, SmartRecruiters, Recruitee, Workable — most
+  company career pages are one of these underneath), and LinkedIn (public guest
+  search, read-only, no login), filtered to France.
 - **Score + filter** with a rule-based, junior-tuned matcher: title-based ML
   relevance gate, internships/alternance excluded, Paris/IDF ranked above
   other-France.
