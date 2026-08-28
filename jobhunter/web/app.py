@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI, Form, Request
+from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from .. import db, export as export_mod, learn
 from ..llm import provider
-from ..pipeline import cover_one, enrich_one, judge_one, run_fetch, tailor_one
+from ..pipeline import cover_one, enrich_one, import_revised_cv, judge_one, run_fetch, tailor_one
 
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
@@ -119,6 +119,17 @@ def cover_route(job_id: int):
 @app.post("/enrich/{job_id}")
 def enrich_route(job_id: int):
     return JSONResponse(enrich_one(job_id))
+
+
+@app.post("/cv/upload/{job_id}")
+async def cv_upload_route(job_id: int, pdf: UploadFile = File(...)):
+    """Store a human-revised CV (PDF) as the job's active CV."""
+    data = await pdf.read()
+    if not data:
+        return JSONResponse({"error": "empty file"}, status_code=400)
+    result = import_revised_cv(job_id, data)
+    status = 404 if result.get("error") else 200
+    return JSONResponse(result, status_code=status)
 
 
 @app.get("/rules", response_class=HTMLResponse)

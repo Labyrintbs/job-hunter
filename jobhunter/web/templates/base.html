@@ -83,6 +83,13 @@
     }
     const approveRule = (btn, id) => runAction(btn, '/rules/' + id + '/approve', d => d.ok);
     const rejectRule = (btn, id) => runAction(btn, '/rules/' + id + '/reject', d => d.ok);
+    async function uploadCV(input, id) {
+      if (!input.files.length) return;
+      const fd = new FormData();
+      fd.append('pdf', input.files[0]);
+      const r = await fetch('/cv/upload/' + id, { method:'POST', body: fd });
+      if (r.ok) { location.reload(); } else { alert('upload failed'); }
+    }
   </script>
 </body>
 </html>

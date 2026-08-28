@@ -6,8 +6,8 @@ from . import db, export as export_mod, learn, schedule
 from .config import DB_PATH, load_search_config
 from .llm import provider
 from .notify import dispatch as notify_dispatch
-from .pipeline import (cover_one, daily_run, enrich_one, enrich_pending, judge_all,
-                       judge_one, run_fetch, tailor_one)
+from .pipeline import (cover_one, daily_run, enrich_one, enrich_pending, import_revised_cv,
+                       judge_all, judge_one, run_fetch, tailor_one)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -42,6 +42,12 @@ def main(argv: list[str] | None = None) -> int:
     p_enrich = sub.add_parser("enrich", help="fetch full descriptions for engaged jobs")
     p_enrich.add_argument("job_id", type=int, nargs="?", help="omit to enrich all pending engaged jobs")
     p_enrich.add_argument("--limit", type=int, default=20)
+
+    p_cv = sub.add_parser("cv", help="manage CV versions (upload your revised CV / list versions)")
+    p_cv.add_argument("action", choices=["upload", "list"])
+    p_cv.add_argument("job_id", type=int)
+    p_cv.add_argument("--pdf", help="path to your revised PDF (for upload)")
+    p_cv.add_argument("--tex", help="path to your revised .tex (optional)")
 
     sub.add_parser("llm-status", help="show which LLM backend is active")
 
@@ -281,6 +287,25 @@ def main(argv: list[str] | None = None) -> int:
         print(f"preference profile:        {'set' if prof else 'none'}")
         if m["false_negative_rate"] >= 0.3:
             print("\n⚠ screen may be too aggressive — review the Filtered bucket / seniority.max_years.")
+        return 0
+
+    if args.command == "cv":
+        db.init_db()
+        if args.action == "upload":
+            if not args.pdf:
+                print("upload needs --pdf PATH"); return 1
+            from pathlib import Path
+            res = import_revised_cv(args.job_id, Path(args.pdf),
+                                    Path(args.tex) if args.tex else None)
+            if res.get("error"):
+                print(f"error: {res['error']}"); return 1
+            print(f"stored revised CV (now active): {res['pdf']}")
+            return 0
+        with db.connect() as conn:
+            arts = db.list_cv_artifacts(conn, args.job_id)
+        for a in arts:
+            print(f"  #{a['id']:<4d} [{a['origin']:7s}] {a['generated_at']}  {a['pdf_path']}")
+        print(f"\n{len(arts)} version(s)")
         return 0
 
     if args.command == "export":

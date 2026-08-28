@@ -25,7 +25,12 @@ cover letter per job, and track every application from a local web dashboard.
 - **LLM fit-judge** (Claude): 0–100 score + verdict + reasons + seniority read
   (`seniority`, `min_years_required`), junior-calibrated.
 - **LaTeX CV auto-tailoring**: reorders your projects/experience by relevance to
-  each job, rewrites the "Seeking" tagline, compiles to PDF (`latexmk`).
+  each job, rewrites the "Seeking" tagline, compiles to PDF (`latexmk`). Each CV
+  version is tagged `ai` / `revised` / `base`.
+- **Upload your revised CV**: hand the system the final human-polished PDF and it
+  becomes that job's CV of record (latest-wins, badged `✎ revised`) without
+  destroying the AI versions. `jobhunter cv upload <id> --pdf CV.pdf` / `cv list <id>`,
+  or the ⬆ button in the dashboard.
 - **Cover-letter drafting** (Claude): grounded in your real CV, matches the
   posting's language, never fabricates.
 - **Feedback (explicit-only)**: 👍 interested / 👎 dismiss with fixed reason chips

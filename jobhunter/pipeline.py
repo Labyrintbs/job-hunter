@@ -204,7 +204,8 @@ def tailor_one(job_id: int) -> dict:
     tex_path, pdf_path = cv_engine.tailor_job(job, job_id)
 
     with db.connect() as conn:
-        db.add_cv_artifact(conn, job_id, str(tex_path), str(pdf_path or ""), base_version="cv_base.tex")
+        db.add_cv_artifact(conn, job_id, str(tex_path), str(pdf_path or ""),
+                           base_version="cv_base.tex", origin="ai")
         if pdf_path:
             db.update_status(conn, job_id, "cv_ready")
     return {
@@ -213,3 +214,43 @@ def tailor_one(job_id: int) -> dict:
         "pdf": str(pdf_path) if pdf_path else None,
         "compiled": pdf_path is not None,
     }
+
+
+def import_revised_cv(job_id: int, pdf: "Path | bytes", tex: "Path | None" = None) -> dict:
+    """Store a human-revised CV against a job. It becomes the active CV (latest-wins)
+    without touching the AI versions, which stay on disk. `pdf` is a path or raw bytes."""
+    from pathlib import Path
+    import shutil
+    db.init_db()
+    with db.connect() as conn:
+        row = db.get_job(conn, job_id)
+        if not row:
+            return {"job_id": job_id, "error": "not found"}
+        company = row["company"]
+
+    out_dir = cv_engine.CV_OUT_DIR / f"{job_id}-{cv_engine._slug(company)}"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stamp = _timestamp()
+    pdf_dest = out_dir / f"revised-{stamp}.pdf"
+    if isinstance(pdf, (bytes, bytearray)):
+        pdf_dest.write_bytes(pdf)
+    else:
+        shutil.copy(Path(pdf), pdf_dest)
+
+    tex_dest = ""
+    if tex is not None:
+        tex_dest_path = out_dir / f"revised-{stamp}.tex"
+        shutil.copy(Path(tex), tex_dest_path)
+        tex_dest = str(tex_dest_path)
+
+    with db.connect() as conn:
+        db.add_cv_artifact(conn, job_id, tex_dest, str(pdf_dest),
+                           base_version="revised", origin="revised")
+        db.update_status(conn, job_id, "cv_ready")
+    return {"job_id": job_id, "pdf": str(pdf_dest), "tex": tex_dest or None, "origin": "revised"}
+
+
+def _timestamp() -> str:
+    """A filesystem-safe timestamp. Isolated so tests can monkeypatch it deterministically."""
+    from datetime import datetime
+    return datetime.now().strftime("%Y%m%d-%H%M%S")

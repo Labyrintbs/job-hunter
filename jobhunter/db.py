@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS cv_artifacts (
     tex_path     TEXT DEFAULT '',
     pdf_path     TEXT DEFAULT '',
     base_version TEXT DEFAULT '',
+    origin       TEXT DEFAULT 'ai',      -- base | ai | revised (human-uploaded)
     generated_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -152,6 +153,9 @@ MIGRATIONS = {
     },
     "applications": {
         "cover_letter_path": "TEXT DEFAULT ''",
+    },
+    "cv_artifacts": {
+        "origin": "TEXT DEFAULT 'ai'",
     },
 }
 
@@ -280,7 +284,10 @@ def list_jobs(conn: sqlite3.Connection, status: str | None = None, min_score: in
     q = """
         SELECT j.*, a.status, a.notes, a.submitted_url, a.cover_letter_path,
                (SELECT pdf_path FROM cv_artifacts c WHERE c.job_id = j.id
-                ORDER BY c.generated_at DESC LIMIT 1) AS cv_pdf
+                ORDER BY c.generated_at DESC LIMIT 1) AS cv_pdf,
+               (SELECT origin FROM cv_artifacts c WHERE c.job_id = j.id
+                ORDER BY c.generated_at DESC LIMIT 1) AS cv_origin,
+               (SELECT COUNT(*) FROM cv_artifacts c WHERE c.job_id = j.id) AS cv_versions
         FROM jobs j JOIN applications a ON a.job_id = j.id
         WHERE j.score >= ?
     """
@@ -416,11 +423,22 @@ def job_from_row(row: sqlite3.Row) -> Job:
 
 
 def add_cv_artifact(conn: sqlite3.Connection, job_id: int, tex_path: str,
-                    pdf_path: str, base_version: str = "") -> None:
-    conn.execute(
-        "INSERT INTO cv_artifacts (job_id, tex_path, pdf_path, base_version) VALUES (?,?,?,?)",
-        (job_id, tex_path, pdf_path, base_version),
+                    pdf_path: str, base_version: str = "", origin: str = "ai") -> int:
+    """Append a CV artifact (append-only; latest-by-generated_at is the active one).
+    origin: 'ai' (auto-tailored) | 'revised' (human-uploaded) | 'base'."""
+    cur = conn.execute(
+        "INSERT INTO cv_artifacts (job_id, tex_path, pdf_path, base_version, origin) VALUES (?,?,?,?,?)",
+        (job_id, tex_path, pdf_path, base_version, origin),
     )
+    return cur.lastrowid
+
+
+def list_cv_artifacts(conn: sqlite3.Connection, job_id: int) -> list[sqlite3.Row]:
+    """All CV versions for a job, newest first."""
+    return conn.execute(
+        "SELECT * FROM cv_artifacts WHERE job_id = ? ORDER BY generated_at DESC, id DESC",
+        (job_id,),
+    ).fetchall()
 
 
 def set_llm_judgment(conn: sqlite3.Connection, job_id: int, score: int,

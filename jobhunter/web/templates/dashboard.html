@@ -76,10 +76,11 @@
         {% if not j["description_full"] %}
         <button class="ghost" style="padding:4px 7px; font-size:12px;" onclick="enrichJob(this, {{ j['id'] }})" title="fetch the full job description">↓desc</button>
         {% endif %}
-        {% if j["cv_pdf"] %}<a href="file://{{ j['cv_pdf'] }}" target="_blank">CV</a>{% endif %}
+        {% if j["cv_pdf"] %}<a href="file://{{ j['cv_pdf'] }}" target="_blank">CV</a>{% if j["cv_origin"] == "revised" %}<span title="human-revised, {{ j['cv_versions'] }} version(s)">✎</span>{% elif j["cv_origin"] == "ai" %}<span class="muted" title="auto-tailored, {{ j['cv_versions'] }} version(s)">🤖</span>{% endif %}{% endif %}
         <button class="ghost" style="padding:4px 7px; font-size:12px;" onclick="tailorCV(this, {{ j['id'] }})">
           {% if j["cv_pdf"] %}↻{% else %}CV{% endif %}
         </button>
+        <label class="ghost" style="padding:4px 7px; font-size:12px; cursor:pointer" title="upload your revised CV (PDF)">⬆<input type="file" accept="application/pdf" style="display:none" onchange="uploadCV(this, {{ j['id'] }})"></label>
         {% if j["cover_letter_path"] %}<a href="file://{{ j['cover_letter_path'] }}" target="_blank">letter</a>{% endif %}
         {% if llm_available %}
         <button class="ghost" style="padding:4px 7px; font-size:12px;" onclick="coverJob(this, {{ j['id'] }})">
