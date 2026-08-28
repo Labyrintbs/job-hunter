@@ -49,14 +49,18 @@
       sel.style.outline = r.ok ? '2px solid #35c46a' : '2px solid #e5534b';
       setTimeout(() => sel.style.outline = 'none', 700);
     }
-    async function tailorCV(btn, jobId) {
-      const label = btn.textContent;
+    async function runAction(btn, url, ok) {
       btn.textContent = '…'; btn.disabled = true;
-      const r = await fetch('/tailor/' + jobId, { method:'POST' });
-      const data = await r.json();
-      if (data.compiled) { location.reload(); }
-      else { btn.textContent = 'failed'; btn.disabled = false; }
+      try {
+        const r = await fetch(url, { method:'POST' });
+        const data = await r.json();
+        if (ok(data)) { location.reload(); }
+        else { btn.textContent = 'failed'; btn.disabled = false; }
+      } catch (e) { btn.textContent = 'failed'; btn.disabled = false; }
     }
+    const tailorCV = (btn, id) => runAction(btn, '/tailor/' + id, d => d.compiled);
+    const judgeJob = (btn, id) => runAction(btn, '/judge/' + id, d => !d.error);
+    const coverJob = (btn, id) => runAction(btn, '/cover/' + id, d => !d.error);
   </script>
 </body>
 </html>

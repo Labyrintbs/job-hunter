@@ -65,9 +65,30 @@ def get_connection(db_path: Path | None = None) -> sqlite3.Connection:
     return conn
 
 
+MIGRATIONS = {
+    "jobs": {
+        "llm_score": "INTEGER DEFAULT NULL",
+        "llm_verdict": "TEXT DEFAULT ''",
+        "llm_reasons": "TEXT DEFAULT ''",
+    },
+    "applications": {
+        "cover_letter_path": "TEXT DEFAULT ''",
+    },
+}
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    for table, cols in MIGRATIONS.items():
+        existing = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+        for name, decl in cols.items():
+            if name not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+
+
 def init_db(db_path: Path | None = None) -> None:
     with get_connection(db_path) as conn:
         conn.executescript(SCHEMA)
+        _migrate(conn)
 
 
 @contextmanager
@@ -127,7 +148,7 @@ def upsert_job(conn: sqlite3.Connection, job: Job, score: int, reasons: str) -> 
 
 def list_jobs(conn: sqlite3.Connection, status: str | None = None, min_score: int = 0) -> list[sqlite3.Row]:
     q = """
-        SELECT j.*, a.status, a.notes, a.submitted_url,
+        SELECT j.*, a.status, a.notes, a.submitted_url, a.cover_letter_path,
                (SELECT pdf_path FROM cv_artifacts c WHERE c.job_id = j.id
                 ORDER BY c.generated_at DESC LIMIT 1) AS cv_pdf
         FROM jobs j JOIN applications a ON a.job_id = j.id
@@ -172,6 +193,21 @@ def add_cv_artifact(conn: sqlite3.Connection, job_id: int, tex_path: str,
     conn.execute(
         "INSERT INTO cv_artifacts (job_id, tex_path, pdf_path, base_version) VALUES (?,?,?,?)",
         (job_id, tex_path, pdf_path, base_version),
+    )
+
+
+def set_llm_judgment(conn: sqlite3.Connection, job_id: int, score: int,
+                     verdict: str, reasons: str) -> None:
+    conn.execute(
+        "UPDATE jobs SET llm_score = ?, llm_verdict = ?, llm_reasons = ? WHERE id = ?",
+        (score, verdict, reasons, job_id),
+    )
+
+
+def set_cover_letter(conn: sqlite3.Connection, job_id: int, path: str) -> None:
+    conn.execute(
+        "UPDATE applications SET cover_letter_path = ? WHERE job_id = ?",
+        (path, job_id),
     )
 
 

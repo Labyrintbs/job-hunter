@@ -17,12 +17,20 @@
 
 <table>
   <thead>
-    <tr><th>Score</th><th>Role</th><th>Company</th><th>Location</th><th>Why</th><th>Status</th><th>CV</th></tr>
+    <tr><th>Score</th><th>LLM</th><th>Role</th><th>Company</th><th>Location</th><th>Why</th><th>Status</th><th>Docs</th></tr>
   </thead>
   <tbody>
   {% for j in jobs %}
     <tr>
       <td class="score">{{ j["score"] }}</td>
+      <td>
+        {% if j["llm_score"] is not none %}
+          <span class="score" title="{{ j['llm_reasons'] }}">{{ j["llm_score"] }}</span>
+          <div class="muted" style="font-size:11px">{{ j["llm_verdict"] }}</div>
+        {% elif llm_available %}
+          <button class="ghost" style="padding:4px 8px; font-size:12px;" onclick="judgeJob(this, {{ j['id'] }})">judge</button>
+        {% else %}<span class="muted">—</span>{% endif %}
+      </td>
       <td>{% if j["url"] %}<a href="{{ j['url'] }}" target="_blank" rel="noopener">{{ j["title"] }}</a>{% else %}{{ j["title"] }}{% endif %}
           <div class="muted" style="font-size:12px">{{ j["contract_type"] }} · {{ j["language"] }}</div></td>
       <td>{{ j["company"] }}</td>
@@ -35,11 +43,17 @@
           {% endfor %}
         </select>
       </td>
-      <td>
-        {% if j["cv_pdf"] %}<a href="file://{{ j['cv_pdf'] }}" target="_blank">PDF</a>{% endif %}
-        <button class="ghost" style="padding:4px 8px; font-size:12px;" onclick="tailorCV(this, {{ j['id'] }})">
-          {% if j["cv_pdf"] %}↻{% else %}Tailor{% endif %}
+      <td style="white-space:nowrap">
+        {% if j["cv_pdf"] %}<a href="file://{{ j['cv_pdf'] }}" target="_blank">CV</a>{% endif %}
+        <button class="ghost" style="padding:4px 7px; font-size:12px;" onclick="tailorCV(this, {{ j['id'] }})">
+          {% if j["cv_pdf"] %}↻{% else %}CV{% endif %}
         </button>
+        {% if j["cover_letter_path"] %}<a href="file://{{ j['cover_letter_path'] }}" target="_blank">letter</a>{% endif %}
+        {% if llm_available %}
+        <button class="ghost" style="padding:4px 7px; font-size:12px;" onclick="coverJob(this, {{ j['id'] }})">
+          {% if j["cover_letter_path"] %}↻{% else %}letter{% endif %}
+        </button>
+        {% endif %}
       </td>
     </tr>
   {% else %}

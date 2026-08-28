@@ -4,7 +4,8 @@ import argparse
 
 from . import db
 from .config import DB_PATH
-from .pipeline import run_fetch, tailor_one
+from .llm import provider
+from .pipeline import cover_one, judge_all, judge_one, run_fetch, tailor_one
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -20,6 +21,16 @@ def main(argv: list[str] | None = None) -> int:
 
     p_tailor = sub.add_parser("tailor", help="generate + compile a tailored CV")
     p_tailor.add_argument("job_id", type=int)
+
+    p_judge = sub.add_parser("judge", help="LLM fit-judge jobs")
+    p_judge.add_argument("job_id", type=int, nargs="?", help="omit to judge all above --min-score")
+    p_judge.add_argument("--min-score", type=int, default=40)
+    p_judge.add_argument("--limit", type=int, default=None)
+
+    p_cover = sub.add_parser("cover", help="draft a cover letter (LLM)")
+    p_cover.add_argument("job_id", type=int)
+
+    sub.add_parser("llm-status", help="show which LLM backend is active")
 
     p_web = sub.add_parser("web", help="run the dashboard")
     p_web.add_argument("--host", default="127.0.0.1")
@@ -55,6 +66,28 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         print(f"tex: {result['tex']}")
         print(f"pdf: {result['pdf']}  (compiled={result['compiled']})")
+        return 0
+
+    if args.command == "llm-status":
+        print(f"LLM backend: {provider.backend()} (available={provider.available()})")
+        return 0
+
+    if args.command == "judge":
+        if args.job_id is not None:
+            result = judge_one(args.job_id)
+            if result.get("error"):
+                print(f"error: {result['error']}"); return 1
+            print(f"[{result['score']:3d}] {result['verdict']:8s} {result['reasons']}")
+        else:
+            stats = judge_all(min_score=args.min_score, limit=args.limit)
+            print(f"candidates={stats['candidates']} judged={stats['judged']}")
+        return 0
+
+    if args.command == "cover":
+        result = cover_one(args.job_id)
+        if result.get("error"):
+            print(f"error: {result['error']}"); return 1
+        print(f"cover letter: {result['cover_letter']}")
         return 0
 
     if args.command == "web":

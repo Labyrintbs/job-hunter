@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from . import db, match
+from .apply import cover_letter
 from .config import load_companies, load_search_config
+from .llm import judge as llm_judge
+from .llm import provider
 from .sources import ats, wttj
 from .tailor import engine as cv_engine
 
@@ -39,6 +42,52 @@ def run_fetch(config: dict | None = None) -> dict:
                 per_source[job.source] = per_source.get(job.source, 0) + 1
 
     return {"fetched": seen, "kept": kept, "new": new, "new_by_source": per_source}
+
+
+def judge_one(job_id: int) -> dict:
+    """LLM fit-judge one job; store score/verdict/reasons on the job."""
+    db.init_db()
+    with db.connect() as conn:
+        row = db.get_job(conn, job_id)
+        if not row:
+            return {"job_id": job_id, "error": "not found"}
+        job = db.job_from_row(row)
+    result = llm_judge.judge(job)
+    with db.connect() as conn:
+        db.set_llm_judgment(conn, job_id, result["score"], result["verdict"], result["reasons"])
+    return {"job_id": job_id, **result}
+
+
+def judge_all(min_score: int = 40, limit: int | None = None) -> dict:
+    """Judge every stored job at/above a rule-score threshold that isn't judged yet."""
+    db.init_db()
+    with db.connect() as conn:
+        rows = [r for r in db.list_jobs(conn, min_score=min_score) if r["llm_score"] is None]
+    if limit:
+        rows = rows[:limit]
+    judged = 0
+    for r in rows:
+        try:
+            judge_one(r["id"])
+            judged += 1
+        except Exception as exc:
+            print(f"  judge warn: job {r['id']} failed: {exc}")
+    return {"candidates": len(rows), "judged": judged}
+
+
+def cover_one(job_id: int) -> dict:
+    """Draft a cover letter for one job; store the file path on the application."""
+    db.init_db()
+    with db.connect() as conn:
+        row = db.get_job(conn, job_id)
+        if not row:
+            return {"job_id": job_id, "error": "not found"}
+        job = db.job_from_row(row)
+    out_dir = cv_engine.CV_OUT_DIR / f"{job_id}-{cv_engine._slug(job.company)}"
+    path = cover_letter.draft_to_file(job, out_dir)
+    with db.connect() as conn:
+        db.set_cover_letter(conn, job_id, str(path))
+    return {"job_id": job_id, "cover_letter": str(path)}
 
 
 def tailor_one(job_id: int) -> dict:

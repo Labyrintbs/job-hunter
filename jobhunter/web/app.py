@@ -7,7 +7,8 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from .. import db
-from ..pipeline import run_fetch, tailor_one
+from ..llm import provider
+from ..pipeline import cover_one, judge_one, run_fetch, tailor_one
 
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
@@ -34,6 +35,7 @@ def dashboard(request: Request, status: str | None = None, min_score: int = 0):
             "active_status": status or "",
             "min_score": min_score,
             "total": sum(counts.values()),
+            "llm_available": provider.available(),
         },
     )
 
@@ -64,5 +66,18 @@ def run_fetch_route():
 
 @app.post("/tailor/{job_id}")
 def tailor_route(job_id: int):
-    result = tailor_one(job_id)
-    return JSONResponse(result)
+    return JSONResponse(tailor_one(job_id))
+
+
+@app.post("/judge/{job_id}")
+def judge_route(job_id: int):
+    if not provider.available():
+        return JSONResponse({"error": "no LLM backend"}, status_code=503)
+    return JSONResponse(judge_one(job_id))
+
+
+@app.post("/cover/{job_id}")
+def cover_route(job_id: int):
+    if not provider.available():
+        return JSONResponse({"error": "no LLM backend"}, status_code=503)
+    return JSONResponse(cover_one(job_id))
