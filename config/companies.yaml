@@ -1,0 +1,10 @@
+# Company ATS boards to pull directly (public JSON, France-filtered at source).
+# ats: greenhouse | lever ; token = the board slug in the ATS URL.
+# Verified live; extend freely with any Paris employer you care about.
+companies:
+  - { name: Dataiku, ats: greenhouse, token: dataiku }
+  - { name: Shift Technology, ats: greenhouse, token: shifttechnology }
+  - { name: Qonto, ats: lever, token: qonto }
+  - { name: Pigment, ats: lever, token: pigment }
+  - { name: Aircall, ats: lever, token: aircall }
+  - { name: Younited, ats: lever, token: younited }

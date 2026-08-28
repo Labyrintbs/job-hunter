@@ -78,11 +78,25 @@ def score(job: Job, config: dict) -> tuple[int, list[str]]:
     return max(0, min(100, pts)), reasons
 
 
+def is_relevant(job: Job, config: dict) -> bool:
+    """A job must be an ML role by its TITLE, not just be in Paris or mention ML
+    in company boilerplate. Guards against non-ML roles from ATS boards."""
+    title = job.title.lower()
+    role_kw = config.get("role_keywords") or config.get("boost_keywords", [])
+    if any(k.lower() in title for k in role_kw):
+        return True
+    q = config.get("query", "").lower()
+    return bool(q) and all(w in title for w in q.split())
+
+
 def evaluate(job: Job, config: dict) -> tuple[int, str, bool]:
-    """Returns (score, reasons_text, keep). keep=False for hard-excluded jobs."""
+    """Returns (score, reasons_text, keep). keep=False for hard-excluded or
+    non-relevant jobs."""
     excl = is_excluded(job, config)
     if excl:
         return 0, excl, False
+    if not is_relevant(job, config):
+        return 0, "not ML-relevant", False
     pts, reasons = score(job, config)
     keep = pts >= config.get("min_score", 0)
     return pts, "; ".join(reasons), keep

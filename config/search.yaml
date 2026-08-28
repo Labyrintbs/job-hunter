@@ -1,6 +1,25 @@
 # Search configuration for a Paris junior ML-engineer hunt (CDI, no internships).
 query: "machine learning engineer"
 
+# Title must contain one of these for a job to count as ML-relevant. Gates out
+# non-ML roles from company ATS boards (whose boilerplate mentions "machine learning").
+role_keywords:
+  - machine learning
+  - ml engineer
+  - deep learning
+  - data scientist
+  - computer vision
+  - nlp
+  - mlops
+  - ai engineer
+  - applied ai
+  - applied scientist
+  - research engineer
+  - research scientist
+  - genai
+  - generative ai
+  - llm
+
 # Extra keywords that boost a job's score if present in title/description.
 boost_keywords:
   - machine learning

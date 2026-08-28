@@ -35,6 +35,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "fetch":
         stats = run_fetch()
         print(f"fetched={stats['fetched']} kept={stats['kept']} new={stats['new']}")
+        if stats.get("new_by_source"):
+            print("  new by source:", dict(stats["new_by_source"]))
         return 0
 
     if args.command == "list":

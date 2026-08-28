@@ -1,24 +1,31 @@
 from __future__ import annotations
 
 from . import db, match
-from .config import load_search_config
-from .sources import wttj
+from .config import load_companies, load_search_config
+from .sources import ats, wttj
 from .tailor import engine as cv_engine
+
+
+def _gather(config: dict) -> list:
+    jobs = wttj.fetch(
+        query=config["query"],
+        max_hits=config.get("max_hits", 100),
+        country=(config.get("countries") or ["France"])[0],
+    )
+    jobs += ats.fetch_all(load_companies())
+    return jobs
 
 
 def run_fetch(config: dict | None = None) -> dict:
     config = config or load_search_config()
     db.init_db()
 
-    jobs = wttj.fetch(
-        query=config["query"],
-        max_hits=config.get("max_hits", 100),
-        country=(config.get("countries") or ["France"])[0],
-    )
+    jobs = _gather(config)
 
     seen = 0
     kept = 0
     new = 0
+    per_source: dict[str, int] = {}
     with db.connect() as conn:
         for job in jobs:
             seen += 1
@@ -29,8 +36,9 @@ def run_fetch(config: dict | None = None) -> dict:
             _, is_new = db.upsert_job(conn, job, pts, reasons)
             if is_new:
                 new += 1
+                per_source[job.source] = per_source.get(job.source, 0) + 1
 
-    return {"fetched": seen, "kept": kept, "new": new}
+    return {"fetched": seen, "kept": kept, "new": new, "new_by_source": per_source}
 
 
 def tailor_one(job_id: int) -> dict:
