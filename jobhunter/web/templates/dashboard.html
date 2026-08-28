@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="filters">
+  <span class="pill">{{ total }} tracked</span>
+  {% for s in statuses %}
+    <a class="pill" href="/?status={{ s }}">{{ s }} · {{ counts.get(s, 0) }}</a>
+  {% endfor %}
+  {% if active_status %}<a class="pill" href="/">✕ clear</a>{% endif %}
+  <span class="grow"></span>
+  <form method="get" style="margin:0; display:flex; gap:8px; align-items:center;">
+    <label class="muted">min score</label>
+    <input type="number" name="min_score" value="{{ min_score }}" style="width:70px; background:var(--panel); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:5px;">
+    {% if active_status %}<input type="hidden" name="status" value="{{ active_status }}">{% endif %}
+    <button class="ghost" type="submit">apply</button>
+  </form>
+</div>
+
+<table>
+  <thead>
+    <tr><th>Score</th><th>Role</th><th>Company</th><th>Location</th><th>Why</th><th>Status</th><th>CV</th></tr>
+  </thead>
+  <tbody>
+  {% for j in jobs %}
+    <tr>
+      <td class="score">{{ j["score"] }}</td>
+      <td>{% if j["url"] %}<a href="{{ j['url'] }}" target="_blank" rel="noopener">{{ j["title"] }}</a>{% else %}{{ j["title"] }}{% endif %}
+          <div class="muted" style="font-size:12px">{{ j["contract_type"] }} · {{ j["language"] }}</div></td>
+      <td>{{ j["company"] }}</td>
+      <td class="muted">{{ j["location"] }}</td>
+      <td class="reasons">{{ j["match_reasons"] }}</td>
+      <td>
+        <select onchange="setStatus(this, {{ j['id'] }})">
+          {% for s in statuses %}
+            <option value="{{ s }}" {% if s == j["status"] %}selected{% endif %}>{{ s }}</option>
+          {% endfor %}
+        </select>
+      </td>
+      <td>{% if j["cv_pdf"] %}<a href="file://{{ j['cv_pdf'] }}" target="_blank">PDF</a>{% else %}<span class="muted">—</span>{% endif %}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="7" class="muted">No jobs yet. Click “Fetch new jobs”.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

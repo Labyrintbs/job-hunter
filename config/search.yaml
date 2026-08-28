@@ -1,0 +1,45 @@
+# Search configuration for a Paris junior ML-engineer hunt (CDI, no internships).
+query: "machine learning engineer"
+
+# Extra keywords that boost a job's score if present in title/description.
+boost_keywords:
+  - machine learning
+  - deep learning
+  - ml engineer
+  - computer vision
+  - nlp
+  - mlops
+  - pytorch
+  - data scientist
+
+# Geography (WTTJ facet uses country; location text is matched against these).
+countries: ["France"]
+locations:
+  - paris
+  - ile-de-france
+  - "île-de-france"
+allow_remote_france: true
+
+# Languages to keep (matched loosely against posting language / content).
+languages: ["fr", "en"]
+
+# Postings whose title/contract contains any of these are dropped (want CDI/full-time).
+exclude_terms:
+  - stage
+  - stagiaire
+  - internship
+  - intern
+  - alternance
+  - apprenti
+  - apprentissage
+  - vie
+  - freelance
+
+# Companies to never show.
+company_blocklist: []
+
+# Only keep jobs at or above this rule-based score (0-100).
+min_score: 20
+
+# Max hits to request from WTTJ per run.
+max_hits: 100

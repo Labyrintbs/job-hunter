@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block content %}
+<div style="display:flex; gap:14px; overflow-x:auto; padding-bottom:10px;">
+  {% for s in statuses %}
+  <div style="min-width:250px; flex:0 0 250px; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:10px;">
+    <div style="display:flex; justify-content:space-between; margin-bottom:8px;">
+      <strong style="text-transform:capitalize">{{ s }}</strong>
+      <span class="pill">{{ by_status[s]|length }}</span>
+    </div>
+    {% for j in by_status[s] %}
+    <div style="background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:9px; margin-bottom:8px;">
+      <div style="display:flex; justify-content:space-between; gap:6px;">
+        <span class="score">{{ j["score"] }}</span>
+        <select onchange="setStatus(this, {{ j['id'] }})" style="font-size:12px;">
+          {% for st in statuses %}<option value="{{ st }}" {% if st == s %}selected{% endif %}>{{ st }}</option>{% endfor %}
+        </select>
+      </div>
+      <div style="margin-top:5px; font-size:13px;">
+        {% if j["url"] %}<a href="{{ j['url'] }}" target="_blank" rel="noopener">{{ j["title"] }}</a>{% else %}{{ j["title"] }}{% endif %}
+      </div>
+      <div class="muted" style="font-size:12px;">{{ j["company"] }} · {{ j["location"] }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}
