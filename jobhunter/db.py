@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import re
 import sqlite3
+import unicodedata
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -201,10 +203,37 @@ def connect(db_path: Path | None = None):
         conn.close()
 
 
-def _content_key(job: Job) -> str:
-    if job.url:
-        return job.url
-    return f"{job.company.lower()}|{job.title.lower()}|{job.location.lower()}"
+def _normalize(s: str) -> str:
+    """Casefold + strip accents/punctuation so the same posting's text compares equal
+    across sources even when they render it slightly differently (accents, spacing,
+    "Île-de-France" vs "Ile-de-France")."""
+    s = unicodedata.normalize("NFKD", s or "").encode("ascii", "ignore").decode("ascii")
+    return re.sub(r"[^a-z0-9]+", " ", s.lower()).strip()
+
+
+def _norm_city(location: str) -> str:
+    """Just the city, normalized. Sources format the full location wildly differently
+    for the same posting -- WTTJ: "Paris, Ile-de-France, France", an ATS board: "Paris",
+    LinkedIn: "Paris, Île-de-France" -- so matching the full string never lines up across
+    sources. The city (first comma-separated segment) is the one part they share."""
+    return _normalize((location or "").split(",")[0])
+
+
+def _find_content_match(conn: sqlite3.Connection, job: Job) -> sqlite3.Row | None:
+    """Cross-source dedup: same normalized company + title + city, any source (different
+    platforms give the same real posting different URLs and IDs, so those can't be the
+    match key here). SQL narrows to same company first (cheap, uses no accent folding)
+    before the accent-aware Python comparison on the small remainder."""
+    norm_title = _normalize(job.title)
+    norm_city = _norm_city(job.location)
+    candidates = conn.execute(
+        "SELECT id, title, location FROM jobs WHERE LOWER(company) = LOWER(?)",
+        (job.company,),
+    ).fetchall()
+    for c in candidates:
+        if _normalize(c["title"]) == norm_title and _norm_city(c["location"]) == norm_city:
+            return c
+    return None
 
 
 def upsert_job(conn: sqlite3.Connection, job: Job, score: int, reasons: str, *,
@@ -214,19 +243,19 @@ def upsert_job(conn: sqlite3.Connection, job: Job, score: int, reasons: str, *,
     """Insert a job if new. Returns (job_id, is_new). Existing jobs keep their
     application status; their score/reasons and screening flags are refreshed, and
     last_seen is stamped every time the job is seen (for staleness / market signals).
-    Dedups both on (source, external_id) and on content (WTTJ indexes the same posting
-    under several objectIDs)."""
+    Dedups on (source, external_id), then on exact URL, then cross-source on normalized
+    (company, title, location) — the same posting fetched from WTTJ, a company's own ATS
+    board, and LinkedIn all land on one row instead of three."""
     row = conn.execute(
         "SELECT id FROM jobs WHERE source = ? AND external_id = ?",
         (job.source, job.external_id),
     ).fetchone()
-    if not row:
-        key = _content_key(job)
+    if not row and job.url:
         row = conn.execute(
-            """SELECT id FROM jobs WHERE source = ?
-               AND COALESCE(NULLIF(url, ''), lower(company)||'|'||lower(title)||'|'||lower(location)) = ?""",
-            (job.source, key),
+            "SELECT id FROM jobs WHERE url = ? AND url != ''", (job.url,)
         ).fetchone()
+    if not row:
+        row = _find_content_match(conn, job)
     if row:
         conn.execute(
             """UPDATE jobs SET score = ?, match_reasons = ?, filtered = ?,

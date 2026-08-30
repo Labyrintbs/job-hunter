@@ -2,8 +2,8 @@ from jobhunter import db
 from jobhunter.models import Job
 
 
-def J(ext, loc="Paris"):
-    return Job(source="wttj", external_id=ext, title="ML Engineer", company="Acme",
+def J(ext, loc="Paris", title="ML Engineer"):
+    return Job(source="wttj", external_id=ext, title=title, company="Acme",
                location=loc, url=f"http://x/{ext}")
 
 
@@ -13,8 +13,8 @@ def _set_seen(conn, job_id, last_seen):
 
 def test_stale_relative_to_latest_run(tmp_db):
     with db.connect() as conn:
-        fresh, _ = db.upsert_job(conn, J("1"), 60, "r")
-        ghost, _ = db.upsert_job(conn, J("2"), 60, "r")
+        fresh, _ = db.upsert_job(conn, J("1", title="ML Engineer A"), 60, "r")
+        ghost, _ = db.upsert_job(conn, J("2", title="ML Engineer B"), 60, "r")
         # Latest fetch run is "now"; the ghost was last seen 30 days before it.
         conn.execute("INSERT INTO fetch_runs (ran_at) VALUES ('2026-02-01 00:00:00')")
         _set_seen(conn, fresh, "2026-02-01 00:00:00")
