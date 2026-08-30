@@ -25,3 +25,18 @@ def test_without_marker_removes_only_ours():
     cleaned = schedule.without_marker(existing)
     assert "/other/job" in cleaned
     assert schedule.MARKER not in cleaned
+
+
+def test_python_resolution_prefers_override_then_conda(tmp_path, monkeypatch):
+    monkeypatch.delenv("JOBHUNTER_PYTHON", raising=False)
+    monkeypatch.delenv("CONDA_PREFIX", raising=False)
+    # explicit override wins over everything
+    monkeypatch.setenv("JOBHUNTER_PYTHON", "/opt/custom/bin/python")
+    assert schedule._python() == "/opt/custom/bin/python"
+    # an active conda env's python is preferred over the repo .venv
+    conda = tmp_path / "conda"
+    (conda / "bin").mkdir(parents=True)
+    (conda / "bin" / "python").touch()
+    monkeypatch.setenv("JOBHUNTER_PYTHON", "")
+    monkeypatch.setenv("CONDA_PREFIX", str(conda))
+    assert schedule._python() == str(conda / "bin" / "python")

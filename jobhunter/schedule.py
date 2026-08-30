@@ -5,8 +5,10 @@ our line and never touch the user's other cron jobs.
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
+from pathlib import Path
 
 from .config import REPO_ROOT
 
@@ -14,9 +16,22 @@ MARKER = "# jobhunter-daily"
 
 
 def _python() -> str:
-    """The interpreter to run under cron — prefer the project venv."""
+    """The interpreter to run under cron. Resolution order: the JOBHUNTER_PYTHON
+    env var, the activated conda env's python (CONDA_PREFIX), the project .venv,
+    then the interpreter running this code. Preferring conda keeps the env out of
+    the iCloud-managed repo tree (macOS storage optimization evicts venv binaries)."""
+    override = os.environ.get("JOBHUNTER_PYTHON")
+    if override:
+        return override
+    conda = os.environ.get("CONDA_PREFIX")
+    if conda:
+        p = Path(conda) / "bin" / "python"
+        if p.exists():
+            return str(p)
     venv = REPO_ROOT / ".venv" / "bin" / "python"
-    return str(venv) if venv.exists() else sys.executable
+    if venv.exists():
+        return str(venv)
+    return sys.executable
 
 
 def cron_line(hour: int = 8, minute: int = 0) -> str:

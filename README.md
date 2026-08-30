@@ -62,16 +62,21 @@ cover letter per job, and track every application from a local web dashboard.
   configured channels — File (always on), Telegram, or Email.
 
 ## Setup
+The environment is a conda env living outside the repo tree — important because
+this repo lives under an iCloud-synced folder, and macOS "Optimize Mac Storage"
+evicts binaries (like `pydantic_core`'s `.so`) to the cloud, silently breaking a
+local `.venv`. A conda env under `~/opt/anaconda3/envs` is not evicted.
 ```bash
-uv venv --python 3.13 .venv
-uv pip install --python .venv/bin/python -e .
+conda create -n jobhunter python=3.13 -y
+conda run -n jobhunter pip install -e '.[dev,llm]'
 ```
 LLM features use whichever is available: `ANTHROPIC_API_KEY` (`pip install -e '.[llm]'`)
 or the local `claude` CLI (subscription) — check with `jobhunter llm-status`.
 
 ## Use
 ```bash
-P=.venv/bin/python
+conda activate jobhunter
+P=$CONDA_PREFIX/bin/python
 $P -m jobhunter.cli fetch            # fetch + score + store new jobs (WTTJ + ATS)
 $P -m jobhunter.cli judge --min-score 40   # LLM-judge promising jobs
 $P -m jobhunter.cli tailor <job_id>  # tailored CV -> data/cv/<job>/cv.pdf
@@ -92,6 +97,11 @@ $P -m jobhunter.cli cron uninstall      # remove it
 Installing is opt-in because the daily run makes LLM calls. Only the tagged
 `# jobhunter-daily` line is ever touched; your other cron jobs are preserved.
 Output is appended to `data/cron.log`.
+
+The interpreter in the cron line is resolved by `schedule._python()`: first the
+`JOBHUNTER_PYTHON` env var, then the active conda env (`CONDA_PREFIX`), then the
+project `.venv`, then `sys.executable`. Install cron from the activated env to get
+the conda python.
 
 ## Market trends (Grafana / Metabase)
 Trend data accumulates automatically: each `fetch`/`run` inserts a `fetch_runs` row
@@ -128,7 +138,7 @@ writes `data/notifications/`).
 
 ## Tests
 ```bash
-.venv/bin/python -m pytest -q
+$P -m pytest -q
 ```
 
 ## Layout
