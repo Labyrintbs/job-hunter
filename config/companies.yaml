@@ -5,7 +5,46 @@
 companies:
   - { name: Dataiku, ats: greenhouse, token: dataiku }
   - { name: Shift Technology, ats: greenhouse, token: shifttechnology }
+  - { name: Algolia, ats: greenhouse, token: algolia }
+  - { name: Datadog, ats: greenhouse, token: datadog }
+  - { name: Databricks, ats: greenhouse, token: databricks }
+  - { name: SESAMm, ats: greenhouse, token: sesamm }
   - { name: Qonto, ats: lever, token: qonto }
   - { name: Pigment, ats: lever, token: pigment }
   - { name: Aircall, ats: lever, token: aircall }
   - { name: Younited, ats: lever, token: younited }
+  - { name: BlaBlaCar, ats: lever, token: blablacar }
+  - { name: Contentsquare, ats: lever, token: contentsquare }
+  - { name: Malt, ats: lever, token: malt }
+  - { name: Swile, ats: lever, token: swile }
+  - { name: Agicap, ats: lever, token: agicap }
+  - { name: Alice & Bob, ats: lever, token: alice-bob }
+  - { name: Bigblue, ats: lever, token: bigblue }
+  - { name: Ekimetrics, ats: lever, token: ekimetrics }
+  - { name: Verkor, ats: lever, token: verkor }
+  - { name: Doctrine, ats: lever, token: doctrine }
+  - { name: Vestiaire Collective, ats: lever, token: vestiairecollective }
+  - { name: Veepee, ats: lever, token: veepee }
+  - { name: Heetch, ats: lever, token: heetch }
+  - { name: Alan, ats: ashby, token: alan }
+  - { name: Doctolib, ats: ashby, token: doctolib }
+  - { name: Back Market, ats: ashby, token: backmarket }
+  - { name: H Company, ats: ashby, token: hcompany }
+  - { name: Ledger, ats: ashby, token: ledger }
+  - { name: Photoroom, ats: ashby, token: photoroom }
+  - { name: Sorare, ats: ashby, token: sorare }
+  - { name: Owkin, ats: ashby, token: owkin }
+  - { name: Akur8, ats: ashby, token: akur8 }
+  - { name: Pennylane, ats: ashby, token: pennylane }
+  - { name: Voodoo, ats: ashby, token: voodoo }
+  - { name: Dust, ats: ashby, token: dust }
+  - { name: Nabla, ats: ashby, token: nabla }
+  - { name: Ecovadis, ats: smartrecruiters, token: ecovadis }
+  - { name: Shippeo, ats: smartrecruiters, token: shippeo }
+  - { name: Accor, ats: smartrecruiters, token: accor }
+  - { name: LVMH, ats: smartrecruiters, token: lvmh }
+  - { name: Saint-Gobain, ats: smartrecruiters, token: saintgobain }
+  - { name: Believe, ats: smartrecruiters, token: believe }
+  - { name: Dailymotion, ats: smartrecruiters, token: dailymotion }
+  - { name: Exotec, ats: workable, token: exotec }
+  - { name: Hugging Face, ats: workable, token: huggingface }
