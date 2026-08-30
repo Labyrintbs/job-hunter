@@ -68,14 +68,21 @@ def compile_tex(tex: str, out_dir: Path, name: str = "cv") -> Path | None:
     tex_path = out_dir / f"{name}.tex"
     tex_path.write_text(tex, encoding="utf-8")
 
-    glyph = REPO_ROOT / "templates" / "glyphtounicode.tex"  # optional; latex has it built-in
     with tempfile.TemporaryDirectory() as tmp:
         tmp_tex = Path(tmp) / f"{name}.tex"
         tmp_tex.write_text(tex, encoding="utf-8")
-        proc = subprocess.run(
-            ["latexmk", "-pdf", "-interaction=nonstopmode", tmp_tex.name],
-            cwd=tmp, capture_output=True, text=True,
-        )
+        try:
+            proc = subprocess.run(
+                ["latexmk", "-pdf", "-interaction=nonstopmode", tmp_tex.name],
+                cwd=tmp, capture_output=True, text=True,
+            )
+        except OSError as exc:  # latexmk missing / not runnable
+            (out_dir / f"{name}.compile.log").write_text(
+                f"latexmk failed to run: {exc}\n"
+                f"Install it, e.g. `brew install --cask basictex`.\n",
+                encoding="utf-8",
+            )
+            return None
         tmp_pdf = Path(tmp) / f"{name}.pdf"
         if proc.returncode != 0 or not tmp_pdf.exists():
             (out_dir / f"{name}.compile.log").write_text(proc.stdout + proc.stderr, encoding="utf-8")

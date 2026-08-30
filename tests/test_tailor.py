@@ -39,3 +39,15 @@ def test_tailor_changes_tagline_and_is_valid_latex_structure():
     assert r"\&" in tex                        # company '&' escaped
     assert tex.count(r"\begin{document}") == 1
     assert tex.count(r"\end{document}") == 1
+
+
+def test_compile_missing_latexmk_degrades_gracefully(tmp_path, monkeypatch):
+    # No latexmk binary on PATH -> compile returns None, .tex kept, log explains why.
+    def _missing(*a, **k):
+        raise FileNotFoundError("latexmk")
+    monkeypatch.setattr(engine.subprocess, "run", _missing)
+    out = engine.compile_tex(r"\begin{document}hi\end{document}", tmp_path)
+    assert out is None
+    assert (tmp_path / "cv.tex").exists()
+    log = (tmp_path / "cv.compile.log").read_text()
+    assert "latexmk" in log
