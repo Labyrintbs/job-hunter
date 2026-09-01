@@ -307,13 +307,21 @@ def add_fetch_run(conn: sqlite3.Connection, stats: dict) -> int:
     return cur.lastrowid
 
 
+SORT_ORDERS = {
+    "score": "j.score DESC, j.fetched_at DESC",
+    "fetched_at": "j.fetched_at DESC, j.score DESC",
+}
+
+
 def list_jobs(conn: sqlite3.Connection, status: str | None = None, min_score: int = 0,
               filtered: int | None = 0, dismissed: bool | None = False,
-              staleness_days: int = 14, exclude_statuses: tuple = ()) -> list[sqlite3.Row]:
+              staleness_days: int = 14, exclude_statuses: tuple = (),
+              sort: str = "score") -> list[sqlite3.Row]:
     """filtered=0 (default) shows the main list, filtered=1 the auto-hidden bucket,
     filtered=None shows both. dismissed=False (default) hides jobs you rejected,
     dismissed=True shows only those, dismissed=None ignores the label.
     exclude_statuses hides those statuses unless `status` names one of them.
+    sort picks an entry from SORT_ORDERS ("score" or "fetched_at"), falling back to score.
     Adds computed `is_stale` / `days_since_seen` (relative to the latest fetch run)."""
     q = """
         SELECT j.*, a.status, a.notes, a.submitted_url, a.cover_letter_path,
@@ -346,7 +354,7 @@ def list_jobs(conn: sqlite3.Connection, status: str | None = None, min_score: in
         marks = ",".join("?" for _ in exclude_statuses)
         q += f" AND a.status NOT IN ({marks})"
         params.extend(exclude_statuses)
-    q += " ORDER BY j.score DESC, j.fetched_at DESC"
+    q += " ORDER BY " + SORT_ORDERS.get(sort, SORT_ORDERS["score"])
     return conn.execute(q, params).fetchall()
 
 

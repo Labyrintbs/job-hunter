@@ -23,18 +23,19 @@ def _startup() -> None:
 
 @app.get("/", response_class=HTMLResponse)
 def dashboard(request: Request, status: str | None = None, min_score: int = 0,
-              filtered: int = 0, dismissed: int = 0, stale: int = 0):
+              filtered: int = 0, dismissed: int = 0, stale: int = 0, sort: str = "score"):
     days = load_search_config().get("staleness_days", 14)
     exclude = ("unavailable", "rejected") if not (status or dismissed) else ()
+    sort = sort if sort in db.SORT_ORDERS else "score"
     with db.connect() as conn:
         if dismissed:
             jobs = db.list_jobs(conn, status=status or None, min_score=min_score,
                                 filtered=None, dismissed=True, staleness_days=days,
-                                exclude_statuses=exclude)
+                                exclude_statuses=exclude, sort=sort)
         else:
             jobs = db.list_jobs(conn, status=status or None, min_score=min_score,
                                 filtered=filtered, dismissed=False, staleness_days=days,
-                                exclude_statuses=exclude)
+                                exclude_statuses=exclude, sort=sort)
         if stale:
             jobs = [j for j in jobs if j["is_stale"]]
         counts = db.status_counts(conn)
@@ -53,6 +54,7 @@ def dashboard(request: Request, status: str | None = None, min_score: int = 0,
             "filtered": filtered,
             "dismissed": dismissed,
             "stale": stale,
+            "sort": sort,
             "n_filtered": n_filtered,
             "n_dismissed": n_dismissed,
             "n_stale": n_stale,

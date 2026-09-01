@@ -1,34 +1,42 @@
 {% extends "base.html" %}
 {% block content %}
+{% set sort_qs = '&sort=' + sort if sort and sort != 'score' else '' %}
 <div class="filters">
-  <span class="pill">{{ total }} tracked</span>
+  <span class="pill">{{ total }} tracked · {{ jobs|length }} shown</span>
   {% for s in statuses %}
-    <a class="pill" href="/?status={{ s }}">{{ s }} · {{ counts.get(s, 0) }}</a>
+    <a class="pill" href="/?status={{ s }}{{ sort_qs }}">{{ s }} · {{ counts.get(s, 0) }}</a>
   {% endfor %}
-  {% if active_status %}<a class="pill" href="/">✕ clear</a>{% endif %}
+  {% if active_status %}<a class="pill" href="/{{ ('?' + sort_qs[1:]) if sort_qs else '' }}">✕ clear</a>{% endif %}
   <span class="grow"></span>
   {% if filtered or dismissed or stale %}
-    <a class="pill" href="/" style="border-color:var(--accent)">← back to main list</a>
+    <a class="pill" href="/{{ ('?' + sort_qs[1:]) if sort_qs else '' }}" style="border-color:var(--accent)">← back to main list</a>
   {% else %}
-    <a class="pill" href="/?filtered=1" title="auto-hidden: senior / too many years / low score">🕳 filtered · {{ n_filtered }}</a>
-    <a class="pill" href="/?dismissed=1" title="jobs you explicitly rejected">👎 dismissed · {{ n_dismissed }}</a>
-    <a class="pill" href="/?stale=1" title="not seen in recent fetches — posting likely taken down"{% if n_stale %} style="border-color:var(--danger)"{% endif %}>⚠ stale · {{ n_stale }}</a>
+    <a class="pill" href="/?filtered=1{{ sort_qs }}" title="auto-hidden: senior / too many years / low score">🕳 filtered · {{ n_filtered }}</a>
+    <a class="pill" href="/?dismissed=1{{ sort_qs }}" title="jobs you explicitly rejected">👎 dismissed · {{ n_dismissed }}</a>
+    <a class="pill" href="/?stale=1{{ sort_qs }}" title="not seen in recent fetches — posting likely taken down"{% if n_stale %} style="border-color:var(--danger)"{% endif %}>⚠ stale · {{ n_stale }}</a>
   {% endif %}
+  <span class="muted">sort</span>
+  <a class="pill{% if not sort or sort == 'score' %} on{% endif %}"
+     href="/?{% if active_status %}status={{ active_status }}&{% endif %}{% if min_score %}min_score={{ min_score }}&{% endif %}{% if filtered %}filtered=1&{% endif %}{% if dismissed %}dismissed=1&{% endif %}{% if stale %}stale=1&{% endif %}sort=score">score</a>
+  <a class="pill{% if sort == 'fetched_at' %} on{% endif %}"
+     href="/?{% if active_status %}status={{ active_status }}&{% endif %}{% if min_score %}min_score={{ min_score }}&{% endif %}{% if filtered %}filtered=1&{% endif %}{% if dismissed %}dismissed=1&{% endif %}{% if stale %}stale=1&{% endif %}sort=fetched_at">newest added</a>
   <form method="get" style="margin:0; display:flex; gap:8px; align-items:center;">
     <label class="muted">min score</label>
     <input type="number" name="min_score" value="{{ min_score }}" style="width:70px; background:var(--panel); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:5px;">
     {% if active_status %}<input type="hidden" name="status" value="{{ active_status }}">{% endif %}
+    {% if sort and sort != 'score' %}<input type="hidden" name="sort" value="{{ sort }}">{% endif %}
     <button class="ghost" type="submit">apply</button>
   </form>
 </div>
 
 <table>
   <thead>
-    <tr><th>Score</th><th>LLM</th><th>Role</th><th>Company</th><th>Location</th><th>Why</th><th>You</th><th>Status</th><th>Docs</th></tr>
+    <tr><th>#</th><th>Score</th><th>LLM</th><th>Role</th><th>Company</th><th>Location</th><th>Added</th><th>Why</th><th>You</th><th>Status</th><th>Docs</th></tr>
   </thead>
   <tbody>
   {% for j in jobs %}
     <tr>
+      <td class="muted">{{ loop.index }}</td>
       <td class="score">{{ j["score"] }}</td>
       <td>
         {% if j["llm_score"] is not none %}
@@ -46,6 +54,7 @@
           <div class="muted" style="font-size:12px">{{ j["contract_type"] }} · {{ j["language"] }}</div></td>
       <td>{{ j["company"] }}</td>
       <td class="muted">{{ j["location"] }}</td>
+      <td class="muted" style="white-space:nowrap" title="{{ j['fetched_at'] }}">{{ j["fetched_at"][:10] if j["fetched_at"] else "—" }}</td>
       <td class="reasons">{% if filtered and j["filter_reason"] %}<span style="color:var(--danger)">{{ j["filter_reason"] }}</span><br>{% endif %}{{ j["match_reasons"] }}</td>
       <td class="feedback">
         {% if dismissed %}
@@ -99,7 +108,7 @@
       </td>
     </tr>
   {% else %}
-    <tr><td colspan="9" class="muted">{% if dismissed %}No dismissed jobs.{% elif filtered %}Nothing in the Filtered bucket.{% elif stale %}No stale jobs — all postings are still appearing.{% else %}No jobs yet. Click “Fetch new jobs”.{% endif %}</td></tr>
+    <tr><td colspan="11" class="muted">{% if dismissed %}No dismissed jobs.{% elif filtered %}Nothing in the Filtered bucket.{% elif stale %}No stale jobs — all postings are still appearing.{% else %}No jobs yet. Click “Fetch new jobs”.{% endif %}</td></tr>
   {% endfor %}
   </tbody>
 </table>
