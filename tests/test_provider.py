@@ -16,6 +16,7 @@ def test_backend_falls_back_to_cli(monkeypatch):
 def test_unavailable_raises(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setattr(provider.shutil, "which", lambda name: None)
+    monkeypatch.setattr(provider, "_CLI_FALLBACKS", [])   # don't leak the real machine's claude
     assert provider.available() is False
     assert provider.backend() == "none"
     try:
@@ -23,6 +24,18 @@ def test_unavailable_raises(monkeypatch):
         assert False, "should have raised"
     except provider.LLMUnavailable:
         pass
+
+
+def test_cli_falls_back_to_known_install_paths(monkeypatch, tmp_path):
+    # Simulates cron's bare PATH: `which` finds nothing, but the binary exists at a
+    # known fallback location (e.g. ~/.local/bin, where the claude CLI installs).
+    fake_claude = tmp_path / "claude"
+    fake_claude.write_text("#!/bin/sh\necho hi")
+    monkeypatch.setattr(provider.shutil, "which", lambda name: None)
+    monkeypatch.setattr(provider, "_CLI_FALLBACKS", [fake_claude])
+    assert provider._has_cli() is True
+    assert provider._cli_path() == str(fake_claude)
+    assert provider.backend() == "claude-cli"
 
 
 def test_generate_json_extracts_object(monkeypatch):

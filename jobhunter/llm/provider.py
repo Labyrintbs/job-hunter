@@ -14,8 +14,17 @@ import os
 import re
 import shutil
 import subprocess
+from pathlib import Path
 
 DEFAULT_TIMEOUT = 180
+
+# cron runs with a bare minimal PATH that won't include where `claude` actually lives
+# (e.g. ~/.local/bin), so PATH-only lookup silently disables the judge under cron.
+_CLI_FALLBACKS = [
+    Path.home() / ".local" / "bin" / "claude",
+    Path("/opt/homebrew/bin/claude"),
+    Path("/usr/local/bin/claude"),
+]
 
 
 class LLMUnavailable(RuntimeError):
@@ -26,8 +35,18 @@ def _has_api_key() -> bool:
     return bool(os.environ.get("ANTHROPIC_API_KEY"))
 
 
+def _cli_path() -> str | None:
+    found = shutil.which("claude")
+    if found:
+        return found
+    for p in _CLI_FALLBACKS:
+        if p.exists():
+            return str(p)
+    return None
+
+
 def _has_cli() -> bool:
-    return shutil.which("claude") is not None
+    return _cli_path() is not None
 
 
 def available() -> bool:
@@ -56,7 +75,7 @@ def _generate_api(prompt: str, system: str | None, max_tokens: int) -> str:
 
 
 def _generate_cli(prompt: str, system: str | None, timeout: int) -> str:
-    cmd = ["claude", "-p", prompt]
+    cmd = [_cli_path() or "claude", "-p", prompt]
     if system:
         cmd += ["--append-system-prompt", system]
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
