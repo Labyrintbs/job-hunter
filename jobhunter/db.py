@@ -309,10 +309,11 @@ def add_fetch_run(conn: sqlite3.Connection, stats: dict) -> int:
 
 def list_jobs(conn: sqlite3.Connection, status: str | None = None, min_score: int = 0,
               filtered: int | None = 0, dismissed: bool | None = False,
-              staleness_days: int = 14) -> list[sqlite3.Row]:
+              staleness_days: int = 14, exclude_statuses: tuple = ()) -> list[sqlite3.Row]:
     """filtered=0 (default) shows the main list, filtered=1 the auto-hidden bucket,
     filtered=None shows both. dismissed=False (default) hides jobs you rejected,
     dismissed=True shows only those, dismissed=None ignores the label.
+    exclude_statuses hides those statuses unless `status` names one of them.
     Adds computed `is_stale` / `days_since_seen` (relative to the latest fetch run)."""
     q = """
         SELECT j.*, a.status, a.notes, a.submitted_url, a.cover_letter_path,
@@ -341,6 +342,10 @@ def list_jobs(conn: sqlite3.Connection, status: str | None = None, min_score: in
     if status:
         q += " AND a.status = ?"
         params.append(status)
+    elif exclude_statuses:
+        marks = ",".join("?" for _ in exclude_statuses)
+        q += f" AND a.status NOT IN ({marks})"
+        params.extend(exclude_statuses)
     q += " ORDER BY j.score DESC, j.fetched_at DESC"
     return conn.execute(q, params).fetchall()
 

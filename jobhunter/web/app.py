@@ -25,13 +25,16 @@ def _startup() -> None:
 def dashboard(request: Request, status: str | None = None, min_score: int = 0,
               filtered: int = 0, dismissed: int = 0, stale: int = 0):
     days = load_search_config().get("staleness_days", 14)
+    exclude = ("unavailable", "rejected") if not (status or dismissed) else ()
     with db.connect() as conn:
         if dismissed:
             jobs = db.list_jobs(conn, status=status or None, min_score=min_score,
-                                filtered=None, dismissed=True, staleness_days=days)
+                                filtered=None, dismissed=True, staleness_days=days,
+                                exclude_statuses=exclude)
         else:
             jobs = db.list_jobs(conn, status=status or None, min_score=min_score,
-                                filtered=filtered, dismissed=False, staleness_days=days)
+                                filtered=filtered, dismissed=False, staleness_days=days,
+                                exclude_statuses=exclude)
         if stale:
             jobs = [j for j in jobs if j["is_stale"]]
         counts = db.status_counts(conn)

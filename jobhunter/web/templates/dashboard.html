@@ -55,6 +55,7 @@
           <div style="display:flex; gap:4px">
             <button class="ghost{% if j['user_label']=='interested' %} on{% endif %}" style="padding:3px 8px" onclick="toggleLikes({{ j['id'] }})" title="interested{% if filtered %} — restores to main list{% endif %}">👍</button>
             <button class="ghost" style="padding:3px 8px" onclick="toggleChips({{ j['id'] }})" title="dismiss with a reason">👎</button>
+            <button class="ghost" style="padding:3px 8px" onclick="dismissJob({{ j['id'] }}, '')" title="hide — no reason">✕</button>
           </div>
           <div id="likes-{{ j['id'] }}" class="chipbar" style="display:none">
             <input id="like-input-{{ j['id'] }}" class="reason-input" placeholder="why you like it (optional)" onkeydown="if(event.key==='Enter')submitLike({{ j['id'] }})">

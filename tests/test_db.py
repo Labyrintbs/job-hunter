@@ -97,6 +97,18 @@ def test_feedback_dismiss_hides_from_main(tmp_db):
         assert [r["id"] for r in db.labeled_jobs(conn, "dismissed")] == [drop]
 
 
+def test_exclude_statuses_hides_but_pill_shows(tmp_db):
+    with db.connect() as conn:
+        keep, _ = db.upsert_job(conn, J("1", title="ML Engineer A", url="http://x/1"), 60, "r")
+        dead, _ = db.upsert_job(conn, J("2", title="ML Engineer B", url="http://x/2"), 60, "r")
+        db.update_status(conn, dead, "unavailable")
+        assert [r["id"] for r in db.list_jobs(conn, exclude_statuses=("unavailable", "rejected"))] == [keep]
+        assert [r["id"] for r in db.list_jobs(conn, status="unavailable")] == [dead]
+        db.update_status(conn, dead, "rejected")
+        assert [r["id"] for r in db.list_jobs(conn, exclude_statuses=("unavailable", "rejected"))] == [keep]
+        assert [r["id"] for r in db.list_jobs(conn, status="rejected")] == [dead]
+
+
 def test_interested_rescues_from_filtered(tmp_db):
     with db.connect() as conn:
         jid, _ = db.upsert_job(conn, J("1", url="http://x/1"), 55, "r",
