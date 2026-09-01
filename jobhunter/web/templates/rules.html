@@ -5,7 +5,7 @@
   <span class="pill">{{ pending|length }} pending</span>
   <span class="muted">learned from {{ n_dismissed }} dismissed jobs</span>
   {% if metrics.interested %}
-  <span class="pill" title="of your interested jobs, how many the screen had auto-hidden — high means too aggressive"{% if metrics.false_negative_rate >= 0.3 %} style="border-color:#a55"{% endif %}>
+  <span class="pill" title="of your interested jobs, how many the screen had auto-hidden — high means too aggressive"{% if metrics.false_negative_rate >= 0.3 %} style="border-color:var(--tag-red)"{% endif %}>
     false-neg {{ metrics.false_negatives }}/{{ metrics.interested }} ({{ metrics.false_negative_rate }})
   </span>
   {% endif %}

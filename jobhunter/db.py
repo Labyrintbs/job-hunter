@@ -18,6 +18,7 @@ STATUSES = [
     "interview",
     "offer",
     "rejected",
+    "unavailable",
 ]
 
 SCHEMA = """
@@ -147,6 +148,7 @@ MIGRATIONS = {
         "filter_reason": "TEXT DEFAULT ''",
         "user_label": "TEXT DEFAULT ''",
         "dismiss_reasons": "TEXT DEFAULT ''",
+        "interested_reasons": "TEXT DEFAULT ''",
         "labeled_at": "TEXT DEFAULT ''",
         "description_full": "INTEGER DEFAULT 0",
         "was_filtered": "INTEGER DEFAULT 0",
@@ -407,18 +409,20 @@ def set_feedback(conn: sqlite3.Connection, job_id: int, label: str, reasons: str
     if label == "dismissed":
         conn.execute(
             "UPDATE jobs SET user_label = 'dismissed', dismiss_reasons = ?, "
-            "labeled_at = datetime('now') WHERE id = ?",
+            "interested_reasons = '', labeled_at = datetime('now') WHERE id = ?",
             (reasons, job_id),
         )
     elif label == "interested":
         conn.execute(
             "UPDATE jobs SET user_label = 'interested', dismiss_reasons = '', "
-            "filtered = 0, filter_reason = '', labeled_at = datetime('now') WHERE id = ?",
-            (job_id,),
+            "interested_reasons = ?, filtered = 0, filter_reason = '', "
+            "labeled_at = datetime('now') WHERE id = ?",
+            (reasons, job_id),
         )
     else:
         conn.execute(
-            "UPDATE jobs SET user_label = '', dismiss_reasons = '', labeled_at = '' WHERE id = ?",
+            "UPDATE jobs SET user_label = '', dismiss_reasons = '', "
+            "interested_reasons = '', labeled_at = '' WHERE id = ?",
             (job_id,),
         )
 

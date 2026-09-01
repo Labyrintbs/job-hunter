@@ -12,7 +12,7 @@
   {% else %}
     <a class="pill" href="/?filtered=1" title="auto-hidden: senior / too many years / low score">🕳 filtered · {{ n_filtered }}</a>
     <a class="pill" href="/?dismissed=1" title="jobs you explicitly rejected">👎 dismissed · {{ n_dismissed }}</a>
-    <a class="pill" href="/?stale=1" title="not seen in recent fetches — posting likely taken down"{% if n_stale %} style="border-color:#c88"{% endif %}>⚠ stale · {{ n_stale }}</a>
+    <a class="pill" href="/?stale=1" title="not seen in recent fetches — posting likely taken down"{% if n_stale %} style="border-color:var(--danger)"{% endif %}>⚠ stale · {{ n_stale }}</a>
   {% endif %}
   <form method="get" style="margin:0; display:flex; gap:8px; align-items:center;">
     <label class="muted">min score</label>
@@ -40,28 +40,34 @@
       </td>
       <td>{% if j["url"] %}<a href="{{ j['url'] }}" target="_blank" rel="noopener">{{ j["title"] }}</a>{% else %}{{ j["title"] }}{% endif %}
           {% if j["description_full"] %}<span title="full description fetched">📄</span>{% endif %}
-          {% if j["seniority"] == "senior" %}<span class="pill" style="font-size:10px; padding:1px 6px; border-color:#a55">senior</span>{% elif j["seniority"] == "junior" %}<span class="pill" style="font-size:10px; padding:1px 6px; border-color:#5a5">junior</span>{% endif %}
+          {% if j["seniority"] == "senior" %}<span class="pill" style="font-size:10px; padding:1px 6px; border-color:var(--tag-red)">senior</span>{% elif j["seniority"] == "junior" %}<span class="pill" style="font-size:10px; padding:1px 6px; border-color:var(--tag-green)">junior</span>{% endif %}
           {% if j["min_years"] %}<span class="muted" style="font-size:11px">· {{ j["min_years"] }}+ yrs</span>{% endif %}
-          {% if j["is_stale"] %}<span class="pill" style="font-size:10px; padding:1px 6px; border-color:#c88; color:#c88" title="not seen for {{ j['days_since_seen'] }} days — likely delisted">⚠ stale {{ j['days_since_seen'] }}d</span>{% endif %}
+          {% if j["is_stale"] %}<span class="pill" style="font-size:10px; padding:1px 6px; border-color:var(--danger); color:var(--danger)" title="not seen for {{ j['days_since_seen'] }} days — likely delisted">⚠ stale {{ j['days_since_seen'] }}d</span>{% endif %}
           <div class="muted" style="font-size:12px">{{ j["contract_type"] }} · {{ j["language"] }}</div></td>
       <td>{{ j["company"] }}</td>
       <td class="muted">{{ j["location"] }}</td>
-      <td class="reasons">{% if filtered and j["filter_reason"] %}<span style="color:#c88">{{ j["filter_reason"] }}</span><br>{% endif %}{{ j["match_reasons"] }}</td>
+      <td class="reasons">{% if filtered and j["filter_reason"] %}<span style="color:var(--danger)">{{ j["filter_reason"] }}</span><br>{% endif %}{{ j["match_reasons"] }}</td>
       <td class="feedback">
         {% if dismissed %}
-          <div class="muted" style="font-size:11px">{{ j["dismiss_reasons"] }}</div>
+          <div class="muted" style="font-size:11px">{{ j["dismiss_reasons"]|replace('custom:', '') }}</div>
           <button class="ghost" style="padding:3px 8px; font-size:12px" onclick="clearFeedback({{ j['id'] }})">↩ undo</button>
         {% else %}
           <div style="display:flex; gap:4px">
-            <button class="ghost{% if j['user_label']=='interested' %} on{% endif %}" style="padding:3px 8px" onclick="markInterested(this, {{ j['id'] }})" title="interested{% if filtered %} — restores to main list{% endif %}">👍</button>
+            <button class="ghost{% if j['user_label']=='interested' %} on{% endif %}" style="padding:3px 8px" onclick="toggleLikes({{ j['id'] }})" title="interested{% if filtered %} — restores to main list{% endif %}">👍</button>
             <button class="ghost" style="padding:3px 8px" onclick="toggleChips({{ j['id'] }})" title="dismiss with a reason">👎</button>
+          </div>
+          <div id="likes-{{ j['id'] }}" class="chipbar" style="display:none">
+            <input id="like-input-{{ j['id'] }}" class="reason-input" placeholder="why you like it (optional)" onkeydown="if(event.key==='Enter')submitLike({{ j['id'] }})">
+            <button class="chip" onclick="submitLike({{ j['id'] }})">✓ ok</button>
           </div>
           <div id="chips-{{ j['id'] }}" class="chipbar" style="display:none">
             {% for r in dismiss_reasons %}
               <button class="chip" onclick="dismissJob({{ j['id'] }}, '{{ r }}')">{{ r.replace('_', ' ') }}</button>
             {% endfor %}
+            <input id="dismiss-input-{{ j['id'] }}" class="reason-input" placeholder="your own reason" onkeydown="if(event.key==='Enter')submitDismissCustom({{ j['id'] }})">
+            <button class="chip" onclick="submitDismissCustom({{ j['id'] }})">✓ ok</button>
           </div>
-          {% if j['user_label']=='interested' %}<span class="pill" style="border-color:#5a5; color:#8d8; font-size:10px">interested</span>{% endif %}
+          {% if j['user_label']=='interested' %}<span class="pill" style="border-color:var(--ok-border); color:var(--ok-fg); font-size:10px">interested{% if j['interested_reasons'] %} · {{ j['interested_reasons']|replace('custom:', '') }}{% endif %}</span>{% endif %}
         {% endif %}
       </td>
       <td>

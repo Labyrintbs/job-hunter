@@ -5,7 +5,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Job Hunter{% endblock %}</title>
   <style>
-    :root { --bg:#0f1115; --panel:#171a21; --line:#262b36; --fg:#e6e9ef; --muted:#8b94a7; --accent:#6ea8fe; }
+    :root {
+      --bg:#0f1115; --panel:#171a21; --line:#262b36; --fg:#e6e9ef; --muted:#8b94a7; --accent:#6ea8fe;
+      --btn-fg:#0b0d12; --tag-red:#a55; --tag-green:#5a5; --ok-fg:#8d8; --ok-border:#5a5;
+      --danger:#c88; --chip-hover-bd:#c66; --chip-hover-fg:#e99;
+    }
+    [data-theme="light"] {
+      --bg:#f5f6f8; --panel:#ffffff; --line:#d8dce2; --fg:#1b1e24; --muted:#5b6472; --accent:#2563eb;
+      --btn-fg:#ffffff; --tag-red:#b3352b; --tag-green:#1e7d3a; --ok-fg:#1e7d3a; --ok-border:#1e7d3a;
+      --danger:#b3352b; --chip-hover-bd:#b3352b; --chip-hover-fg:#b3352b;
+    }
     * { box-sizing: border-box; }
     body { margin:0; font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--fg); }
     header { display:flex; align-items:center; gap:16px; padding:14px 22px; border-bottom:1px solid var(--line); position:sticky; top:0; background:var(--bg); z-index:5; }
@@ -15,7 +24,7 @@
     .grow { flex:1; }
     main { padding:22px; }
     a { color:var(--accent); }
-    button, .btn { background:var(--accent); color:#0b0d12; border:0; padding:7px 13px; border-radius:7px; font-weight:600; cursor:pointer; }
+    button, .btn { background:var(--accent); color:var(--btn-fg); border:0; padding:7px 13px; border-radius:7px; font-weight:600; cursor:pointer; }
     button.ghost { background:var(--panel); color:var(--fg); border:1px solid var(--line); }
     select { background:var(--panel); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:5px 8px; }
     .pill { display:inline-block; padding:2px 9px; border-radius:999px; font-size:12px; background:var(--panel); border:1px solid var(--line); color:var(--muted); }
@@ -27,11 +36,13 @@
     .muted { color:var(--muted); }
     .reasons { color:var(--muted); font-size:12px; max-width:340px; }
     .filters { display:flex; gap:10px; align-items:center; margin-bottom:16px; flex-wrap:wrap; }
-    button.ghost.on { border-color:#5a5; color:#8d8; }
+    button.ghost.on { border-color:var(--ok-border); color:var(--ok-fg); }
     .chipbar { display:flex; flex-wrap:wrap; gap:4px; margin-top:5px; max-width:220px; }
     .chip { background:transparent; color:var(--muted); border:1px solid var(--line); border-radius:999px; padding:2px 8px; font-size:11px; font-weight:500; cursor:pointer; }
-    .chip:hover { border-color:#c66; color:#e99; }
+    .chip:hover { border-color:var(--chip-hover-bd); color:var(--chip-hover-fg); }
+    .reason-input { background:var(--panel); color:var(--fg); border:1px solid var(--line); border-radius:999px; padding:2px 8px; font-size:11px; width:110px; }
   </style>
+  <script>document.documentElement.dataset.theme = localStorage.getItem('jh-theme') || 'dark';</script>
 </head>
 <body>
   <header>
@@ -42,12 +53,18 @@
       <a href="/rules" class="{% if request.url.path == '/rules' %}active{% endif %}">Rules</a>
     </nav>
     <span class="grow"></span>
+    <button class="ghost" onclick="toggleTheme()" title="toggle light / dark theme">🌓</button>
     <form method="post" action="/run/fetch" style="margin:0">
       <button type="submit">⟳ Fetch new jobs</button>
     </form>
   </header>
   <main>{% block content %}{% endblock %}</main>
   <script>
+    function toggleTheme() {
+      const cur = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+      document.documentElement.dataset.theme = cur;
+      localStorage.setItem('jh-theme', cur);
+    }
     async function setStatus(sel, jobId) {
       const body = new URLSearchParams({ job_id: jobId, status: sel.value });
       const r = await fetch('/status', { method:'POST', body });
@@ -74,12 +91,21 @@
       if (r.ok) location.reload();
       return r.ok;
     }
-    const markInterested = (btn, id) => sendFeedback(id, 'interested', '');
+    function toggleBar(id) {
+      const e = document.getElementById(id);
+      e.style.display = e.style.display === 'none' ? 'flex' : 'none';
+    }
+    const toggleLikes = (id) => toggleBar('likes-' + id);
+    const toggleChips = (id) => toggleBar('chips-' + id);
     const dismissJob = (id, reason) => sendFeedback(id, 'dismissed', reason);
     const clearFeedback = (id) => sendFeedback(id, '', '');
-    function toggleChips(id) {
-      const e = document.getElementById('chips-' + id);
-      e.style.display = e.style.display === 'none' ? 'flex' : 'none';
+    function submitLike(id) {
+      const t = (document.getElementById('like-input-' + id).value || '').trim();
+      sendFeedback(id, 'interested', t ? 'custom:' + t : '');
+    }
+    function submitDismissCustom(id) {
+      const t = (document.getElementById('dismiss-input-' + id).value || '').trim();
+      if (t) sendFeedback(id, 'dismissed', 'custom:' + t);
     }
     const approveRule = (btn, id) => runAction(btn, '/rules/' + id + '/approve', d => d.ok);
     const rejectRule = (btn, id) => runAction(btn, '/rules/' + id + '/reject', d => d.ok);
