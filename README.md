@@ -18,11 +18,13 @@ cover letter per job, and track every application from a local web dashboard.
   into a Filtered bucket (never deleted — reviewable and restorable). A
   junior/new-grad title always overrides the gate; below-`min_score` jobs land
   there too. `jobhunter list --filtered` or the 🕳 filtered pill in the dashboard.
-- **Lazy enrichment**: LinkedIn guest cards carry no description; for jobs you've
-  engaged with (marked interested, or moved past `new`) the full text is fetched
-  on demand — LinkedIn via its guest detail endpoint, others via the job page —
-  and written back so the judge and learning phases have real content.
-  CLI: `jobhunter enrich [<id>]`; runs automatically (bounded) in `jobhunter run`.
+- **Enrichment**: LinkedIn guest cards and SmartRecruiters carry no description, and
+  WTTJ's profile field is sometimes empty; `jobhunter run` fetches the full text for
+  every new job automatically (LinkedIn via its guest detail endpoint, others via the
+  job page), re-scores it with that real content, and writes it back — so the rule
+  score, the judge, and any local corpus built from the DB all see actual JD text, not
+  just the title. Older/backlog jobs you engage with later (marked interested, or moved
+  past `new`) are enriched lazily the same way. CLI: `jobhunter enrich [<id>]`.
 - **LLM fit-judge** (Claude): 0–100 score + verdict + reasons + seniority read
   (`seniority`, `min_years_required`), junior-calibrated.
 - **LaTeX CV auto-tailoring**: reorders your projects/experience by relevance to

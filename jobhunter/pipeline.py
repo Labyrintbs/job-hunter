@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 from . import db, enrich, match
 from .apply import cover_letter
 from .config import load_companies, load_search_config
@@ -81,11 +83,16 @@ def run_fetch(config: dict | None = None, jobs: list | None = None) -> dict:
 
 
 def daily_run(judge: bool = True, judge_min_score: int = 40, judge_limit: int = 15) -> dict:
-    """One scheduled run: fetch everywhere, then LLM-judge the new promising jobs
-    (highest rule-score first, capped to bound cost). Returns a summary including
-    the new job rows (for notification)."""
+    """One scheduled run: fetch everywhere, enrich every new job with real JD content
+    (LinkedIn/SmartRecruiters cards carry none up front), re-score with that content,
+    THEN LLM-judge the new promising jobs (highest rule-score first, capped to bound
+    cost) so the judge sees real descriptions instead of title-only stubs. Returns a
+    summary including the new job rows (for notification)."""
     config = load_search_config()
     stats = run_fetch(config)
+
+    new_enriched = enrich_new(stats["new_ids"])["enriched"]
+    engaged_enriched = enrich_pending(limit=10)["enriched"]
 
     judged = 0
     if judge and provider.available():
@@ -102,18 +109,19 @@ def daily_run(judge: bool = True, judge_min_score: int = 40, judge_limit: int = 
             except Exception as exc:
                 print(f"  judge warn: job {jid} failed: {exc}")
 
-    enriched = enrich_pending(limit=10)["enriched"]
-
     with db.connect() as conn:
         new_rows = [dict(db.get_job(conn, jid)) for jid in stats["new_ids"]]
 
     notified = notify_dispatch.send(new_rows, config)
-    return {**stats, "judged": judged, "enriched": enriched,
+    return {**stats, "judged": judged, "enriched": new_enriched + engaged_enriched,
             "new_rows": new_rows, "notified": notified}
 
 
 def enrich_one(job_id: int) -> dict:
-    """Fetch the full description for one job and store it."""
+    """Fetch the full description for one job, store it, and re-score with that content
+    (title-only scoring becomes content-aware once the JD lands -- this can also move a
+    job into/out of the Filtered bucket, e.g. a '5+ years' requirement only visible in
+    the body)."""
     db.init_db()
     with db.connect() as conn:
         row = db.get_job(conn, job_id)
@@ -123,9 +131,17 @@ def enrich_one(job_id: int) -> dict:
     text = enrich.fetch_full_text(source, ext, url)
     if not text:
         return {"job_id": job_id, "enriched": False}
+    config = load_search_config()
     with db.connect() as conn:
         db.set_description(conn, job_id, text)
-    return {"job_id": job_id, "enriched": True, "chars": len(text)}
+        job = db.job_from_row(db.get_job(conn, job_id))
+        cfg = {**config, "_active_rules": [dict(r) for r in db.active_rules(conn)]}
+        s = match.screen(job, cfg)
+        db.update_screening(conn, job_id, s.score, s.reasons, filtered=s.filtered,
+                            filter_reason=s.filter_reason, seniority=s.seniority,
+                            min_years=s.min_years)
+    return {"job_id": job_id, "enriched": True, "chars": len(text),
+            "score": s.score, "filtered": s.filtered}
 
 
 def enrich_pending(limit: int = 20) -> dict:
@@ -135,6 +151,29 @@ def enrich_pending(limit: int = 20) -> dict:
         pending = [dict(r) for r in db.jobs_needing_enrichment(conn, limit)]
     enriched = 0
     for r in pending:
+        try:
+            if enrich_one(r["id"]).get("enriched"):
+                enriched += 1
+        except Exception as exc:
+            print(f"  enrich warn: job {r['id']} failed: {exc}")
+    return {"candidates": len(pending), "enriched": enriched}
+
+
+def enrich_new(job_ids: list[int]) -> dict:
+    """Enrich every job from this run's fresh crop that still lacks a real description
+    (LinkedIn guest cards and SmartRecruiters give none up front; WTTJ's profile field
+    is sometimes empty). Unlike enrich_pending this isn't gated on engagement -- every
+    new posting gets its full JD saved locally, which is what backs the rule-score
+    content signal, the LLM judge, and any downstream corpus (e.g. embeddings) built
+    from the DB. Throttled since it now includes LinkedIn's guest endpoint
+    unconditionally rather than only for jobs you've engaged with."""
+    db.init_db()
+    with db.connect() as conn:
+        pending = [dict(r) for r in db.jobs_by_id_needing_enrichment(conn, job_ids)]
+    enriched = 0
+    for i, r in enumerate(pending):
+        if i:
+            time.sleep(1.0)
         try:
             if enrich_one(r["id"]).get("enriched"):
                 enriched += 1

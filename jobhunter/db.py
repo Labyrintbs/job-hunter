@@ -343,6 +343,35 @@ def list_jobs(conn: sqlite3.Connection, status: str | None = None, min_score: in
     return conn.execute(q, params).fetchall()
 
 
+def jobs_by_id_needing_enrichment(conn: sqlite3.Connection, job_ids: list[int]) -> list[sqlite3.Row]:
+    """Given a specific set of job ids (e.g. one run's freshly-inserted postings), those
+    still lacking a real description -- independent of engagement. Backs the local JD
+    corpus for every new posting, not just ones you've acted on."""
+    if not job_ids:
+        return []
+    marks = ",".join("?" for _ in job_ids)
+    return conn.execute(
+        f"SELECT id, source, external_id, url FROM jobs "
+        f"WHERE id IN ({marks}) AND COALESCE(description_full, 0) = 0",
+        job_ids,
+    ).fetchall()
+
+
+def update_screening(conn: sqlite3.Connection, job_id: int, score: int, reasons: str, *,
+                     filtered: bool, filter_reason: str, seniority: str,
+                     min_years: int | None) -> None:
+    """Refresh score/screening after enrichment adds real JD content -- a job scored on
+    title alone (LinkedIn cards, thin WTTJ profiles) becomes content-aware once the
+    description lands, which can also flip its filtered bucket (e.g. a '5+ years'
+    requirement only visible in the body)."""
+    conn.execute(
+        """UPDATE jobs SET score = ?, match_reasons = ?, filtered = ?, filter_reason = ?,
+           seniority = ?, min_years = ?,
+           was_filtered = CASE WHEN ? THEN 1 ELSE was_filtered END WHERE id = ?""",
+        (score, reasons, int(filtered), filter_reason, seniority, min_years, int(filtered), job_id),
+    )
+
+
 def set_filtered(conn: sqlite3.Connection, job_id: int, filtered: bool, reason: str = "") -> None:
     conn.execute(
         "UPDATE jobs SET filtered = ?, filter_reason = ? WHERE id = ?",

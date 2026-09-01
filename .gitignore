@@ -1,7 +1,10 @@
 .venv/
 __pycache__/
 *.pyc
+.env
+.env.*
 data/*.db
+data/*.log
 data/cv/
 data/export/
 data/notifications/
