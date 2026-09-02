@@ -446,6 +446,11 @@ def dismissed_count(conn: sqlite3.Connection) -> int:
     ).fetchone()[0]
 
 
+def last_fetch_at(conn: sqlite3.Connection) -> str | None:
+    """UTC timestamp string of the most recent fetch_runs row, or None if never run."""
+    return conn.execute("SELECT MAX(ran_at) FROM fetch_runs").fetchone()[0]
+
+
 def stale_count(conn: sqlite3.Connection, staleness_days: int = 14) -> int:
     """Jobs not seen in `staleness_days` relative to the latest fetch run (likely delisted)."""
     return conn.execute(

@@ -13,6 +13,7 @@ from pathlib import Path
 from .config import REPO_ROOT
 
 MARKER = "# jobhunter-daily"
+WATCHDOG_MARKER = "# jobhunter-watchdog"
 
 
 def _python() -> str:
@@ -49,18 +50,18 @@ def _write_crontab(content: str) -> None:
     subprocess.run(["crontab", "-"], input=content, text=True, check=True)
 
 
-def without_marker(existing: str) -> str:
-    return "\n".join(l for l in existing.splitlines() if MARKER not in l)
+def without_marker(existing: str, marker: str = MARKER) -> str:
+    return "\n".join(l for l in existing.splitlines() if marker not in l)
 
 
-def with_entry(existing: str, line: str) -> str:
-    base = without_marker(existing).rstrip("\n")
+def with_entry(existing: str, line: str, marker: str = MARKER) -> str:
+    base = without_marker(existing, marker).rstrip("\n")
     return (base + "\n" if base else "") + line + "\n"
 
 
 def install(hour: int = 8, minute: int = 0) -> str:
     line = cron_line(hour, minute)
-    _write_crontab(with_entry(_read_crontab(), line))
+    _write_crontab(with_entry(_read_crontab(), line, MARKER))
     return line
 
 
@@ -68,7 +69,7 @@ def uninstall() -> bool:
     existing = _read_crontab()
     if MARKER not in existing:
         return False
-    remaining = without_marker(existing).strip()
+    remaining = without_marker(existing, MARKER).strip()
     _write_crontab(remaining + "\n" if remaining else "")
     return True
 
@@ -76,5 +77,35 @@ def uninstall() -> bool:
 def current() -> str | None:
     for l in _read_crontab().splitlines():
         if MARKER in l:
+            return l
+    return None
+
+
+def watchdog_cron_line(interval_hours: int = 1) -> str:
+    """Runs `jobhunter watchdog` every interval_hours; it self-checks staleness
+    and only refetches if the gap exceeds its own --max-gap-hours threshold."""
+    py = _python()
+    cmd = f"cd {REPO_ROOT} && {py} -m jobhunter.cli watchdog >> {REPO_ROOT}/data/watchdog_cron.log 2>&1"
+    return f"0 */{interval_hours} * * * {cmd} {WATCHDOG_MARKER}"
+
+
+def install_watchdog(interval_hours: int = 1) -> str:
+    line = watchdog_cron_line(interval_hours)
+    _write_crontab(with_entry(_read_crontab(), line, WATCHDOG_MARKER))
+    return line
+
+
+def uninstall_watchdog() -> bool:
+    existing = _read_crontab()
+    if WATCHDOG_MARKER not in existing:
+        return False
+    remaining = without_marker(existing, WATCHDOG_MARKER).strip()
+    _write_crontab(remaining + "\n" if remaining else "")
+    return True
+
+
+def current_watchdog() -> str | None:
+    for l in _read_crontab().splitlines():
+        if WATCHDOG_MARKER in l:
             return l
     return None

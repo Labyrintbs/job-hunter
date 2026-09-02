@@ -58,6 +58,14 @@ def main(argv: list[str] | None = None) -> int:
     p_cron = sub.add_parser("cron", help="manage the daily crontab entry")
     p_cron.add_argument("action", choices=["show", "install", "uninstall"], nargs="?", default="show")
     p_cron.add_argument("--time", default="08:00", help="HH:MM (default 08:00)")
+    p_cron.add_argument("--job", choices=["daily", "watchdog"], default="daily",
+                        help="which crontab entry to manage")
+    p_cron.add_argument("--interval-hours", type=int, default=1,
+                        help="watchdog check interval in hours (default 1)")
+
+    p_watchdog = sub.add_parser("watchdog", help="self-heal: refetch if the last run is "
+                                "older than --max-gap-hours (cron target)")
+    p_watchdog.add_argument("--max-gap-hours", type=float, default=6.0)
 
     p_notify = sub.add_parser("notify", help="send a digest of current top jobs to configured channels")
     p_notify.add_argument("--min-score", type=int, default=None, help="override notifications.min_score")
@@ -191,6 +199,17 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "cron":
+        if args.job == "watchdog":
+            if args.action == "install":
+                line = schedule.install_watchdog(args.interval_hours)
+                print(f"installed:\n  {line}")
+            elif args.action == "uninstall":
+                print("removed" if schedule.uninstall_watchdog() else "no watchdog entry found")
+            else:
+                cur = schedule.current_watchdog()
+                print(f"current:\n  {cur}" if cur else "not installed")
+                print(f"\nwould install:\n  {schedule.watchdog_cron_line(args.interval_hours)}")
+            return 0
         try:
             hour, minute = (int(x) for x in args.time.split(":"))
         except ValueError:
@@ -204,6 +223,17 @@ def main(argv: list[str] | None = None) -> int:
             cur = schedule.current()
             print(f"current:\n  {cur}" if cur else "not installed")
             print(f"\nwould install:\n  {schedule.cron_line(hour, minute)}")
+        return 0
+
+    if args.command == "watchdog":
+        from . import watchdog
+        result = watchdog.check_and_fetch(args.max_gap_hours)
+        if result["triggered"]:
+            s = result["summary"]
+            print(f"triggered catch-up fetch: fetched={s['fetched']} kept={s['kept']} new={s['new']}")
+        else:
+            gap = result["gap_hours"]
+            print(f"ok — last run {gap:.1f}h ago, no action needed" if gap is not None else "ok")
         return 0
 
     if args.command == "notify":
