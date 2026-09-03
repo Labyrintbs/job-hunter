@@ -1,7 +1,7 @@
 %-------------------------
 % Resume in LaTeX
 % Based on Jake Gutierrez template, customized for Hongming Fang
-% Tailored for: Implicity — Deep Learning Engineer, SaMD squad (Paris)
+% MASTER VERSION — full content, trim per application
 %------------------------
 
 \documentclass[letterpaper,12pt]{article}
@@ -134,7 +134,7 @@
     {Master of Science in Computer Science, Specialization in Image}{09/2024 -- 09/2026}
     {Sorbonne University}{Paris, France}
     \resumeItemListStart
-     \resumeItem{\textit{Major Modules}: Biomedical Imaging, Pattern Recognition and Machine Learning for Image Understanding, Advanced Methods for Computer Vision/Image Analysis, Image Processing, 3D Graphics Algorithms, Data Science}
+     \resumeItem{\textit{Major Modules}: Image Processing, 3D Graphics Algorithms, Data Science, Computer Architecture, Biomedical Imaging, Pattern Recognition and Machine Learning for Image Understanding, Advanced Methods for Computer Vision/Image Analysis}
      \resumeItem{Overall grade: 15.2/20 (M1) and 16.59/20 (M2, ongoing).}
     \resumeItemListEnd
 
@@ -146,54 +146,33 @@
     \resumeItemListEnd
   \resumeSubHeadingListEnd
 
-%-----------PROJECTS & RESEARCH-----------
-\section{PROJECTS \& RESEARCH EXPERIENCE}
-    \vspace{-5pt}
-    \resumeSubHeadingListStart
-
-    \resumeProjectHeadingFourItemResearch
-    {\textbf{Deep Learning for Classification of Colorectal Polyps}}{02/2025 -- 05/2025}
-    {Sorbonne University, Projet DIGIT}{Paris, France}
-
-    \projectdesc{Developed a binary classification system of colorectal polyps (adenomatous vs. hyperplastic) using CNNs on the clinical POLAR dataset.}
-    \resumeItemListStart
-      \resumeItem{Reviewed state-of-the-art CNN approaches for colorectal polyp classification and selected VGG-19 as backbone, preprocessed and restructured the dataset to ensure label consistency.}
-      \resumeItem{Applied transfer learning with data augmentation to mitigate severe class imbalance, improving hyperplastic polyp F1 from 0.148 to 0.351.}
-    \resumeItemListEnd
-
-    \resumeProjectHeadingFourItemResearch
-    {\textbf{Image and Point Cloud Analysis for Cultural Heritage}}{11/2025 -- 02/2026}{Sorbonne University, PRAT Project}{Paris, France}
-
-    \projectdesc{Comparative study of geometric (FPFH) and learning-based (SpinNet) descriptors for cross-modal 3D point cloud registration, aligning photogrammetry and laser scans of a 12-meter wooden relief from the Cernuschi Museum.}
-    \resumeItemListStart
-      \resumeItem{Built a coarse-to-fine registration pipeline in Open3D (scale normalization, voxel downsampling, feature extraction, RANSAC global alignment, ICP refinement) to handle cross-modal differences in density, scale, and overlap with no ground-truth correspondences.}
-      \resumeItem{Designed overlap-aware evaluation metrics for a benchmark without ground truth, showing that SpinNet, pretrained only on indoor 3DMatch data, generalizes to cultural-heritage scans and succeeds on 5 of 7 fragments where FPFH fails entirely, at 6.6 times higher runtime.}
-    \resumeItemListEnd
-
-    \resumeProjectHeadingFourItemResearch
-     {\textbf{Interpretability Based Dialog Policy Optimization}}{12/2022 -- 06/2024}{Beihang University}{Master Thesis}
-    \resumeItemListStart
-        \resumeItem{Modeled a task-oriented dialogue pipeline with structural causal models and constructed counterfactual belief states to mitigate spurious correlations, then trained the policy with offline reinforcement learning (BCQ) and causal reward shaping.}
-        \resumeItem{Achieved competitive results (Inform 96.3\%, Success 83.4\%) while improving robustness and interpretability over baseline models.}
-    \resumeItemListEnd
-
-    \resumeSubHeadingListEnd
-
 %-----------PROFESSIONAL EXPERIENCE-----------
 \section{PROFESSIONAL EXPERIENCE}
   \resumeSubHeadingListStart
 
     \resumeSubheading
+      {DiliTrust}{03/2026 -- 08/2026}
+      {Machine Learning Engineer Intern}{Paris, France}
+      \resumeItemListStart
+        \resumeItem{Evaluated Qwen3.5-4B as a migration candidate to replace a production LLM for multilingual legal entity extraction. Closed its accuracy gap to the production baseline by engineering a structured prompt framework with field-level metadata, raising extraction precision by 1.6 points and context accuracy by 8.4 points.}
+        \resumeItem{Built an automated agentic pipeline in LangGraph where an LLM-as-judge critic scores extraction quality against a 9-category failure taxonomy and iteratively refines the prompts used by another model, raising context accuracy to 96.8\% and cutting inference time by 40.8\% against the production model.}
+        \resumeItem{Fine-tuned Qwen3.5-4B via SFT on the optimized prompt, then diagnosed that it overfit to training labels: strong in-distribution gains, but generalization to unseen labels fell below the out-of-box model. Resolved this by merging multiple data sources and switching to reinforcement learning (GRPO) with a custom reward function combining exact-match and LLM-judge scoring, lifting in-distribution accuracy 8 points above the out-of-box model while achieving the best generalization to unseen labels of any fine-tuned variant.}
+        \resumeItem{Designed and implemented a metadata-generation pipeline that mines user annotation history to automatically improve per-field extraction guidance, gated by an evaluation harness that only adopts a candidate if it scores at least as well as the current best on held-out real annotations.}
+      \resumeItemListEnd
+
+    \needspace{8\baselineskip}
+    \resumeSubheading
       {DeepWise}{03/2023 -- 09/2023}
       {AI Algorithm Intern, Medical Imaging}{Beijing, China}
       \resumeItemListStart
         \resumeItem{Developed and validated deep learning segmentation models for clinical CT and CTA imaging, deployed in a production annotation pipeline used by medical annotators.}
-        \resumeItem{Improved a segmentation model initially trained on lower-limb CTA data by incorporating newly annotated aorta CTA scans, achieving Dice scores of 0.88/0.72.}
+        \resumeItem{Improved the bed and external object segmentation model initially trained on lower-limb CTA data by incorporating newly annotated aorta CTA scans, achieving Dice scores of 0.88/0.72.}
         \resumeItem{Extended model coverage to full-body CT by manually annotating over 300 head CTA scans after diagnosing performance degradation on out-of-distribution anatomy, then deployed the model to pre-annotate over 1000 non-enhanced CT datasets with less than 5\% manual correction required.}
         \resumeItem{Combined CTA and non-enhanced CT data to retrain a unified segmentation model based on observed failure patterns, achieving pre-release Dice scores of 0.93/0.76 and demonstrating strong generalization across previously unseen body regions.}
+        \resumeItem{Implemented post-processing algorithms for lower-limb segmentation to remove small disconnected components based on calcification ratios and vessel positions.}
       \resumeItemListEnd
 
-
+    \needspace{7\baselineskip}
     \resumeSubheading
       {Orange Labs International Center Beijing}{06/2022 -- 09/2022}
       {AI Algorithm Intern, Self-Supervised Speech Modeling}{Beijing, China}
@@ -203,26 +182,79 @@
         \resumeItem{Evaluated cross-lingual English and French performance, identifying specific failure modes such as uvular sound mishandling that limited generalization to French.}
       \resumeItemListEnd
 
-
-    \resumeSubheading
-      {DiliTrust}{03/2026 -- 08/2026}
-      {Machine Learning Engineer Intern}{Paris, France}
-      \resumeItemListStart
-        \resumeItem{Evaluated Qwen3.5-4B as a migration candidate to replace a production LLM for multilingual legal entity extraction. Closed its accuracy gap to the production baseline by engineering a structured prompt framework with field-level metadata, raising extraction precision by 1.6 points and context accuracy by 8.4 points.}
-        \resumeItem{Built an automated agentic pipeline in LangGraph where an LLM-as-judge critic scores extraction quality against a 9-category failure taxonomy and iteratively refines the prompts used by another model, raising context accuracy to 96.8\% and cutting inference time by 40.8\% against the production model.}
-        \resumeItem{Fine-tuned Qwen3.5-4B via SFT on the optimized prompt, then diagnosed that it overfit to training labels: strong in-distribution gains, but generalization to unseen labels fell below the out-of-box model. Resolved this by merging multiple data sources and switching to reinforcement learning (GRPO) with a custom reward function combining exact-match and LLM-judge scoring, lifting in-distribution accuracy 8 points above the out-of-box model while achieving the best generalization to unseen labels of any fine-tuned variant.}
-      \resumeItemListEnd
-
   \resumeSubHeadingListEnd
+
+%-----------PROJECTS & RESEARCH-----------
+\section{PROJECTS \& RESEARCH EXPERIENCE}
+    \vspace{-5pt}
+    \resumeSubHeadingListStart
+
+    \resumeProjectHeadingFourItemResearch
+    {\textbf{Image and Point Cloud Analysis for Art History}}{11/2025 -- 02/2026}{Sorbonne University, PRAT Project}{Paris, France}
+
+    \projectdesc{Comparative study of geometric (FPFH) and learning-based (SpinNet) descriptors for cross-modal 3D point cloud registration, aligning photogrammetry and laser scans of a 12-meter Japanese wooden dragon relief from the Cernuschi Museum.}
+    \resumeItemListStart
+      \resumeItem{Built a coarse-to-fine registration pipeline in Open3D (scale normalization, voxel downsampling, FPFH and SpinNet feature extraction, RANSAC global alignment, ICP refinement) to handle cross-modal differences in density, scale, and overlap with no ground-truth correspondences.}
+      \resumeItem{Benchmarked geometric and learning-based descriptors with overlap-aware metrics, showing that SpinNet, pretrained only on indoor 3DMatch data, generalizes to cultural-heritage scans and succeeds on 5 of 7 fragments where FPFH fails entirely, at the cost of 6.6 times higher runtime.}
+    \resumeItemListEnd
+
+    \resumeProjectHeadingFourItemResearch
+    {\textbf{NeRF Reproduction in PyTorch}}{04/2025 -- 05/2025}
+    {Sorbonne University, IG3D Course Project}{Paris, France}
+
+    \projectdesc{Reproduced the NeRF model in PyTorch and validated its performance through ablation experiments on standard datasets, then applied it to a custom Blender-generated dataset by tuning sampling bounds to correct geometric distortions.}
+
+    \resumeProjectHeadingFourItemResearch
+    {\textbf{What Makes a Great City to Live in France}}{02/2025 -- 05/2025}
+    {Sorbonne University, DALAS Course Project}{Paris, France}
+
+    \projectdesc{Analyzed multi-modal urban data to identify the key factors driving the predicted 2025 population of major French cities.}
+    \resumeItemListStart
+      \resumeItem{Collected and merged multi-source city-level data via web scraping and API queries, and standardized them into comparable per-capita indicators.}
+      \resumeItem{Visualized distributions and correlations of each feature family to characterize structural differences between 20 major French cities.}
+      \resumeItem{Combined PCA, hierarchical clustering and SHAP-based feature contribution analysis to show that urban livability arises from a balance between economic activity and lifestyle-related factors.}
+    \resumeItemListEnd
+
+    \resumeProjectHeadingFourItemResearch
+    {\textbf{Deep Learning for Classification of Colorectal Polyps}}{02/2025 -- 05/2025}
+    {Sorbonne University, Projet DIGIT}{Paris, France}
+
+    \projectdesc{Developed a binary classification system of colorectal polyps (adenomatous vs. hyperplastic) using CNNs on the clinical POLAR dataset.}
+    \resumeItemListStart
+      \resumeItem{Reviewed state-of-the-art CNN approaches for colorectal polyp classification and selected VGG-19 as backbone, preprocessed and restructured the POLAR dataset to ensure label consistency.}
+      \resumeItem{Applied transfer learning with data augmentation to mitigate class imbalance, improving hyperplastic polyp F1 from 0.148 to 0.351.}
+    \resumeItemListEnd
+
+    \resumeProjectHeadingFourItemResearch
+     {\textbf{Interpretability Based Dialog Policy Optimization of TOD}}{12/2022 -- 06/2024}{Beihang University}{Master Thesis}
+    \resumeItemListStart
+        \resumeItem{Modeled task-oriented dialogue pipeline with structural causal models and constructed counterfactual belief states to mitigate spurious correlations.}
+        \resumeItem{Trained dialogue policy using offline reinforcement learning (BCQ) with causal rewards on the MultiWOZ 2.0 dataset.}
+        \resumeItem{Achieved competitive results (Inform 96.3\%, Success 83.4\%) while improving robustness and interpretability over baseline models.}
+    \resumeItemListEnd
+
+    \resumeProjectHeadingFourItemResearch
+      {\textbf{Data Joker}}{10/2021 -- 05/2022}
+      {École Centrale de Pékin, Collaborative Innovation Project}{Schlumberger}
+
+    \projectdesc{Generated new labeled data using deep learning to verify abnormal pressure detection algorithms based on historical drilling data and limited annotated samples.}
+    \resumeItemListStart
+        \resumeItem{Preprocessed data from six drilling sites, totaling approximately one million records to remove invalid NaN data and filter out inconsistent samples.}
+        \resumeItem{Trained and tested TimeGAN model on datasets of 5000 examples for each drilling site, achieving a discrimination score of 0.18 and a prediction score of 0.05.}
+    \resumeItemListEnd
+
+    \resumeSubHeadingListEnd
 
 %-----------SKILLS-----------
 \section{SKILLS}
  \begin{itemize}[leftmargin=0.2in, label={}]
     \small{\item{
+    \textbf{Technical Skills:} Python, C/C++; PyTorch, NumPy, pandas, scikit-learn, OpenCV, Open3D; Linux, Git, Docker\\
+    \textbf{Generative AI \& Agentic Systems:} Prompt engineering, LoRA SFT \& GRPO fine-tuning with custom reward design, LangGraph agentic pipelines (tool orchestration, iterative refinement), model selection under cost/performance constraints, vLLM\\
+    \textbf{LLM Evaluation \& Monitoring:} LLM-as-a-judge evaluation frameworks, failure taxonomy design, hallucination and generalization diagnosis, inference cost/latency optimization, continuous evaluation pipelines\\
     \textbf{Deep Learning:} CNNs, Transformers, self-supervised representation learning, transfer learning, distributed training (DDP), training pipeline design, experiment reproducibility\\
-    \textbf{Medical \& Biomedical Imaging:} CT/CTA segmentation, clinical dataset annotation workflows, class imbalance handling, out-of-distribution generalization diagnosis\\
-    \textbf{Technical Skills:} Python, C/C++; PyTorch, NumPy, pandas, scikit-learn; Linux, Git, Docker\\
-    \textbf{Languages:} Mandarin (native), English (fluent), French (professional working proficiency)
+    \textbf{Computer Vision \& Medical Imaging:} Image processing, segmentation, 2D/3D point cloud registration, classification, CT/CTA segmentation, clinical annotation workflows, class imbalance handling, filtering, FFT\\
+    \textbf{Languages:} Mandarin (native), English (fluent, C1), French (professional working proficiency)
     }}
  \end{itemize}
 
