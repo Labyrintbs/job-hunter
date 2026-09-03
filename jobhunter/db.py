@@ -315,11 +315,13 @@ SORT_ORDERS = {
 
 def list_jobs(conn: sqlite3.Connection, status: str | None = None, min_score: int = 0,
               filtered: int | None = 0, dismissed: bool | None = False,
+              interested: bool | None = None,
               staleness_days: int = 14, exclude_statuses: tuple = (),
               sort: str = "score") -> list[sqlite3.Row]:
     """filtered=0 (default) shows the main list, filtered=1 the auto-hidden bucket,
     filtered=None shows both. dismissed=False (default) hides jobs you rejected,
-    dismissed=True shows only those, dismissed=None ignores the label.
+    dismissed=True shows only those, dismissed=None ignores the label. interested
+    mirrors dismissed but for the 'interested' label (default None: ignore it).
     exclude_statuses hides those statuses unless `status` names one of them.
     sort picks an entry from SORT_ORDERS ("score" or "fetched_at"), falling back to score.
     Adds computed `is_stale` / `days_since_seen` (relative to the latest fetch run)."""
@@ -347,6 +349,10 @@ def list_jobs(conn: sqlite3.Connection, status: str | None = None, min_score: in
         q += " AND COALESCE(j.user_label, '') = 'dismissed'"
     elif dismissed is False:
         q += " AND COALESCE(j.user_label, '') != 'dismissed'"
+    if interested is True:
+        q += " AND COALESCE(j.user_label, '') = 'interested'"
+    elif interested is False:
+        q += " AND COALESCE(j.user_label, '') != 'interested'"
     if status:
         q += " AND a.status = ?"
         params.append(status)
@@ -443,6 +449,12 @@ def set_feedback(conn: sqlite3.Connection, job_id: int, label: str, reasons: str
 def dismissed_count(conn: sqlite3.Connection) -> int:
     return conn.execute(
         "SELECT COUNT(*) FROM jobs WHERE COALESCE(user_label, '') = 'dismissed'"
+    ).fetchone()[0]
+
+
+def interested_count(conn: sqlite3.Connection) -> int:
+    return conn.execute(
+        "SELECT COUNT(*) FROM jobs WHERE COALESCE(user_label, '') = 'interested'"
     ).fetchone()[0]
 
 

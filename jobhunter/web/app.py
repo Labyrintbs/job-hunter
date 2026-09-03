@@ -23,25 +23,31 @@ def _startup() -> None:
 
 @app.get("/", response_class=HTMLResponse)
 def dashboard(request: Request, status: str | None = None, min_score: int = 0,
-              filtered: int = 0, dismissed: int = 0, stale: int = 0, sort: str = "score"):
+              filtered: int = 0, dismissed: int = 0, stale: int = 0,
+              interested: int = 0, sort: str = "score"):
     days = load_search_config().get("staleness_days", 14)
-    exclude = ("unavailable", "rejected") if not (status or dismissed) else ()
+    exclude = ("unavailable", "rejected") if not (status or dismissed or interested) else ()
     sort = sort if sort in db.SORT_ORDERS else "score"
     with db.connect() as conn:
         if dismissed:
             jobs = db.list_jobs(conn, status=status or None, min_score=min_score,
                                 filtered=None, dismissed=True, staleness_days=days,
                                 exclude_statuses=exclude, sort=sort)
+        elif interested:
+            jobs = db.list_jobs(conn, status=status or None, min_score=min_score,
+                                filtered=None, dismissed=None, interested=True,
+                                staleness_days=days, exclude_statuses=exclude, sort=sort)
         else:
             jobs = db.list_jobs(conn, status=status or None, min_score=min_score,
-                                filtered=filtered, dismissed=False, staleness_days=days,
-                                exclude_statuses=exclude, sort=sort)
+                                filtered=filtered, dismissed=False, interested=False,
+                                staleness_days=days, exclude_statuses=exclude, sort=sort)
         if stale:
             jobs = [j for j in jobs if j["is_stale"]]
         counts = db.status_counts(conn)
         n_filtered = db.filtered_count(conn)
         n_dismissed = db.dismissed_count(conn)
         n_stale = db.stale_count(conn, days)
+        n_interested = db.interested_count(conn)
     return TEMPLATES.TemplateResponse(
         request,
         "dashboard.html",
@@ -54,10 +60,12 @@ def dashboard(request: Request, status: str | None = None, min_score: int = 0,
             "filtered": filtered,
             "dismissed": dismissed,
             "stale": stale,
+            "interested": interested,
             "sort": sort,
             "n_filtered": n_filtered,
             "n_dismissed": n_dismissed,
             "n_stale": n_stale,
+            "n_interested": n_interested,
             "dismiss_reasons": db.DISMISS_REASONS,
             "total": sum(counts.values()),
             "llm_available": provider.available(),
@@ -92,9 +100,11 @@ def restore_route(job_id: int):
 
 
 @app.post("/feedback/{job_id}")
-def feedback_route(job_id: int, label: str = Form(...), reasons: str = Form("")):
+def feedback_route(job_id: int, label: str = Form(""), reasons: str = Form("")):
     """Explicit judgment: 'interested' (also rescues from Filtered), 'dismissed'
-    (with reason chips), or '' to clear."""
+    (with reason chips), or '' to clear. label defaults to "" (not required) because
+    Starlette's urlencoded form parser drops blank-valued fields entirely, so the
+    clear-feedback request (label='') would otherwise arrive with the key missing."""
     try:
         with db.connect() as conn:
             db.set_feedback(conn, job_id, label, reasons)

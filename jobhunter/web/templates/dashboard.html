@@ -8,18 +8,19 @@
   {% endfor %}
   {% if active_status %}<a class="pill" href="/{{ ('?' + sort_qs[1:]) if sort_qs else '' }}">✕ clear</a>{% endif %}
   <span class="grow"></span>
-  {% if filtered or dismissed or stale %}
+  {% if filtered or dismissed or stale or interested %}
     <a class="pill" href="/{{ ('?' + sort_qs[1:]) if sort_qs else '' }}" style="border-color:var(--accent)">← back to main list</a>
   {% else %}
     <a class="pill" href="/?filtered=1{{ sort_qs }}" title="auto-hidden: senior / too many years / low score">🕳 filtered · {{ n_filtered }}</a>
     <a class="pill" href="/?dismissed=1{{ sort_qs }}" title="jobs you explicitly rejected">👎 dismissed · {{ n_dismissed }}</a>
+    <a class="pill" href="/?interested=1{{ sort_qs }}" title="jobs you liked — track your applications here">👍 liked · {{ n_interested }}</a>
     <a class="pill" href="/?stale=1{{ sort_qs }}" title="not seen in recent fetches — posting likely taken down"{% if n_stale %} style="border-color:var(--danger)"{% endif %}>⚠ stale · {{ n_stale }}</a>
   {% endif %}
   <span class="muted">sort</span>
   <a class="pill{% if not sort or sort == 'score' %} on{% endif %}"
-     href="/?{% if active_status %}status={{ active_status }}&{% endif %}{% if min_score %}min_score={{ min_score }}&{% endif %}{% if filtered %}filtered=1&{% endif %}{% if dismissed %}dismissed=1&{% endif %}{% if stale %}stale=1&{% endif %}sort=score">score</a>
+     href="/?{% if active_status %}status={{ active_status }}&{% endif %}{% if min_score %}min_score={{ min_score }}&{% endif %}{% if filtered %}filtered=1&{% endif %}{% if dismissed %}dismissed=1&{% endif %}{% if stale %}stale=1&{% endif %}{% if interested %}interested=1&{% endif %}sort=score">score</a>
   <a class="pill{% if sort == 'fetched_at' %} on{% endif %}"
-     href="/?{% if active_status %}status={{ active_status }}&{% endif %}{% if min_score %}min_score={{ min_score }}&{% endif %}{% if filtered %}filtered=1&{% endif %}{% if dismissed %}dismissed=1&{% endif %}{% if stale %}stale=1&{% endif %}sort=fetched_at">newest added</a>
+     href="/?{% if active_status %}status={{ active_status }}&{% endif %}{% if min_score %}min_score={{ min_score }}&{% endif %}{% if filtered %}filtered=1&{% endif %}{% if dismissed %}dismissed=1&{% endif %}{% if stale %}stale=1&{% endif %}{% if interested %}interested=1&{% endif %}sort=fetched_at">newest added</a>
   <form method="get" style="margin:0; display:flex; gap:8px; align-items:center;">
     <label class="muted">min score</label>
     <input type="number" name="min_score" value="{{ min_score }}" style="width:70px; background:var(--panel); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:5px;">
@@ -60,6 +61,9 @@
         {% if dismissed %}
           <div class="muted" style="font-size:11px">{{ j["dismiss_reasons"]|replace('custom:', '') }}</div>
           <button class="ghost" style="padding:3px 8px; font-size:12px" onclick="clearFeedback({{ j['id'] }})">↩ undo</button>
+        {% elif interested %}
+          <div class="muted" style="font-size:11px">{{ j["interested_reasons"]|replace('custom:', '') }}</div>
+          <button class="ghost" style="padding:3px 8px; font-size:12px" onclick="clearFeedback({{ j['id'] }})">↩ undo</button>
         {% else %}
           <div style="display:flex; gap:4px">
             <button class="ghost{% if j['user_label']=='interested' %} on{% endif %}" style="padding:3px 8px" onclick="toggleLikes({{ j['id'] }})" title="interested{% if filtered %} — restores to main list{% endif %}">👍</button>
@@ -77,7 +81,6 @@
             <input id="dismiss-input-{{ j['id'] }}" class="reason-input" placeholder="your own reason" onkeydown="if(event.key==='Enter')submitDismissCustom({{ j['id'] }})">
             <button class="chip" onclick="submitDismissCustom({{ j['id'] }})">✓ ok</button>
           </div>
-          {% if j['user_label']=='interested' %}<span class="pill" style="border-color:var(--ok-border); color:var(--ok-fg); font-size:10px">interested{% if j['interested_reasons'] %} · {{ j['interested_reasons']|replace('custom:', '') }}{% endif %}</span>{% endif %}
         {% endif %}
       </td>
       <td>
@@ -108,7 +111,7 @@
       </td>
     </tr>
   {% else %}
-    <tr><td colspan="11" class="muted">{% if dismissed %}No dismissed jobs.{% elif filtered %}Nothing in the Filtered bucket.{% elif stale %}No stale jobs — all postings are still appearing.{% else %}No jobs yet. Click “Fetch new jobs”.{% endif %}</td></tr>
+    <tr><td colspan="11" class="muted">{% if dismissed %}No dismissed jobs.{% elif interested %}No liked jobs yet — click 👍 on a job you're interested in.{% elif filtered %}Nothing in the Filtered bucket.{% elif stale %}No stale jobs — all postings are still appearing.{% else %}No jobs yet. Click “Fetch new jobs”.{% endif %}</td></tr>
   {% endfor %}
   </tbody>
 </table>
