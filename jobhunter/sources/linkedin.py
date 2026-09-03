@@ -2,9 +2,11 @@
 
 This uses the same unauthenticated `jobs-guest` endpoint that the site serves to
 logged-out visitors — the least ToS-hostile way to read LinkedIn postings. It is
-still rate-limited: we throttle, cap pages, and back off on non-200. For richer
-data or higher volume you would need a logged-in session (secondary account) and
-accept higher ban risk — deliberately out of scope here.
+still rate-limited: we throttle, cap pages, and retry a 429 with backoff before
+giving up on that page. fetch() covers multiple query/location pairs for more
+volume; each pair's pagination is independent so one bad combo doesn't cost the
+others. For richer data or higher volume still you would need a logged-in session
+(secondary account) and accept higher ban risk — deliberately out of scope here.
 
 Read-only: this never logs in and never applies.
 """
@@ -58,24 +60,47 @@ def _parse_card(card: str) -> Job | None:
     )
 
 
-def fetch(query: str, location: str = "Paris, France", max_pages: int = 3,
-          recent_hours: int = 168) -> list[Job]:
+def _fetch_one(client: httpx.Client, query: str, location: str, max_pages: int,
+                recent_hours: int, max_retries: int, backoff_base: float) -> list[Job]:
+    jobs: list[Job] = []
+    for page in range(max_pages):
+        params = {
+            "keywords": query,
+            "location": location,
+            "start": page * 10,
+            "f_TPR": f"r{recent_hours * 3600}",
+        }
+        url = f"{SEARCH_URL}?{urllib.parse.urlencode(params)}"
+        resp = None
+        for attempt in range(max_retries + 1):
+            resp = client.get(url)
+            if resp.status_code != 429:
+                break
+            if attempt < max_retries:
+                time.sleep(backoff_base * 2 ** attempt)
+        if resp.status_code != 200 or not resp.text.strip():
+            break  # rate-limited past retries, or exhausted
+        cards = _CARD_RE.findall(resp.text)
+        if not cards:
+            break
+        jobs.extend(j for j in (_parse_card(c) for c in cards) if j)
+        time.sleep(THROTTLE_SECONDS)
+    return jobs
+
+
+def fetch(queries: list[str], locations: list[str], max_pages: int = 5,
+          recent_hours: int = 168, max_retries: int = 3,
+          backoff_base: float = 2.0) -> list[Job]:
+    """One request per (query, location) pair's page. A 429 retries just that page
+    with exponential backoff instead of abandoning the whole fetch; any other
+    non-200/empty response or exhausted results only breaks that pair's pagination,
+    so one bad combo doesn't cost the others. Cross-pair duplicates are harmless --
+    external_id is stable regardless of which search surfaced the posting, and
+    db.py's dedup collapses them."""
     jobs: list[Job] = []
     with httpx.Client(timeout=20, headers=_HEADERS) as client:
-        for page in range(max_pages):
-            params = {
-                "keywords": query,
-                "location": location,
-                "start": page * 10,
-                "f_TPR": f"r{recent_hours * 3600}",
-            }
-            url = f"{SEARCH_URL}?{urllib.parse.urlencode(params)}"
-            resp = client.get(url)
-            if resp.status_code != 200 or not resp.text.strip():
-                break  # rate-limited or exhausted
-            cards = _CARD_RE.findall(resp.text)
-            if not cards:
-                break
-            jobs.extend(j for j in (_parse_card(c) for c in cards) if j)
-            time.sleep(THROTTLE_SECONDS)
+        for query in queries:
+            for location in locations:
+                jobs.extend(_fetch_one(client, query, location, max_pages,
+                                        recent_hours, max_retries, backoff_base))
     return jobs

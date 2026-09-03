@@ -8,8 +8,11 @@ cover letter per job, and track every application from a local web dashboard.
 ## Features
 - **Fetch** from Welcome to the Jungle (public Algolia backend), company ATS
   boards (Greenhouse, Lever, Ashby, SmartRecruiters, Recruitee, Workable — most
-  company career pages are one of these underneath), and LinkedIn (public guest
-  search, read-only, no login), filtered to France.
+  company career pages are one of these underneath), LinkedIn (public guest
+  search, read-only, no login, multiple query/location searches per run),
+  France Travail (official government API — needs a free key, see
+  *Configuration* below), and HelloWork (page-1-only, no login), filtered to
+  France.
 - **Score + filter** with a rule-based, junior-tuned matcher: title-based ML
   relevance gate, internships/alternance excluded, Paris/IDF ranked above
   other-France.
@@ -121,9 +124,20 @@ SQLite stays the source of truth — point a BI tool at it:
 
 ## Configuration
 - `config/search.yaml` — query, role/boost keywords, geo, languages, exclude
-  terms, company blocklist, `min_score`, `max_hits`, `linkedin`, `notifications`.
+  terms, company blocklist, `min_score`, `max_hits`, `linkedin`, `francetravail`,
+  `hellowork`, `notifications`.
 - `config/companies.yaml` — ATS boards to pull (`name`, `ats`, `token`).
 - `templates/cv_base.tex` — the base CV the tailoring reorders.
+
+### France Travail
+The only source here backed by an official, documented API rather than a scrape.
+Register a free account at [francetravail.io](https://francetravail.io), create an
+application, subscribe it to "Offres d'emploi v2", then:
+```bash
+export FRANCE_TRAVAIL_CLIENT_ID=... FRANCE_TRAVAIL_CLIENT_SECRET=...
+```
+Without these set, `francetravail.fetch()` silently contributes nothing — same
+posture as `linkedin.enabled: false`, no error, no crash.
 
 ### Notifications
 Set `notifications.channels` in `search.yaml` (e.g. `[file, telegram]`) and provide
@@ -146,7 +160,7 @@ $P -m pytest -q
 ## Layout
 ```
 jobhunter/
-  sources/wttj.py, sources/ats.py   fetch (WTTJ Algolia; Greenhouse/Lever)
+  sources/                          fetch: wttj, ats, linkedin, francetravail, hellowork
   match.py                          scoring + relevance/seniority gate; applies approved rules
   enrich.py                         lazy full-description fetch for engaged jobs
   learn.py                          rule miner + LLM preference-profile condenser
@@ -170,8 +184,14 @@ config/, templates/, tests/, data/  (data/ created on first run; git-ignored)
    jobs the screen had hidden); if it climbs, loosen `seniority.max_years` or drop a rule.
 
 ## Roadmap
-- Indeed / Glassdoor sources; LinkedIn logged-in enrichment (`li_at` cookie,
-  secondary account) for descriptions.
+- Indeed / Glassdoor: investigated, not viable without headless-browser/proxy
+  infra — both hard-block on the first unauthenticated request (Cloudflare
+  bot-challenge), and Indeed's old Publisher API was discontinued in 2023 with
+  no self-serve replacement. Not planned unless that infra gets added.
+- HelloWork pagination past page 1: needs a real browser (Playwright or similar)
+  to discover the JS-triggered load-more request; deliberately deferred.
+- LinkedIn logged-in enrichment (`li_at` cookie, secondary account) for
+  descriptions.
 - LLM-assisted screening-question answers with a cached Q→A store.
 - Auto-suggest a `seniority.max_years` bump when the false-negative rate is high.
 - Weekly digest of rule hit-counts + profile drift.

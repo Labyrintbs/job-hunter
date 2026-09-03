@@ -8,29 +8,71 @@ from .config import load_companies, load_search_config
 from .llm import judge as llm_judge
 from .llm import provider
 from .notify import dispatch as notify_dispatch
-from .sources import ats, linkedin, wttj
+from .sources import ats, francetravail, hellowork, linkedin, wttj
 from .tailor import engine as cv_engine
 
 
-def _gather(config: dict) -> list:
-    jobs = wttj.fetch(
-        query=config["query"],
-        max_hits=config.get("max_hits", 100),
-        country=(config.get("countries") or ["France"])[0],
-    )
-    jobs += ats.fetch_all(load_companies())
-
+def _fetch_linkedin(config: dict) -> list:
     li = config.get("linkedin") or {}
-    if li.get("enabled"):
+    if not li.get("enabled"):
+        return []
+    return linkedin.fetch(
+        queries=li.get("queries") or [config["query"]],
+        locations=li.get("locations") or ["Paris, France"],
+        max_pages=li.get("max_pages", 5),
+        recent_hours=li.get("recent_hours", 168),
+        max_retries=li.get("max_retries", 3),
+        backoff_base=li.get("backoff_seconds", 2.0),
+    )
+
+
+def _fetch_francetravail(config: dict) -> list:
+    ft = config.get("francetravail") or {}
+    if not ft.get("enabled", True):
+        return []
+    return francetravail.fetch(
+        query=config["query"],
+        departements=ft.get("departements", francetravail.IDF_DEPARTEMENTS),
+    )
+
+
+def _fetch_hellowork(config: dict) -> list:
+    hw = config.get("hellowork") or {}
+    if not hw.get("enabled"):
+        return []
+    queries = hw.get("queries") or [config["query"]]
+    locations = hw.get("locations") or ["Paris"]
+    jobs: list = []
+    for query in queries:
+        for location in locations:
+            jobs += hellowork.fetch(query, location)
+    return jobs
+
+
+def _gather(config: dict) -> list:
+    """Pull every enabled source. Each is isolated: one source's failure (a bad
+    token, a network hiccup, a rate-limit) only drops that source's jobs, never
+    the whole run."""
+    sources = [
+        ("wttj", lambda: wttj.fetch(query=config["query"],
+                                     max_hits=config.get("max_hits", 100),
+                                     country=(config.get("countries") or ["France"])[0])),
+        ("ats", lambda: ats.fetch_all(load_companies())),
+        ("linkedin", lambda: _fetch_linkedin(config)),
+        ("francetravail", lambda: _fetch_francetravail(config)),
+        ("hellowork", lambda: _fetch_hellowork(config)),
+    ]
+    jobs: list = []
+    counts: dict[str, int] = {}
+    for name, fn in sources:
         try:
-            jobs += linkedin.fetch(
-                query=config["query"],
-                location=li.get("location", "Paris, France"),
-                max_pages=li.get("max_pages", 3),
-                recent_hours=li.get("recent_hours", 168),
-            )
+            got = fn()
         except Exception as exc:
-            print(f"  linkedin warn: {exc}")
+            print(f"  {name} warn: {exc}")
+            got = []
+        counts[name] = len(got)
+        jobs += got
+    print(f"  fetched by source: {counts}")
     return jobs
 
 

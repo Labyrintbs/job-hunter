@@ -73,12 +73,40 @@ staleness_days: 14
 # Max hits to request from WTTJ per run.
 max_hits: 100
 
-# LinkedIn public guest search (read-only, no login).
+# LinkedIn public guest search (read-only, no login). Each query is searched in
+# each location (a cross product), so 4 queries x 2 locations = 8 searches/run.
 linkedin:
   enabled: true
-  location: "Paris, France"
+  queries:
+    - "machine learning engineer"
+    - "nlp engineer"
+    - "llm engineer"
+    - "data scientist"
+  locations:
+    - "Paris, France"
+    - "Île-de-France, France"
   recent_hours: 168   # last 7 days
-  max_pages: 3
+  max_pages: 5
+  max_retries: 3       # retries on 429 before giving up on a page
+  backoff_seconds: 2.0
+
+# France Travail (Pôle emploi) official API — needs a free key, see README.
+# Credentials: FRANCE_TRAVAIL_CLIENT_ID / FRANCE_TRAVAIL_CLIENT_SECRET env vars.
+# Silently contributes nothing until those are set.
+francetravail:
+  enabled: true
+  departements: "75,92,93,94,77,78,91,95"   # Île-de-France
+
+# HelloWork — page-1 only (~30 results/query), see jobhunter/sources/hellowork.py
+# docstring for why pagination isn't attempted.
+hellowork:
+  enabled: true
+  queries:
+    - "machine learning engineer"
+    - "nlp engineer"
+    - "llm engineer"
+  locations:
+    - "Paris"
 
 # Notify about new jobs after each scheduled run.
 # 'file' always works (writes data/notifications/); telegram/email need env creds.

@@ -48,3 +48,20 @@ companies:
   - { name: Dailymotion, ats: smartrecruiters, token: dailymotion }
   - { name: Exotec, ats: workable, token: exotec }
   - { name: Hugging Face, ats: workable, token: huggingface }
+  - { name: Mistral AI, ats: ashby, token: mistral.ai }
+  - { name: Illuin Technology, ats: ashby, token: illuin }
+  - { name: Giskard, ats: workable, token: giskard }
+  - { name: Mirakl, ats: greenhouse, token: mirakl }
+  - { name: Zenchef, ats: recruitee, token: zenchef }
+  - { name: PlayPlay, ats: lever, token: playplay }
+  - { name: Ankorstore, ats: ashby, token: ankorstore }
+  - { name: 360Learning, ats: lever, token: 360learning }
+  - { name: Brevo, ats: lever, token: brevo }
+  - { name: Artefact, ats: greenhouse, token: artefact }
+  - { name: Theodo, ats: lever, token: theodo }
+  - { name: Ivalua, ats: greenhouse, token: ivalua }
+  - { name: Gorgias, ats: ashby, token: gorgias }
+  - { name: JobTeaser, ats: smartrecruiters, token: jobteaser }
+  - { name: Lifen, ats: ashby, token: lifen }
+  - { name: Klaxoon, ats: greenhouse, token: klaxoon }
+  - { name: Yubo, ats: ashby, token: yubo }
