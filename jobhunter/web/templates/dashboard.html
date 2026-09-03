@@ -32,7 +32,7 @@
 
 <table>
   <thead>
-    <tr><th>#</th><th>Score</th><th>LLM</th><th>Role</th><th>Company</th><th>Location</th><th>Source</th><th>Added</th><th>Why</th><th>You</th><th>Status</th><th>Docs</th></tr>
+    <tr><th>#</th><th>Score</th><th>LLM</th><th>Role</th><th>Category</th><th>Company</th><th>Location</th><th>Source</th><th>Added</th><th>Why</th><th>You</th><th>Status</th><th>Docs</th></tr>
   </thead>
   <tbody>
   {% for j in jobs %}
@@ -53,6 +53,7 @@
           {% if j["min_years"] %}<span class="muted" style="font-size:11px">· {{ j["min_years"] }}+ yrs</span>{% endif %}
           {% if j["is_stale"] %}<span class="pill" style="font-size:10px; padding:1px 6px; border-color:var(--danger); color:var(--danger)" title="not seen for {{ j['days_since_seen'] }} days — likely delisted">⚠ stale {{ j['days_since_seen'] }}d</span>{% endif %}
           <div class="muted" style="font-size:12px">{{ j["contract_type"] }} · {{ j["language"] }}</div></td>
+      <td><span class="pill" style="font-size:11px; padding:2px 7px">{{ j["role_category"] or "ML/DL" }}</span></td>
       <td>{{ j["company"] }}</td>
       <td class="muted">{{ j["location"] }}</td>
       <td class="muted" style="white-space:nowrap">{{ j["source"] }}</td>
@@ -112,7 +113,7 @@
       </td>
     </tr>
   {% else %}
-    <tr><td colspan="12" class="muted">{% if dismissed %}No dismissed jobs.{% elif interested %}No liked jobs yet — click 👍 on a job you're interested in.{% elif filtered %}Nothing in the Filtered bucket.{% elif stale %}No stale jobs — all postings are still appearing.{% else %}No jobs yet. Click “Fetch new jobs”.{% endif %}</td></tr>
+    <tr><td colspan="13" class="muted">{% if dismissed %}No dismissed jobs.{% elif interested %}No liked jobs yet — click 👍 on a job you're interested in.{% elif filtered %}Nothing in the Filtered bucket.{% elif stale %}No stale jobs — all postings are still appearing.{% else %}No jobs yet. Click “Fetch new jobs”.{% endif %}</td></tr>
   {% endfor %}
   </tbody>
 </table>

@@ -146,6 +146,27 @@ def score(job: Job, config: dict) -> tuple[int, list[str]]:
     return max(0, min(100, pts)), reasons
 
 
+_SPECIFIC_ROLE_CATEGORIES = ["NLP", "CV", "AI"]   # checked before the ML/DL catch-all
+
+
+def classify_role(title: str, description: str, config: dict) -> str:
+    """NLP / CV / AI / ML/DL, checked title-first then title+description. ML/DL
+    is a true fallback (returned only when none of the domain-specific categories
+    match anywhere) rather than one more entry in the same priority pass -- almost
+    every posting's title contains a generic "machine learning" term, so checking
+    it at the same tier as the others would make it win by default before the
+    description ever gets a look. Takes primitives rather than a Job so the DB
+    backfill can call it directly off a stored row."""
+    cats = config.get("role_categories") or {}
+    title_text = title.lower()
+    full_text = f"{title} {description}".lower()
+    for text in (title_text, full_text):
+        for cat in _SPECIFIC_ROLE_CATEGORIES:
+            if any(kw.lower() in text for kw in cats.get(cat, [])):
+                return cat
+    return "ML/DL"
+
+
 def is_relevant(job: Job, config: dict) -> bool:
     """A job must be an ML role by its TITLE, not just be in Paris or mention ML
     in company boilerplate. Guards against non-ML roles from ATS boards."""
@@ -185,6 +206,7 @@ class Screening:
     seniority: str
     min_years: int | None
     matched_rules: list[int] = field(default_factory=list)
+    role_category: str = "ML/DL"
 
 
 def screen(job: Job, config: dict) -> Screening:
@@ -202,6 +224,7 @@ def screen(job: Job, config: dict) -> Screening:
     pts, reasons = score(job, config)
     seniority = detect_seniority(job)
     min_years = min_years_required(_text(job))
+    role_category = classify_role(job.title, job.description, config)
 
     sen_cfg = config.get("seniority") or {}
     gate = sen_cfg.get("filter", True)
@@ -227,6 +250,7 @@ def screen(job: Job, config: dict) -> Screening:
         seniority=seniority,
         min_years=min_years,
         matched_rules=matched,
+        role_category=role_category,
     )
 
 

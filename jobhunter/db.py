@@ -154,6 +154,7 @@ MIGRATIONS = {
         "was_filtered": "INTEGER DEFAULT 0",
         "geo_tier": "TEXT DEFAULT ''",
         "last_seen": "TEXT DEFAULT ''",
+        "role_category": "TEXT DEFAULT ''",
     },
     "applications": {
         "cover_letter_path": "TEXT DEFAULT ''",
@@ -188,11 +189,30 @@ def _backfill_geo_tier(conn: sqlite3.Connection) -> None:
                      (match.geo_tier(r["location"], config), r["id"]))
 
 
+def _backfill_role_category(conn: sqlite3.Connection) -> None:
+    """Populate role_category for pre-existing rows (new rows get it at upsert time)."""
+    rows = conn.execute(
+        "SELECT id, title, description FROM jobs WHERE COALESCE(role_category,'') = ''"
+    ).fetchall()
+    if not rows:
+        return
+    from . import match
+    from .config import load_search_config
+    try:
+        config = load_search_config()
+    except Exception:
+        config = {}
+    for r in rows:
+        cat = match.classify_role(r["title"], r["description"], config)
+        conn.execute("UPDATE jobs SET role_category = ? WHERE id = ?", (cat, r["id"]))
+
+
 def init_db(db_path: Path | None = None) -> None:
     with get_connection(db_path) as conn:
         conn.executescript(SCHEMA)
         _migrate(conn)
         _backfill_geo_tier(conn)
+        _backfill_role_category(conn)
 
 
 @contextmanager
@@ -241,7 +261,7 @@ def _find_content_match(conn: sqlite3.Connection, job: Job) -> sqlite3.Row | Non
 def upsert_job(conn: sqlite3.Connection, job: Job, score: int, reasons: str, *,
                filtered: bool = False, filter_reason: str = "",
                seniority: str = "", min_years: int | None = None,
-               geo_tier: str = "") -> tuple[int, bool]:
+               geo_tier: str = "", role_category: str = "") -> tuple[int, bool]:
     """Insert a job if new. Returns (job_id, is_new). Existing jobs keep their
     application status; their score/reasons and screening flags are refreshed, and
     last_seen is stamped every time the job is seen (for staleness / market signals).
@@ -262,10 +282,10 @@ def upsert_job(conn: sqlite3.Connection, job: Job, score: int, reasons: str, *,
         conn.execute(
             """UPDATE jobs SET score = ?, match_reasons = ?, filtered = ?,
                filter_reason = ?, seniority = ?, min_years = ?, geo_tier = ?,
-               last_seen = datetime('now'),
+               role_category = ?, last_seen = datetime('now'),
                was_filtered = CASE WHEN ? THEN 1 ELSE was_filtered END WHERE id = ?""",
             (score, reasons, int(filtered), filter_reason, seniority, min_years, geo_tier,
-             int(filtered), row["id"]),
+             role_category, int(filtered), row["id"]),
         )
         return row["id"], False
 
@@ -274,14 +294,14 @@ def upsert_job(conn: sqlite3.Connection, job: Job, score: int, reasons: str, *,
            (source, external_id, title, company, location, language, url,
             description, contract_type, posted_at, score, match_reasons,
             filtered, filter_reason, seniority, min_years, description_full, was_filtered,
-            geo_tier, last_seen)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))""",
+            geo_tier, role_category, last_seen)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))""",
         (
             job.source, job.external_id, job.title, job.company, job.location,
             job.language, job.url, job.description, job.contract_type,
             job.posted_at, score, reasons,
             int(filtered), filter_reason, seniority, min_years,
-            int(len(job.description or "") > 200), int(filtered), geo_tier,
+            int(len(job.description or "") > 200), int(filtered), geo_tier, role_category,
         ),
     )
     job_id = cur.lastrowid
@@ -389,16 +409,18 @@ def jobs_with_full_description(conn: sqlite3.Connection) -> list[sqlite3.Row]:
 
 def update_screening(conn: sqlite3.Connection, job_id: int, score: int, reasons: str, *,
                      filtered: bool, filter_reason: str, seniority: str,
-                     min_years: int | None) -> None:
+                     min_years: int | None, role_category: str = "") -> None:
     """Refresh score/screening after enrichment adds real JD content -- a job scored on
     title alone (LinkedIn cards, thin WTTJ profiles) becomes content-aware once the
     description lands, which can also flip its filtered bucket (e.g. a '5+ years'
-    requirement only visible in the body)."""
+    requirement only visible in the body) or its role category (e.g. a generic "ML
+    Engineer" title that's actually NLP-focused per the body)."""
     conn.execute(
         """UPDATE jobs SET score = ?, match_reasons = ?, filtered = ?, filter_reason = ?,
-           seniority = ?, min_years = ?,
+           seniority = ?, min_years = ?, role_category = ?,
            was_filtered = CASE WHEN ? THEN 1 ELSE was_filtered END WHERE id = ?""",
-        (score, reasons, int(filtered), filter_reason, seniority, min_years, int(filtered), job_id),
+        (score, reasons, int(filtered), filter_reason, seniority, min_years, role_category,
+         int(filtered), job_id),
     )
 
 

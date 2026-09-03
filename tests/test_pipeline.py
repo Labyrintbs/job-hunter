@@ -29,6 +29,37 @@ def test_gather_collects_every_source(config, monkeypatch):
     assert {j.source for j in jobs} == {"wttj", "ats", "linkedin", "francetravail", "hellowork"}
 
 
+def test_fetch_wttj_loops_over_configured_queries(monkeypatch):
+    calls = []
+
+    def fake_fetch(query, max_hits, country):
+        calls.append(query)
+        return [Job(source="wttj", external_id=query, title=query, company="Acme")]
+
+    monkeypatch.setattr(pipeline.wttj, "fetch", fake_fetch)
+    cfg = {"query": "machine learning engineer", "max_hits": 100, "countries": ["France"],
+           "wttj": {"queries": ["machine learning engineer", "nlp engineer"]}}
+    jobs = pipeline._fetch_wttj(cfg)
+    assert calls == ["machine learning engineer", "nlp engineer"]
+    assert len(jobs) == 2
+
+
+def test_fetch_francetravail_loops_over_configured_queries(monkeypatch):
+    calls = []
+
+    def fake_fetch(query, departements):
+        calls.append(query)
+        return [Job(source="francetravail", external_id=query, title=query, company="Acme")]
+
+    monkeypatch.setattr(pipeline.francetravail, "fetch", fake_fetch)
+    cfg = {"query": "machine learning engineer",
+           "francetravail": {"enabled": True, "departements": "75",
+                             "queries": ["machine learning engineer", "computer vision engineer"]}}
+    jobs = pipeline._fetch_francetravail(cfg)
+    assert calls == ["machine learning engineer", "computer vision engineer"]
+    assert len(jobs) == 2
+
+
 def _insert(conn, config, **kw):
     job = Job(source=kw.pop("source", "linkedin"), external_id=kw.pop("external_id", "1"),
               title=kw.pop("title", "Machine Learning Engineer"), company=kw.pop("company", "Acme"),
@@ -38,7 +69,7 @@ def _insert(conn, config, **kw):
     s = match.screen(job, config)
     jid, _ = db.upsert_job(conn, job, s.score, s.reasons, filtered=s.filtered,
                            filter_reason=s.filter_reason, seniority=s.seniority,
-                           min_years=s.min_years)
+                           min_years=s.min_years, role_category=s.role_category)
     return jid
 
 
@@ -63,6 +94,31 @@ def test_enrich_one_rescopes_with_real_content(tmp_db, config, monkeypatch, tmp_
     jd_file = tmp_path / "jd" / f"linkedin__{after['external_id']}.txt"
     assert jd_file.exists()
     assert rich_text in jd_file.read_text(encoding="utf-8")
+
+
+def test_run_fetch_persists_role_category(tmp_db, config, monkeypatch):
+    cv_job = Job(source="wttj", external_id="42", title="Computer Vision Engineer",
+                company="Acme", location="Paris, Ile-de-France, France")
+    monkeypatch.setattr(pipeline, "_gather", lambda cfg: [cv_job])
+    stats = pipeline.run_fetch(config)
+    with db.connect() as conn:
+        row = db.get_job(conn, stats["new_ids"][0])
+    assert row["role_category"] == "CV"
+
+
+def test_enrich_one_can_flip_role_category(tmp_db, config, monkeypatch):
+    with db.connect() as conn:
+        jid = _insert(conn, config, title="Machine Learning Engineer")   # generic -> ML/DL
+        before = db.get_job(conn, jid)
+    assert before["role_category"] == "ML/DL"
+
+    monkeypatch.setattr(pipeline.enrich, "fetch_full_text",
+                        lambda *a, **k: "We focus on named entity recognition and sentiment analysis.")
+    pipeline.enrich_one(jid)
+
+    with db.connect() as conn:
+        after = db.get_job(conn, jid)
+    assert after["role_category"] == "NLP"   # re-screened with the enriched body
 
 
 def test_enrich_new_skips_jobs_that_already_have_a_description(tmp_db, config, monkeypatch):

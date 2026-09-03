@@ -1,4 +1,4 @@
-from jobhunter.match import detect_seniority, is_relevant, min_years_required, screen
+from jobhunter.match import classify_role, detect_seniority, is_relevant, min_years_required, screen
 from jobhunter.models import Job
 
 
@@ -94,3 +94,35 @@ def test_active_company_block_rule_filters(config):
 def test_no_active_rules_leaves_job_alone(config):
     s = screen(J(title="Machine Learning Engineer", desc="great role"), config)
     assert s.filtered is False and s.matched_rules == []
+
+
+def test_classify_role_nlp(config):
+    assert classify_role("NLP Engineer", "", config) == "NLP"
+
+
+def test_classify_role_cv(config):
+    assert classify_role("Computer Vision Engineer", "", config) == "CV"
+
+
+def test_classify_role_ai(config):
+    assert classify_role("AI Engineer", "", config) == "AI"
+
+
+def test_classify_role_ml_dl_default(config):
+    assert classify_role("Machine Learning Engineer", "", config) == "ML/DL"
+    assert classify_role("Data Scientist", "", config) == "ML/DL"
+
+
+def test_classify_role_falls_back_to_description(config):
+    # generic title, domain signal only shows up in the body
+    assert classify_role("Software Engineer", "We work on object detection models.", config) == "CV"
+
+
+def test_classify_role_title_takes_priority_over_description(config):
+    # title is NLP-specific even though the body mentions a generic ML term too
+    assert classify_role("NLP Engineer", "great machine learning team", config) == "NLP"
+
+
+def test_screen_surfaces_role_category(config):
+    s = screen(J(title="Computer Vision Engineer"), config)
+    assert s.role_category == "CV"

@@ -12,7 +12,12 @@ cover letter per job, and track every application from a local web dashboard.
   search, read-only, no login, multiple query/location searches per run),
   France Travail (official government API — needs a free key, see
   *Configuration* below), and HelloWork (page-1-only, no login), filtered to
-  France.
+  France. Every source searches a broadened query set — plain "machine
+  learning engineer" plus "deep learning engineer", "nlp engineer", "computer
+  vision engineer", and "ai engineer" — rather than one narrow phrase.
+- **Role category**: each job is classified NLP / CV / AI / ML-DL (title
+  first, full description as fallback once enriched — see `role_categories`
+  in `config/search.yaml`) and shown as a dashboard column.
 - **Score + filter** with a rule-based, junior-tuned matcher: title-based ML
   relevance gate, internships/alternance excluded, Paris/IDF ranked above
   other-France.

@@ -150,6 +150,22 @@ def test_was_filtered_persists_and_false_negative_stats(tmp_db):
         assert stats["false_negative_rate"] == 1.0
 
 
+def test_role_category_stored_on_upsert(tmp_db):
+    with db.connect() as conn:
+        jid, _ = db.upsert_job(conn, J("1", title="NLP Engineer", url="http://x/1"), 60, "r",
+                               role_category="NLP")
+        assert db.get_job(conn, jid)["role_category"] == "NLP"
+
+
+def test_role_category_backfilled_for_preexisting_rows(tmp_db):
+    with db.connect() as conn:
+        jid, _ = db.upsert_job(conn, J("1", title="Computer Vision Engineer", url="http://x/1"), 60, "r")
+        assert db.get_job(conn, jid)["role_category"] == ""   # left unset by this upsert
+    db.init_db()   # re-running the migration/backfill pass, as happens on every real startup
+    with db.connect() as conn:
+        assert db.get_job(conn, jid)["role_category"] == "CV"
+
+
 def test_llm_and_cover_setters(tmp_db):
     with db.connect() as conn:
         jid, _ = db.upsert_job(conn, J("1", url="http://x/1"), 60, "r")

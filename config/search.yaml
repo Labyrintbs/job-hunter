@@ -31,6 +31,48 @@ boost_keywords:
   - pytorch
   - data scientist
 
+# Buckets shown as the dashboard's Category column. Checked title-first, then
+# title+description, in this priority order (domain-specific before the ML/DL
+# catch-all) -- see jobhunter/match.py:classify_role.
+role_categories:
+  NLP:
+    - nlp
+    - natural language processing
+    - text mining
+    - named entity
+    - sentiment analysis
+    - nlu
+    - chatbot
+    - conversational ai
+  CV:
+    - computer vision
+    - image processing
+    - object detection
+    - image segmentation
+    - opencv
+    - visual recognition
+    - point cloud
+    - 3d vision
+  AI:
+    - genai
+    - generative ai
+    - llm
+    - large language model
+    - prompt engineering
+    - rag
+    - ai engineer
+    - applied ai
+    - artificial intelligence
+  ML/DL:
+    - machine learning
+    - deep learning
+    - ml engineer
+    - mlops
+    - data scientist
+    - applied scientist
+    - research engineer
+    - research scientist
+
 # Geography (WTTJ facet uses country; location text is matched against these).
 countries: ["France"]
 locations:
@@ -70,16 +112,27 @@ min_score: 20
 # flagged stale/ghost — the posting has likely been taken down.
 staleness_days: 14
 
-# Max hits to request from WTTJ per run.
+# Max hits to request from WTTJ per run (applied per query below).
 max_hits: 100
 
+wttj:
+  queries:
+    - "machine learning engineer"
+    - "deep learning engineer"
+    - "nlp engineer"
+    - "computer vision engineer"
+    - "ai engineer"
+
 # LinkedIn public guest search (read-only, no login). Each query is searched in
-# each location (a cross product), so 4 queries x 2 locations = 8 searches/run.
+# each location (a cross product), so 7 queries x 2 locations = 14 searches/run.
 linkedin:
   enabled: true
   queries:
     - "machine learning engineer"
+    - "deep learning engineer"
     - "nlp engineer"
+    - "computer vision engineer"
+    - "ai engineer"
     - "llm engineer"
     - "data scientist"
   locations:
@@ -96,6 +149,12 @@ linkedin:
 francetravail:
   enabled: true
   departements: "75,92,93,94,77,78,91,95"   # Île-de-France
+  queries:
+    - "machine learning engineer"
+    - "deep learning engineer"
+    - "nlp engineer"
+    - "computer vision engineer"
+    - "ai engineer"
 
 # HelloWork — page-1 only (~30 results/query), see jobhunter/sources/hellowork.py
 # docstring for why pagination isn't attempted.
@@ -103,8 +162,10 @@ hellowork:
   enabled: true
   queries:
     - "machine learning engineer"
+    - "deep learning engineer"
     - "nlp engineer"
-    - "llm engineer"
+    - "computer vision engineer"
+    - "ai engineer"
   locations:
     - "Paris"
 

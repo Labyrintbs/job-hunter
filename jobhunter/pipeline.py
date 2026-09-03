@@ -12,6 +12,16 @@ from .sources import ats, francetravail, hellowork, linkedin, wttj
 from .tailor import engine as cv_engine
 
 
+def _fetch_wttj(config: dict) -> list:
+    wt = config.get("wttj") or {}
+    queries = wt.get("queries") or [config["query"]]
+    jobs: list = []
+    for q in queries:
+        jobs += wttj.fetch(query=q, max_hits=config.get("max_hits", 100),
+                            country=(config.get("countries") or ["France"])[0])
+    return jobs
+
+
 def _fetch_linkedin(config: dict) -> list:
     li = config.get("linkedin") or {}
     if not li.get("enabled"):
@@ -30,10 +40,12 @@ def _fetch_francetravail(config: dict) -> list:
     ft = config.get("francetravail") or {}
     if not ft.get("enabled", True):
         return []
-    return francetravail.fetch(
-        query=config["query"],
-        departements=ft.get("departements", francetravail.IDF_DEPARTEMENTS),
-    )
+    departements = ft.get("departements", francetravail.IDF_DEPARTEMENTS)
+    queries = ft.get("queries") or [config["query"]]
+    jobs: list = []
+    for q in queries:
+        jobs += francetravail.fetch(query=q, departements=departements)
+    return jobs
 
 
 def _fetch_hellowork(config: dict) -> list:
@@ -54,9 +66,7 @@ def _gather(config: dict) -> list:
     token, a network hiccup, a rate-limit) only drops that source's jobs, never
     the whole run."""
     sources = [
-        ("wttj", lambda: wttj.fetch(query=config["query"],
-                                     max_hits=config.get("max_hits", 100),
-                                     country=(config.get("countries") or ["France"])[0])),
+        ("wttj", lambda: _fetch_wttj(config)),
         ("ats", lambda: ats.fetch_all(load_companies())),
         ("linkedin", lambda: _fetch_linkedin(config)),
         ("francetravail", lambda: _fetch_francetravail(config)),
@@ -103,6 +113,7 @@ def run_fetch(config: dict | None = None, jobs: list | None = None) -> dict:
                 conn, job, s.score, s.reasons,
                 filtered=s.filtered, filter_reason=s.filter_reason,
                 seniority=s.seniority, min_years=s.min_years, geo_tier=tier,
+                role_category=s.role_category,
             )
             if is_new:
                 tier_new[tier] = tier_new.get(tier, 0) + 1
@@ -184,7 +195,7 @@ def enrich_one(job_id: int) -> dict:
         s = match.screen(job, cfg)
         db.update_screening(conn, job_id, s.score, s.reasons, filtered=s.filtered,
                             filter_reason=s.filter_reason, seniority=s.seniority,
-                            min_years=s.min_years)
+                            min_years=s.min_years, role_category=s.role_category)
     return {"job_id": job_id, "enriched": True, "chars": len(text),
             "score": s.score, "filtered": s.filtered}
 
