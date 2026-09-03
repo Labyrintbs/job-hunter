@@ -24,24 +24,17 @@ def _rank(blocks: list[Block], terms: set[str]) -> list[Block]:
     return sorted(blocks, key=lambda b: len(b.tags & terms), reverse=True)
 
 
-_TEX_ESCAPES = {
-    "&": r"\&", "%": r"\%", "$": r"\$", "#": r"\#", "_": r"\_",
-    "{": r"\{", "}": r"\}", "~": r"\textasciitilde{}", "^": r"\textasciicircum{}",
-    "\\": r"\textbackslash{}",
-}
+# Update when the target start date changes. Kept as one constant so it's
+# never silently dropped by a re-tailor (see templates/cv_tailoring_workflow.md).
+AVAILABILITY = "September 2026"
 
 
-def _tex_escape(text: str) -> str:
-    return "".join(_TEX_ESCAPES.get(ch, ch) for ch in text)
-
-
-def _tagline(job: Job) -> str:
-    role = _tex_escape(job.title.strip().rstrip("."))
-    company = _tex_escape(job.company.strip())
-    who = f" at {company}" if company else ""
+def _tagline() -> str:
+    # Deliberately generic, same line as templates/cv_base.tex, no per-job
+    # "targeting <role> at <company>" clause. See templates/cv_tailoring_workflow.md.
     return (
-        f"{{Seeking a full-time Machine Learning role (CDI) — targeting "
-        f"{role}{who}; Île-de-France, open to mobility}}"
+        f"{{Seeking a full-time Machine Learning role (CDI) from {AVAILABILITY} — "
+        f"Île-de-France, open to mobility}}"
     )
 
 
@@ -57,7 +50,7 @@ def tailor_tex(job: Job, parsed: ParsedCV | None = None) -> str:
     doc = snippet_bank.reassemble(doc, r"PROJECTS[^}]*", _rank(parsed.projects, terms))
     doc = snippet_bank.reassemble(doc, r"PROFESSIONAL EXPERIENCE", _rank(parsed.experiences, terms))
     if parsed.heading_line:
-        doc = doc.replace(parsed.heading_line, _tagline(job), 1)
+        doc = doc.replace(parsed.heading_line, _tagline(), 1)
     return doc
 
 
