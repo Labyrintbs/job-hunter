@@ -24,10 +24,14 @@ cover letter per job, and track every application from a local web dashboard.
 - **Enrichment**: LinkedIn guest cards and SmartRecruiters carry no description, and
   WTTJ's profile field is sometimes empty; `jobhunter run` fetches the full text for
   every new job automatically (LinkedIn via its guest detail endpoint, others via the
-  job page), re-scores it with that real content, and writes it back — so the rule
-  score, the judge, and any local corpus built from the DB all see actual JD text, not
-  just the title. Older/backlog jobs you engage with later (marked interested, or moved
-  past `new`) are enriched lazily the same way. CLI: `jobhunter enrich [<id>]`.
+  job page), re-scores it with that real content, feeds the full text (up to 8000
+  chars) to the LLM judge, and writes it back — so the rule score, the judge, and any
+  local corpus built from the DB all see actual JD text, not just the title. Older/
+  backlog jobs you engage with later (marked interested, or moved past `new`) are
+  enriched lazily the same way. Each enriched JD is also saved as a plain-text file
+  under `data/jd/<source>__<external_id>.txt` for offline analysis outside the DB;
+  `jobhunter jd-dump` backfills those files for jobs enriched before this existed.
+  CLI: `jobhunter enrich [<id>]`.
 - **LLM fit-judge** (Claude): 0–100 score + verdict + reasons + seniority read
   (`seniority`, `min_years_required`), junior-calibrated.
 - **LaTeX CV auto-tailoring**: reorders your projects/experience by relevance to
@@ -169,7 +173,8 @@ $P -m pytest -q
 jobhunter/
   sources/                          fetch: wttj, ats, linkedin, francetravail, hellowork
   match.py                          scoring + relevance/seniority gate; applies approved rules
-  enrich.py                         lazy full-description fetch for engaged jobs
+  enrich.py                         full-description fetch (new jobs + engaged backlog)
+  jd_store.py                       saves each enriched JD to data/jd/ as plain text
   learn.py                          rule miner + LLM preference-profile condenser
   llm/provider.py                   Claude seam (API key or claude CLI)
   llm/judge.py, apply/cover_letter.py   LLM fit-judge (profile-injected) + cover letter

@@ -378,6 +378,15 @@ def jobs_by_id_needing_enrichment(conn: sqlite3.Connection, job_ids: list[int]) 
     ).fetchall()
 
 
+def jobs_with_full_description(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Every job that already has a full description stored -- used to backfill
+    the local JD text files for jobs enriched before jd_store existed."""
+    return conn.execute(
+        "SELECT id, source, external_id, title, company, url, description FROM jobs "
+        "WHERE COALESCE(description_full, 0) = 1"
+    ).fetchall()
+
+
 def update_screening(conn: sqlite3.Connection, job_id: int, score: int, reasons: str, *,
                      filtered: bool, filter_reason: str, seniority: str,
                      min_years: int | None) -> None:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 
-from . import db, export as export_mod, learn, schedule
+from . import db, export as export_mod, jd_store, learn, schedule
 from .config import DB_PATH, load_search_config
 from .llm import provider
 from .notify import dispatch as notify_dispatch
@@ -90,6 +90,8 @@ def main(argv: list[str] | None = None) -> int:
     p_export.add_argument("--view", default="all", choices=["all", *db.VIEW_NAMES])
     p_export.add_argument("--format", default="csv", choices=["csv", "json"])
     p_export.add_argument("--out", default=None, help="output dir (default data/export/)")
+
+    sub.add_parser("jd-dump", help="backfill data/jd/ text files for already-enriched jobs")
 
     p_web = sub.add_parser("web", help="run the dashboard")
     p_web.add_argument("--host", default="127.0.0.1")
@@ -364,6 +366,16 @@ def main(argv: list[str] | None = None) -> int:
         for p in paths:
             print(p)
         print(f"\n{len(paths)} file(s) written to {out}")
+        return 0
+
+    if args.command == "jd-dump":
+        db.init_db()
+        with db.connect() as conn:
+            rows = db.jobs_with_full_description(conn)
+        for r in rows:
+            jd_store.save_jd(source=r["source"], external_id=r["external_id"], title=r["title"],
+                             company=r["company"], url=r["url"], description=r["description"])
+        print(f"wrote {len(rows)} file(s) to {jd_store.JD_DIR}")
         return 0
 
     if args.command == "web":

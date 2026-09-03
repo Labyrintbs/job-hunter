@@ -42,7 +42,7 @@ def _insert(conn, config, **kw):
     return jid
 
 
-def test_enrich_one_rescopes_with_real_content(tmp_db, config, monkeypatch):
+def test_enrich_one_rescopes_with_real_content(tmp_db, config, monkeypatch, tmp_path):
     with db.connect() as conn:
         jid = _insert(conn, config)   # title-only: no boost keywords yet
         before = db.get_job(conn, jid)
@@ -59,6 +59,10 @@ def test_enrich_one_rescopes_with_real_content(tmp_db, config, monkeypatch):
     assert after["description"] == rich_text
     assert after["description_full"] == 1
     assert after["score"] == result["score"]
+
+    jd_file = tmp_path / "jd" / f"linkedin__{after['external_id']}.txt"
+    assert jd_file.exists()
+    assert rich_text in jd_file.read_text(encoding="utf-8")
 
 
 def test_enrich_new_skips_jobs_that_already_have_a_description(tmp_db, config, monkeypatch):

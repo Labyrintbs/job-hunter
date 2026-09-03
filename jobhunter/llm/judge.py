@@ -48,7 +48,8 @@ def judge(job: Job, preferences: str = "") -> dict:
         title=job.title,
         company=job.company,
         location=job.location,
-        description=(job.description or "")[:4000],
+        # 8000 matches enrich.py's _MAX_CHARS fetch cap -- the full stored JD, not half of it.
+        description=(job.description or "")[:8000],
     )
     data = provider.generate_json(prompt, system=SYSTEM, max_tokens=400)
     score = int(max(0, min(100, data.get("score", 0))))

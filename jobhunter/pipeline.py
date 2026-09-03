@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 
-from . import db, enrich, match
+from . import db, enrich, jd_store, match
 from .apply import cover_letter
 from .config import load_companies, load_search_config
 from .llm import judge as llm_judge
@@ -170,9 +170,12 @@ def enrich_one(job_id: int) -> dict:
         if not row:
             return {"job_id": job_id, "error": "not found"}
         source, ext, url = row["source"], row["external_id"], row["url"]
+        title, company = row["title"], row["company"]
     text = enrich.fetch_full_text(source, ext, url)
     if not text:
         return {"job_id": job_id, "enriched": False}
+    jd_store.save_jd(source=source, external_id=ext, title=title, company=company,
+                      url=url, description=text)
     config = load_search_config()
     with db.connect() as conn:
         db.set_description(conn, job_id, text)
