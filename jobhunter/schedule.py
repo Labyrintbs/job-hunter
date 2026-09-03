@@ -35,9 +35,13 @@ def _python() -> str:
     return sys.executable
 
 
-def cron_line(hour: int = 8, minute: int = 0) -> str:
+def cron_line(hour: int = 8, minute: int = 0, interval_hours: int | None = None) -> str:
+    """interval_hours, if given, overrides hour/minute with a `*/N` hour pattern
+    (e.g. 12 -> runs at 00:00 and 12:00) instead of a single fixed time/day."""
     py = _python()
     cmd = f"cd {REPO_ROOT} && {py} -m jobhunter.cli run >> {REPO_ROOT}/data/cron.log 2>&1"
+    if interval_hours:
+        return f"{minute} */{interval_hours} * * * {cmd} {MARKER}"
     return f"{minute} {hour} * * * {cmd} {MARKER}"
 
 
@@ -59,8 +63,8 @@ def with_entry(existing: str, line: str, marker: str = MARKER) -> str:
     return (base + "\n" if base else "") + line + "\n"
 
 
-def install(hour: int = 8, minute: int = 0) -> str:
-    line = cron_line(hour, minute)
+def install(hour: int = 8, minute: int = 0, interval_hours: int | None = None) -> str:
+    line = cron_line(hour, minute, interval_hours)
     _write_crontab(with_entry(_read_crontab(), line, MARKER))
     return line
 

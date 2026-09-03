@@ -32,7 +32,7 @@
 
 <table>
   <thead>
-    <tr><th>#</th><th>Score</th><th>LLM</th><th>Role</th><th>Company</th><th>Location</th><th>Added</th><th>Why</th><th>You</th><th>Status</th><th>Docs</th></tr>
+    <tr><th>#</th><th>Score</th><th>LLM</th><th>Role</th><th>Company</th><th>Location</th><th>Source</th><th>Added</th><th>Why</th><th>You</th><th>Status</th><th>Docs</th></tr>
   </thead>
   <tbody>
   {% for j in jobs %}
@@ -55,6 +55,7 @@
           <div class="muted" style="font-size:12px">{{ j["contract_type"] }} · {{ j["language"] }}</div></td>
       <td>{{ j["company"] }}</td>
       <td class="muted">{{ j["location"] }}</td>
+      <td class="muted" style="white-space:nowrap">{{ j["source"] }}</td>
       <td class="muted" style="white-space:nowrap" title="{{ j['fetched_at'] }}">{{ j["fetched_at"][:10] if j["fetched_at"] else "—" }}</td>
       <td class="reasons">{% if filtered and j["filter_reason"] %}<span style="color:var(--danger)">{{ j["filter_reason"] }}</span><br>{% endif %}{{ j["match_reasons"] }}</td>
       <td class="feedback">
@@ -111,7 +112,7 @@
       </td>
     </tr>
   {% else %}
-    <tr><td colspan="11" class="muted">{% if dismissed %}No dismissed jobs.{% elif interested %}No liked jobs yet — click 👍 on a job you're interested in.{% elif filtered %}Nothing in the Filtered bucket.{% elif stale %}No stale jobs — all postings are still appearing.{% else %}No jobs yet. Click “Fetch new jobs”.{% endif %}</td></tr>
+    <tr><td colspan="12" class="muted">{% if dismissed %}No dismissed jobs.{% elif interested %}No liked jobs yet — click 👍 on a job you're interested in.{% elif filtered %}Nothing in the Filtered bucket.{% elif stale %}No stale jobs — all postings are still appearing.{% else %}No jobs yet. Click “Fetch new jobs”.{% endif %}</td></tr>
   {% endfor %}
   </tbody>
 </table>

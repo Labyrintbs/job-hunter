@@ -96,11 +96,18 @@ new promising jobs (capped per run). Manage the crontab entry with:
 ```bash
 $P -m jobhunter.cli run                 # run once now (what cron calls)
 $P -m jobhunter.cli cron show           # preview the crontab line (no changes)
-$P -m jobhunter.cli cron install --time 08:00   # add the daily entry
+$P -m jobhunter.cli cron install --time 08:00   # add a once-daily entry at 08:00
+$P -m jobhunter.cli cron install --interval-hours 12   # or run every N hours instead (e.g. 00:00 + 12:00)
 $P -m jobhunter.cli cron uninstall      # remove it
 ```
-Installing is opt-in because the daily run makes LLM calls. Only the tagged
+Installing is opt-in because the daily run makes LLM calls (more frequent runs
+mean more judge calls — factor that into `--interval-hours`). Only the tagged
 `# jobhunter-daily` line is ever touched; your other cron jobs are preserved.
+
+A companion watchdog (`cron install --job watchdog`, hourly by default) self-heals
+missed runs — if the last fetch is older than `--max-gap-hours` (default 15h, kept
+above half the main interval so it doesn't duplicate every cycle's normal gap) it
+triggers a catch-up fetch and logs to `data/watchdog.log`.
 Output is appended to `data/cron.log`.
 
 The interpreter in the cron line is resolved by `schedule._python()`: first the

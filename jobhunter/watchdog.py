@@ -22,7 +22,7 @@ def _log(line: str) -> None:
         f.write(f"[{ts} UTC] {line}\n")
 
 
-def check_and_fetch(max_gap_hours: float = 6.0) -> dict:
+def check_and_fetch(max_gap_hours: float = 15.0) -> dict:
     """Compare now to the last fetch_runs.ran_at (stored in UTC). If the gap is
     >= max_gap_hours (or there's no prior run at all), trigger a catch-up run."""
     db.init_db()

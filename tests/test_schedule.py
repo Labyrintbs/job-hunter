@@ -8,6 +8,13 @@ def test_cron_line_shape():
     assert schedule.MARKER in line
 
 
+def test_cron_line_interval_hours_overrides_hour_minute():
+    line = schedule.cron_line(8, 30, interval_hours=12)
+    assert line.startswith("30 */12 * * *")   # minute kept, hour becomes an interval pattern
+    assert "jobhunter.cli run" in line
+    assert schedule.MARKER in line
+
+
 def test_with_entry_adds_and_is_idempotent():
     existing = "0 0 * * * /other/job\n"
     once = schedule.with_entry(existing, schedule.cron_line(8, 0))
