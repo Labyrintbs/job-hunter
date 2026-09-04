@@ -27,6 +27,18 @@ def test_judge_without_preferences_has_no_pref_block(monkeypatch):
     assert "LEARNED PREFERENCES" not in captured["prompt"]
 
 
+def test_judge_uses_condensed_profile_not_full(monkeypatch):
+    # The judge should get background/skills, not verbose project bullets.
+    captured = {}
+    monkeypatch.setattr(J.provider, "generate_json",
+                        lambda prompt, system=None, **kw: captured.update(prompt=prompt)
+                        or {"score": 50, "verdict": "stretch", "reasons": ""})
+    job = Job(source="wttj", external_id="1", title="ML Engineer", company="C", description="d")
+    J.judge(job)
+    assert "SKILLS" in captured["prompt"]
+    assert "Point Cloud" not in captured["prompt"]
+
+
 def test_judge_passes_up_to_8000_chars_of_description(monkeypatch):
     captured = {}
     monkeypatch.setattr(J.provider, "generate_json",

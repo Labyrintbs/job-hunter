@@ -29,11 +29,50 @@ JUNIOR_TERMS = [
     "débutant", "debutant", "jeune diplômé", "jeune diplome", "associate",
 ]
 
+# Explicit citizenship-as-eligibility clauses (distinct from generic "security clearance"
+# language, which is a softer signal). Hard-gates the posting regardless of everything
+# else -- see templates/cv_tailoring_workflow.md's "Citizenship / eligibility" rule.
+_CITIZENSHIP_RE = re.compile(
+    r"must (?:hold|have)[a-z\s]{0,25}citizenship"
+    r"|citizenship (?:in|of) the target territory"
+    r"|citizenship requirement"
+    r"|(?:french|eu|european|us|u\.s\.) citizenship (?:is )?required"
+    r"|require[sd]? .{0,20}citizenship"
+    r"|nationalité (?:française )?(?:est )?(?:requise|exigée)"
+    r"|être de nationalité (?:française|europ[ée]enne)",
+    re.IGNORECASE,
+)
+
+# Consulting/staffing/forward-deployed tells, high-precision phrases only (a bare "mission"
+# or "conseil" is too common in unrelated boilerplate -- these are the phrasings that
+# actually discriminated ESN/forward-deployed postings from product-company ones in
+# practice). Soft signal (score penalty), not a hard filter: some consultancies have
+# genuinely strong technical roles, this is a flag for review, not an auto-reject.
+CLIENT_FACING_TERMS = [
+    "pre-sales", "presales", "pre sales", "avant-vente",
+    "forward deployed", "forward-deployed",
+    "customer-facing", "customer facing",
+    "cabinet de conseil", "conseil et ingénierie",
+    "chez nos clients", "chez le client", "accompagner nos clients",
+    "pour le compte d'un client", "pour nos clients",
+    "contexte de la mission", "en mission chez",
+]
+
+
+def has_citizenship_requirement(text: str) -> bool:
+    return bool(_CITIZENSHIP_RE.search(text))
+
 # A years-of-experience requirement, only when tied to an experience/expérience context
-# (so "founded 8 years ago" is not read as "requires 8 years").
+# (so "founded 8 years ago" is not read as "requires 8 years"). The trailing-context
+# branch also accepts a small set of work verbs (not just "experience" itself) so
+# phrasing like "4+ years working on large-scale ML codebases" still parses — a real
+# posting that silently evaded the seniority gate before this was added.
 _EXP_YEARS_RE = re.compile(
     r"(?:(\d{1,2})\s*\+?\s*(?:-|–|to|à|au)?\s*\d{0,2}\s*"
-    r"(?:years?|yrs?|ans|années?|annees?)[^.\n]{0,40}?(?:experience|expérience|experiences?|exp\b|d['’]exp)"
+    r"(?:years?|yrs?|ans|années?|annees?)[^.\n]{0,40}?"
+    r"(?:experience|expérience|experiences?|exp\b|d['’]exp"
+    r"|working|building|developing|leading|managing|shipping|delivering"
+    r"|travaillant|travaillé|construisant)"
     r"|(?:experience|expérience|minimum|at least|au moins)[^.\n]{0,40}?"
     r"(\d{1,2})\s*\+?\s*(?:-|–|to|à)?\s*\d{0,2}\s*(?:years?|yrs?|ans|années?|annees?))",
     re.IGNORECASE,
@@ -143,6 +182,11 @@ def score(job: Job, config: dict) -> tuple[int, list[str]]:
         pts -= 15
         reasons.append(f"seniority signal '{senior_hit.strip()}'")
 
+    client_hit = next((t for t in CLIENT_FACING_TERMS if t in text), None)
+    if client_hit:
+        pts -= 15
+        reasons.append(f"client-facing/consulting signal '{client_hit}'")
+
     return max(0, min(100, pts)), reasons
 
 
@@ -235,6 +279,8 @@ def screen(job: Job, config: dict) -> Screening:
         flags.append("senior title")
     if gate and seniority != "junior" and min_years is not None and min_years > max_years:
         flags.append(f"requires {min_years}+ yrs")
+    if config.get("citizenship_gate", True) and has_citizenship_requirement(_text(job)):
+        flags.append("citizenship/eligibility requirement")
     if pts < config.get("min_score", 0):
         flags.append(f"score<{config.get('min_score', 0)}")
 

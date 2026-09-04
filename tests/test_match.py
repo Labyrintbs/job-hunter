@@ -1,4 +1,5 @@
-from jobhunter.match import classify_role, detect_seniority, is_relevant, min_years_required, screen
+from jobhunter.match import (classify_role, detect_seniority, has_citizenship_requirement,
+                              is_relevant, min_years_required, screen)
 from jobhunter.models import Job
 
 
@@ -126,3 +127,65 @@ def test_classify_role_title_takes_priority_over_description(config):
 def test_screen_surfaces_role_category(config):
     s = screen(J(title="Computer Vision Engineer"), config)
     assert s.role_category == "CV"
+
+
+# --- min_years_required: "years working on X" phrasing without the word "experience" ---
+
+def test_min_years_catches_years_working_on_phrasing():
+    # Real posting that used to evade the seniority gate entirely (min_years == None)
+    # because the old regex required "experience"/"expérience" to co-occur with the number.
+    assert min_years_required("4 + years working on large-scale ml codebases.") == 4
+
+
+def test_min_years_still_ignores_company_age():
+    assert min_years_required("founded 8 years ago in paris") is None
+    assert min_years_required("we have been building this company for 10 years") is None
+
+
+def test_min_years_still_catches_experience_phrasing():
+    assert min_years_required("environ 3 ans d'expérience en machine learning") == 3
+    assert min_years_required("proven track record... 2+ years of experience in ai/ml") == 2
+
+
+# --- citizenship / eligibility hard gate ---
+
+def test_citizenship_requirement_detected():
+    assert has_citizenship_requirement(
+        "eligibility: must hold citizenship in the target territory (france for now)."
+    ) is True
+
+
+def test_citizenship_requirement_not_confused_with_generic_clearance_language():
+    # "security clearance" alone is a softer signal, not the explicit-citizenship red line.
+    assert has_citizenship_requirement(
+        "clearable: must meet all local requirements for high-level security clearance."
+    ) is False
+
+
+def test_screen_filters_job_with_citizenship_requirement(config):
+    s = screen(J(desc="eligibility: must hold citizenship in the target territory (france)."),
+               config)
+    assert s.keep is True             # still stored, reviewable
+    assert s.filtered is True
+    assert "citizenship" in s.filter_reason
+
+
+def test_citizenship_gate_can_be_disabled_via_config(config):
+    cfg = {**config, "citizenship_gate": False}
+    s = screen(J(desc="must hold citizenship in the target territory."), cfg)
+    assert s.filtered is False
+
+
+# --- client-facing / consulting soft signal ---
+
+def test_client_facing_language_penalizes_score(config):
+    plain = screen(J(title="AI Engineer", desc="build LLM applications"), config).score
+    forward_deployed = screen(
+        J(title="Applied AI Engineer", desc="build LLM applications, forward deployed"), config
+    ).score
+    assert forward_deployed < plain
+
+
+def test_client_facing_reason_surfaced(config):
+    s = screen(J(desc="you'll join pre-sales calls with our customers"), config)
+    assert any("client-facing" in r for r in s.reasons.split("; "))
