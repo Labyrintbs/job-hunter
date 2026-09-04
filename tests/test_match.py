@@ -18,6 +18,19 @@ def test_alternance_excluded(config):
     assert screen(J(title="Alternance Data Scientist"), config).keep is False
 
 
+def test_freelance_contract_type_excluded(config):
+    """Regression: HelloWork (and other French sources) report contract type as
+    'Indépendant', not the English 'freelance' -- both must be caught."""
+    job = J(contract="Indépendant")
+    s = screen(job, config)
+    assert s.keep is False and "excluded" in s.filter_reason
+
+
+def test_portage_salarial_excluded(config):
+    job = J(contract="Portage salarial")
+    assert screen(job, config).keep is False
+
+
 def test_non_ml_title_dropped_even_with_ml_boilerplate(config):
     job = J(title="Product Manager", desc="We are a machine learning company using pytorch.")
     assert is_relevant(job, config) is False

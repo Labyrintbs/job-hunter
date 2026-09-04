@@ -95,6 +95,9 @@ exclude_terms:
   - apprentissage
   - vie
   - freelance
+  - indépendant
+  - independant
+  - portage salarial
 
 # Companies to never show.
 company_blocklist: []
