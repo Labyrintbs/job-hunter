@@ -216,3 +216,34 @@ def test_daily_run_enriches_before_judging(tmp_db, config, monkeypatch):
 
     assert summary["judged"] == 1
     assert captured["description"] == marker   # judge saw the enriched content, not empty/title-only
+
+
+def test_judge_one_auto_hides_weak_verdict(tmp_db, config, monkeypatch):
+    with db.connect() as conn:
+        jid = _insert(conn, config)
+    monkeypatch.setattr(pipeline.llm_judge, "judge", lambda job, preferences="":
+                        {"score": 15, "verdict": "weak", "seniority": "junior",
+                         "min_years": 0, "reasons": "domain mismatch"})
+
+    pipeline.judge_one(jid)
+
+    with db.connect() as conn:
+        row = db.get_job(conn, jid)
+    assert row["llm_score"] == 15
+    assert row["filtered"] == 1
+    assert row["filter_reason"] == "llm judge: weak fit"
+
+
+def test_judge_one_does_not_hide_good_or_stretch_verdicts(tmp_db, config, monkeypatch):
+    with db.connect() as conn:
+        jid = _insert(conn, config)
+    monkeypatch.setattr(pipeline.llm_judge, "judge", lambda job, preferences="":
+                        {"score": 55, "verdict": "stretch", "seniority": "junior",
+                         "min_years": 0, "reasons": "uncertain fit"})
+
+    pipeline.judge_one(jid)
+
+    with db.connect() as conn:
+        row = db.get_job(conn, jid)
+    assert row["llm_score"] == 55
+    assert row["filtered"] == 0

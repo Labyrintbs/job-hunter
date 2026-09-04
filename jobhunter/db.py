@@ -328,7 +328,10 @@ def add_fetch_run(conn: sqlite3.Connection, stats: dict) -> int:
 
 
 SORT_ORDERS = {
-    "score": "j.score DESC, j.fetched_at DESC",
+    # Once the LLM judge has an opinion, it's a more informed signal than the rule-based
+    # keyword score (which can't see company type, domain fit, or hard disqualifiers) --
+    # let it take over ranking. Unjudged jobs fall back to the rule score, all we have.
+    "score": "COALESCE(j.llm_score, j.score) DESC, j.score DESC, j.fetched_at DESC",
     "fetched_at": "j.fetched_at DESC, j.score DESC",
 }
 
@@ -579,6 +582,19 @@ def list_cv_artifacts(conn: sqlite3.Connection, job_id: int) -> list[sqlite3.Row
         "SELECT * FROM cv_artifacts WHERE job_id = ? ORDER BY generated_at DESC, id DESC",
         (job_id,),
     ).fetchall()
+
+
+def set_llm_filter(conn: sqlite3.Connection, job_id: int, filter_reason: str) -> None:
+    """Auto-hide a job into the Filtered bucket on a weak LLM verdict, without touching
+    its rule-based score/reasons. Appends to any existing filter_reason rather than
+    clobbering it, in case a rule-based reason is already there."""
+    row = conn.execute("SELECT filter_reason FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    existing = (row["filter_reason"] or "").strip() if row else ""
+    combined = f"{existing}; {filter_reason}" if existing else filter_reason
+    conn.execute(
+        "UPDATE jobs SET filtered = 1, filter_reason = ? WHERE id = ?",
+        (combined, job_id),
+    )
 
 
 def set_llm_judgment(conn: sqlite3.Connection, job_id: int, score: int,

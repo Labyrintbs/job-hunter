@@ -174,3 +174,34 @@ def test_llm_and_cover_setters(tmp_db):
         rows = db.list_jobs(conn)
         assert rows[0]["llm_score"] == 88
         assert rows[0]["cover_letter_path"] == "/tmp/cl.md"
+
+
+def test_default_sort_prefers_llm_score_over_rule_score(tmp_db):
+    """A high rule score with a low (informed) llm_score should rank below a lower
+    rule score that the judge actually likes -- regression for the Decathlon case
+    (rule=70, llm=15) outranking genuinely good fits."""
+    with db.connect() as conn:
+        high_rule_weak_llm, _ = db.upsert_job(
+            conn, J("1", url="http://x/1", company="CoA"), 90, "r")
+        db.set_llm_judgment(conn, high_rule_weak_llm, 15, "weak", "domain mismatch")
+        low_rule_good_llm, _ = db.upsert_job(
+            conn, J("2", url="http://x/2", company="CoB"), 40, "r")
+        db.set_llm_judgment(conn, low_rule_good_llm, 85, "strong", "great fit")
+        unjudged, _ = db.upsert_job(conn, J("3", url="http://x/3", company="CoC"), 60, "r")
+
+        ids = [r["id"] for r in db.list_jobs(conn, filtered=None)]
+        assert ids.index(low_rule_good_llm) < ids.index(unjudged) < ids.index(high_rule_weak_llm)
+
+
+def test_set_llm_filter_hides_job_and_preserves_existing_reason(tmp_db):
+    with db.connect() as conn:
+        jid, _ = db.upsert_job(conn, J("1", url="http://x/1"), 60, "r")
+        db.set_llm_filter(conn, jid, "llm judge: weak fit")
+        row = db.get_job(conn, jid)
+        assert row["filtered"] == 1
+        assert row["filter_reason"] == "llm judge: weak fit"
+
+        # A second call (e.g. re-judged) appends rather than clobbering.
+        db.set_llm_filter(conn, jid, "llm judge: weak fit (re-judged)")
+        assert db.get_job(conn, jid)["filter_reason"] == \
+            "llm judge: weak fit; llm judge: weak fit (re-judged)"

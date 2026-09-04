@@ -264,6 +264,10 @@ def judge_one(job_id: int) -> dict:
         db.set_llm_judgment(conn, job_id, result["score"], result["verdict"], result["reasons"])
         if result.get("seniority") or result.get("min_years") is not None:
             db.set_seniority(conn, job_id, result.get("seniority", ""), result.get("min_years"))
+        if result["verdict"] == "weak":
+            # A weak verdict is a more informed signal than the rule score that got it
+            # onto the board in the first place -- auto-hide it like any other filter.
+            db.set_llm_filter(conn, job_id, "llm judge: weak fit")
     return {"job_id": job_id, **result}
 
 
