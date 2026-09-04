@@ -1,5 +1,6 @@
 from jobhunter import db, pipeline
 from jobhunter.models import Job
+from jobhunter.tailor import engine as cv_engine
 
 
 def test_gather_survives_a_source_exception(config, monkeypatch):
@@ -104,6 +105,56 @@ def test_run_fetch_persists_role_category(tmp_db, config, monkeypatch):
     with db.connect() as conn:
         row = db.get_job(conn, stats["new_ids"][0])
     assert row["role_category"] == "CV"
+
+
+def test_run_fetch_precreates_cv_folder_for_kept_not_filtered_jobs(tmp_db, config, monkeypatch):
+    kept = Job(source="wttj", external_id="1", title="Computer Vision Engineer",
+               company="Acme", location="Paris, Ile-de-France, France")
+    filtered = Job(source="wttj", external_id="2", title="ML Engineer",
+                    company="OtherCo", location="Paris, Ile-de-France, France",
+                    description="French citizenship is required for this role.")
+    monkeypatch.setattr(pipeline, "_gather", lambda cfg: [kept, filtered])
+    stats = pipeline.run_fetch(config)
+
+    with db.connect() as conn:
+        kept_row = db.get_job(conn, stats["new_ids"][0])
+        filtered_id = [r["id"] for r in db.list_jobs(conn, filtered=1)][0]
+        filtered_row = db.get_job(conn, filtered_id)
+    assert filtered_row["filtered"] == 1
+
+    kept_dir = cv_engine.CV_OUT_DIR / f"{kept_row['id']}-{cv_engine._slug(kept_row['company'])}"
+    filtered_dir = cv_engine.CV_OUT_DIR / f"{filtered_row['id']}-{cv_engine._slug(filtered_row['company'])}"
+    assert kept_dir.is_dir()
+    assert not filtered_dir.exists()
+
+
+def test_enrich_one_drops_jd_copy_into_the_cv_folder(tmp_db, config, monkeypatch):
+    with db.connect() as conn:
+        jid = _insert(conn, config, source="linkedin", external_id="7", company="Acme")
+
+    monkeypatch.setattr(pipeline.enrich, "fetch_full_text",
+                        lambda *a, **k: "We build with pytorch and deep learning models.")
+    pipeline.enrich_one(jid)
+
+    with db.connect() as conn:
+        row = db.get_job(conn, jid)
+    assert row["filtered"] == 0
+    jd_copy = cv_engine.CV_OUT_DIR / f"{jid}-{cv_engine._slug(row['company'])}" / "jd.txt"
+    assert jd_copy.exists()
+    assert "pytorch" in jd_copy.read_text(encoding="utf-8")
+
+
+def test_enrich_one_skips_cv_folder_copy_when_enrichment_flips_to_filtered(tmp_db, config, monkeypatch):
+    with db.connect() as conn:
+        jid = _insert(conn, config, source="linkedin", external_id="8", company="OtherCo")
+
+    monkeypatch.setattr(pipeline.enrich, "fetch_full_text",
+                        lambda *a, **k: "French citizenship is required for this role.")
+    result = pipeline.enrich_one(jid)
+    assert result["filtered"] is True
+
+    jd_copy = cv_engine.CV_OUT_DIR / f"{jid}-{cv_engine._slug('OtherCo')}" / "jd.txt"
+    assert not jd_copy.exists()
 
 
 def test_enrich_one_can_flip_role_category(tmp_db, config, monkeypatch):

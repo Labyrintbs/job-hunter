@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 import time
 
 from . import db, enrich, jd_store, match
@@ -124,6 +125,11 @@ def run_fetch(config: dict | None = None, jobs: list | None = None) -> dict:
                 else:
                     new_ids.append(jid)
                     per_source[job.source] = per_source.get(job.source, 0) + 1
+                    # Pre-create the CV folder as soon as a job clears the filter (i.e.
+                    # would show on the dashboard), so the JD (once fetched) and any
+                    # tailored CV later land in the same place for offline analysis.
+                    out_dir = cv_engine.CV_OUT_DIR / f"{jid}-{cv_engine._slug(job.company)}"
+                    out_dir.mkdir(parents=True, exist_ok=True)
 
         stats = {
             "fetched": seen, "kept": kept, "new": len(new_ids),
@@ -185,8 +191,8 @@ def enrich_one(job_id: int) -> dict:
     text = enrich.fetch_full_text(source, ext, url)
     if not text:
         return {"job_id": job_id, "enriched": False}
-    jd_store.save_jd(source=source, external_id=ext, title=title, company=company,
-                      url=url, description=text)
+    jd_path = jd_store.save_jd(source=source, external_id=ext, title=title, company=company,
+                                url=url, description=text)
     config = load_search_config()
     with db.connect() as conn:
         db.set_description(conn, job_id, text)
@@ -196,6 +202,12 @@ def enrich_one(job_id: int) -> dict:
         db.update_screening(conn, job_id, s.score, s.reasons, filtered=s.filtered,
                             filter_reason=s.filter_reason, seniority=s.seniority,
                             min_years=s.min_years, role_category=s.role_category)
+    if not s.filtered:
+        # Keep a copy of the JD right next to where the tailored CV will land,
+        # so both are in one place for later analysis.
+        out_dir = cv_engine.CV_OUT_DIR / f"{job_id}-{cv_engine._slug(company)}"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy(jd_path, out_dir / "jd.txt")
     return {"job_id": job_id, "enriched": True, "chars": len(text),
             "score": s.score, "filtered": s.filtered}
 
