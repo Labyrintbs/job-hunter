@@ -7,7 +7,7 @@ from jobhunter.tailor.engine import BASE_CV
 
 def test_parse_blocks():
     parsed = snippet_bank.parse(BASE_CV)
-    assert len(parsed.projects) == 3
+    assert len(parsed.projects) == 6
     assert len(parsed.experiences) == 3
     assert parsed.heading_line
 
@@ -27,16 +27,14 @@ def test_reorder_floats_relevant_experience_first():
     assert "DiliTrust" in ranked[0].text
 
 
-def test_tex_escape_specials():
-    assert engine._tex_escape("R&D H/F 100%") == r"R\&D H/F 100\%"
-
-
-def test_tailor_changes_tagline_and_is_valid_latex_structure():
+def test_tailor_uses_fixed_generic_tagline_and_is_valid_latex_structure():
+    # Tagline is a fixed generic line, no per-job "targeting <role> at <company>"
+    # clause -- see templates/cv_tailoring_workflow.md's header-tagline rule.
     job = Job(source="x", external_id="1", title="ML Engineer & Data H/F",
               company="Acme & Co", description="machine learning")
     tex = engine.tailor_tex(job)
-    assert "targeting" in tex                 # tagline rewritten
-    assert r"\&" in tex                        # company '&' escaped
+    assert engine._tagline() in tex
+    assert "targeting" not in tex
     assert tex.count(r"\begin{document}") == 1
     assert tex.count(r"\end{document}") == 1
 
