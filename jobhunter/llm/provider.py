@@ -74,10 +74,16 @@ def _generate_api(prompt: str, system: str | None, max_tokens: int) -> str:
     return "".join(block.text for block in msg.content if getattr(block, "type", "") == "text").strip()
 
 
-def _generate_cli(prompt: str, system: str | None, timeout: int) -> str:
+def _generate_cli(prompt: str, system: str | None, timeout: int,
+                  json_schema: dict | None = None) -> str:
     cmd = [_cli_path() or "claude", "-p", prompt]
     if system:
         cmd += ["--append-system-prompt", system]
+    if json_schema:
+        # Structured-output validation -- the CLI has no --max-tokens equivalent, so this
+        # (not a token cap) is what actually prevents truncated/invalid JSON on longer
+        # responses: the model is constrained to emit a complete object matching the schema.
+        cmd += ["--json-schema", json.dumps(json_schema)]
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     if proc.returncode != 0:
         raise LLMUnavailable(f"claude CLI failed: {proc.stderr[:300]}")
@@ -85,17 +91,26 @@ def _generate_cli(prompt: str, system: str | None, timeout: int) -> str:
 
 
 def generate(prompt: str, system: str | None = None, max_tokens: int = 1500,
-             timeout: int = DEFAULT_TIMEOUT) -> str:
+             timeout: int = DEFAULT_TIMEOUT, json_schema: dict | None = None) -> str:
     if _has_api_key():
+        # max_tokens applies here; the CLI path below has no equivalent knob.
         return _generate_api(prompt, system, max_tokens)
     if _has_cli():
-        return _generate_cli(prompt, system, timeout)
+        return _generate_cli(prompt, system, timeout, json_schema=json_schema)
     raise LLMUnavailable("no ANTHROPIC_API_KEY and no `claude` CLI on PATH")
 
 
-def generate_json(prompt: str, system: str | None = None, **kw) -> dict:
-    """Generate and parse a JSON object, tolerating prose or code fences around it."""
-    raw = generate(prompt, system=system, **kw)
+def generate_json(prompt: str, system: str | None = None, json_schema: dict | None = None,
+                  **kw) -> dict:
+    """Generate and parse a JSON object. Pass json_schema to constrain the CLI backend to
+    valid, complete, schema-conformant output (recommended -- see _generate_cli); without
+    it, or on the API backend, this tolerates prose or code fences around a JSON object."""
+    raw = generate(prompt, system=system, json_schema=json_schema, **kw)
+    if json_schema:
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            pass   # e.g. the API backend doesn't enforce the schema -- fall through
     m = re.search(r"\{.*\}", raw, re.S)
     if not m:
         raise ValueError(f"no JSON object in LLM output: {raw[:200]}")

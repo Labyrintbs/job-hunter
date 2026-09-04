@@ -39,6 +39,19 @@ def test_judge_uses_condensed_profile_not_full(monkeypatch):
     assert "Point Cloud" not in captured["prompt"]
 
 
+def test_judge_passes_the_result_schema_to_the_provider(monkeypatch):
+    # This is what actually prevents truncated/invalid JSON on the CLI backend -- not
+    # max_tokens, which the CLI has no equivalent for. See provider._generate_cli.
+    captured = {}
+    monkeypatch.setattr(J.provider, "generate_json",
+                        lambda prompt, system=None, **kw: captured.update(kw)
+                        or {"score": 50, "verdict": "stretch", "seniority": "junior",
+                            "min_years": 0, "reasons": ""})
+    job = Job(source="wttj", external_id="1", title="ML Engineer", company="C", description="d")
+    J.judge(job)
+    assert captured["json_schema"] == J.RESULT_SCHEMA
+
+
 def test_judge_passes_up_to_8000_chars_of_description(monkeypatch):
     captured = {}
     monkeypatch.setattr(J.provider, "generate_json",

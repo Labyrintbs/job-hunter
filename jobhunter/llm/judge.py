@@ -56,6 +56,21 @@ Rate the fit and return ONLY a JSON object:
   "seniority": "<junior|mid|senior>", "min_years": <int required years, 0 if none stated>,
   "reasons": "<= 3 sentences>"}}"""
 
+# Passed as --json-schema to the claude CLI: constrains it to emit a complete, valid
+# object matching this shape instead of free-form prose that can get cut off mid-JSON
+# on longer (e.g. multi-reason "weak") responses. See provider._generate_cli.
+RESULT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "score": {"type": "integer", "minimum": 0, "maximum": 100},
+        "verdict": {"type": "string", "enum": ["strong", "good", "stretch", "weak"]},
+        "seniority": {"type": "string", "enum": ["junior", "mid", "senior"]},
+        "min_years": {"type": "integer", "minimum": 0},
+        "reasons": {"type": "string"},
+    },
+    "required": ["score", "verdict", "seniority", "min_years", "reasons"],
+}
+
 
 def _int_or_none(value) -> int | None:
     try:
@@ -78,7 +93,7 @@ def judge(job: Job, preferences: str = "") -> dict:
         # 8000 matches enrich.py's _MAX_CHARS fetch cap -- the full stored JD, not half of it.
         description=(job.description or "")[:8000],
     )
-    data = provider.generate_json(prompt, system=SYSTEM, max_tokens=400)
+    data = provider.generate_json(prompt, system=SYSTEM, max_tokens=600, json_schema=RESULT_SCHEMA)
     score = int(max(0, min(100, data.get("score", 0))))
     return {
         "score": score,
