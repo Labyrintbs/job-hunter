@@ -250,6 +250,12 @@ def enrich_new(job_ids: list[int]) -> dict:
     return {"candidates": len(pending), "enriched": enriched}
 
 
+# Below this, there's not enough real JD text to judge on -- title/company alone
+# (LinkedIn guest cards, thin WTTJ profiles) makes the LLM guess rather than assess,
+# and that guess tends to read as more confident/optimistic than it should.
+_MIN_DESCRIPTION_CHARS = 100
+
+
 def judge_one(job_id: int) -> dict:
     """LLM fit-judge one job; store score/verdict/reasons on the job."""
     db.init_db()
@@ -259,6 +265,8 @@ def judge_one(job_id: int) -> dict:
             return {"job_id": job_id, "error": "not found"}
         job = db.job_from_row(row)
         profile = db.current_profile(conn)
+    if len((job.description or "").strip()) < _MIN_DESCRIPTION_CHARS:
+        return {"job_id": job_id, "skipped": "no real JD content yet"}
     result = llm_judge.judge(job, preferences=profile["text"] if profile else "")
     with db.connect() as conn:
         db.set_llm_judgment(conn, job_id, result["score"], result["verdict"], result["reasons"])
@@ -272,20 +280,26 @@ def judge_one(job_id: int) -> dict:
 
 
 def judge_all(min_score: int = 40, limit: int | None = None) -> dict:
-    """Judge every stored job at/above a rule-score threshold that isn't judged yet."""
+    """Judge every stored job at/above a rule-score threshold that isn't judged yet.
+    Skips jobs with no real JD content rather than burning a call on a title-only guess --
+    see judge_one's _MIN_DESCRIPTION_CHARS gate."""
     db.init_db()
     with db.connect() as conn:
         rows = [r for r in db.list_jobs(conn, min_score=min_score) if r["llm_score"] is None]
     if limit:
         rows = rows[:limit]
     judged = 0
+    skipped = 0
     for r in rows:
         try:
-            judge_one(r["id"])
-            judged += 1
+            result = judge_one(r["id"])
+            if result.get("skipped"):
+                skipped += 1
+            else:
+                judged += 1
         except Exception as exc:
             print(f"  judge warn: job {r['id']} failed: {exc}")
-    return {"candidates": len(rows), "judged": judged}
+    return {"candidates": len(rows), "judged": judged, "skipped_no_description": skipped}
 
 
 def cover_one(job_id: int) -> dict:

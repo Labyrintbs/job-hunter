@@ -198,7 +198,7 @@ def test_daily_run_enriches_before_judging(tmp_db, config, monkeypatch):
                     company="Acme", location="Paris, Ile-de-France, France", url="http://x/99")
     monkeypatch.setattr(pipeline, "_gather", lambda cfg: [fresh_job])
 
-    marker = "SPECIAL_MARKER_ONLY_PRESENT_AFTER_ENRICHMENT"
+    marker = "SPECIAL_MARKER_ONLY_PRESENT_AFTER_ENRICHMENT " * 3   # clears the judge's min-length gate
     monkeypatch.setattr(pipeline.enrich, "fetch_full_text", lambda *a, **k: marker)
     monkeypatch.setattr(pipeline.provider, "available", lambda: True)
 
@@ -218,9 +218,12 @@ def test_daily_run_enriches_before_judging(tmp_db, config, monkeypatch):
     assert captured["description"] == marker   # judge saw the enriched content, not empty/title-only
 
 
+_REAL_JD = "x" * 150   # clears judge_one's _MIN_DESCRIPTION_CHARS gate
+
+
 def test_judge_one_auto_hides_weak_verdict(tmp_db, config, monkeypatch):
     with db.connect() as conn:
-        jid = _insert(conn, config)
+        jid = _insert(conn, config, description=_REAL_JD)
     monkeypatch.setattr(pipeline.llm_judge, "judge", lambda job, preferences="":
                         {"score": 15, "verdict": "weak", "seniority": "junior",
                          "min_years": 0, "reasons": "domain mismatch"})
@@ -234,9 +237,23 @@ def test_judge_one_auto_hides_weak_verdict(tmp_db, config, monkeypatch):
     assert row["filter_reason"] == "llm judge: weak fit"
 
 
+def test_judge_one_skips_jobs_with_no_real_description(tmp_db, config, monkeypatch):
+    with db.connect() as conn:
+        jid = _insert(conn, config, description="")
+    called = []
+    monkeypatch.setattr(pipeline.llm_judge, "judge", lambda job, preferences="": called.append(1))
+
+    result = pipeline.judge_one(jid)
+
+    assert result.get("skipped")
+    assert called == []   # never even called the LLM -- no ungrounded guess
+    with db.connect() as conn:
+        assert db.get_job(conn, jid)["llm_score"] is None
+
+
 def test_judge_one_does_not_hide_good_or_stretch_verdicts(tmp_db, config, monkeypatch):
     with db.connect() as conn:
-        jid = _insert(conn, config)
+        jid = _insert(conn, config, description=_REAL_JD)
     monkeypatch.setattr(pipeline.llm_judge, "judge", lambda job, preferences="":
                         {"score": 55, "verdict": "stretch", "seniority": "junior",
                          "min_years": 0, "reasons": "uncertain fit"})
