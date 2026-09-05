@@ -61,3 +61,15 @@ def test_import_with_tex(tmp_db, tmp_path, monkeypatch):
 def test_import_missing_job(tmp_db, tmp_path, monkeypatch):
     monkeypatch.setattr(cv_engine, "CV_OUT_DIR", tmp_path / "cv")
     assert pipeline.import_revised_cv(9999, b"%PDF").get("error") == "not found"
+
+
+def test_failed_compile_shows_attempted_but_no_pdf(tmp_db):
+    """tailor_one always records an artifact even when the PDF fails to compile
+    (pdf_path=""), so the dashboard can tell "tried and failed" apart from
+    "never attempted" using cv_versions > 0 with cv_pdf falsy -- no new column."""
+    with db.connect() as conn:
+        jid = _seed(conn)
+        db.add_cv_artifact(conn, jid, "/tmp/cv.tex", "", origin="ai")
+        listed = db.list_jobs(conn)[0]
+    assert listed["cv_versions"] == 1
+    assert not listed["cv_pdf"]

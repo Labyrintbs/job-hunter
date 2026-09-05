@@ -54,6 +54,10 @@ def main(argv: list[str] | None = None) -> int:
 
     p_run = sub.add_parser("run", help="one scheduled run: fetch + judge new jobs (cron target)")
     p_run.add_argument("--no-judge", action="store_true")
+    p_run.add_argument("--no-tailor", action="store_true",
+                       help="skip auto-tailoring a CV + cover letter for non-weak-verdict jobs")
+    p_run.add_argument("--tailor-limit", type=int, default=10,
+                       help="max jobs auto-tailored per run (each cover letter is an LLM call)")
 
     p_cron = sub.add_parser("cron", help="manage the daily crontab entry")
     p_cron.add_argument("action", choices=["show", "install", "uninstall"], nargs="?", default="show")
@@ -195,10 +199,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "run":
-        summary = daily_run(judge=not args.no_judge)
+        summary = daily_run(judge=not args.no_judge, auto_tailor=not args.no_tailor,
+                           auto_tailor_limit=args.tailor_limit)
         print(f"fetched={summary['fetched']} kept={summary['kept']} new={summary['new']} "
               f"filtered_new={summary.get('filtered_new', 0)} judged={summary['judged']} "
-              f"enriched={summary.get('enriched', 0)}")
+              f"tailored={summary.get('tailored', 0)} enriched={summary.get('enriched', 0)}")
         if summary.get("new_by_source"):
             print("  new by source:", dict(summary["new_by_source"]))
         return 0

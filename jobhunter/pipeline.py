@@ -141,12 +141,17 @@ def run_fetch(config: dict | None = None, jobs: list | None = None) -> dict:
     return stats
 
 
-def daily_run(judge: bool = True, judge_min_score: int = 30, judge_limit: int = 15) -> dict:
+def daily_run(judge: bool = True, judge_min_score: int = 30, judge_limit: int = 15,
+              auto_tailor: bool = True, auto_tailor_limit: int = 10) -> dict:
     """One scheduled run: fetch everywhere, enrich every new job with real JD content
     (LinkedIn/SmartRecruiters cards carry none up front), re-score with that content,
     THEN LLM-judge the new promising jobs (highest rule-score first, capped to bound
-    cost) so the judge sees real descriptions instead of title-only stubs. Returns a
-    summary including the new job rows (for notification)."""
+    cost) so the judge sees real descriptions instead of title-only stubs. Jobs the
+    judge rates strong/good/stretch (i.e. not an outright "weak" fit) then get a CV
+    auto-tailored + a cover letter drafted (capped separately, since each cover letter
+    is its own LLM call) so they're ready for you to review and submit yourself --
+    never auto-submitted. Returns a summary including the new job rows (for
+    notification)."""
     config = load_search_config()
     stats = run_fetch(config)
 
@@ -154,6 +159,7 @@ def daily_run(judge: bool = True, judge_min_score: int = 30, judge_limit: int = 
     engaged_enriched = enrich_pending(limit=10)["enriched"]
 
     judged = 0
+    qualified: list[int] = []
     if judge and provider.available():
         new_set = set(stats["new_ids"])
         with db.connect() as conn:
@@ -163,16 +169,34 @@ def daily_run(judge: bool = True, judge_min_score: int = 30, judge_limit: int = 
             ][:judge_limit]
         for jid in to_judge:
             try:
-                judge_one(jid)
+                result = judge_one(jid)
                 judged += 1
+                if result.get("verdict") in ("strong", "good", "stretch"):
+                    qualified.append(jid)
             except Exception as exc:
                 print(f"  judge warn: job {jid} failed: {exc}")
+
+    tailored = 0
+    if auto_tailor:
+        for jid in qualified[:auto_tailor_limit]:
+            try:
+                with db.connect() as conn:
+                    already = db.list_cv_artifacts(conn, jid)
+                if already:
+                    continue   # idempotency guard; not expected for brand-new jobs
+                result = tailor_one(jid, auto=True)
+                cover_one(jid)
+                if result.get("compiled"):
+                    tailored += 1
+            except Exception as exc:
+                print(f"  auto-tailor warn: job {jid} failed: {exc}")
 
     with db.connect() as conn:
         new_rows = [dict(db.get_job(conn, jid)) for jid in stats["new_ids"]]
 
     notified = notify_dispatch.send(new_rows, config)
-    return {**stats, "judged": judged, "enriched": new_enriched + engaged_enriched,
+    return {**stats, "judged": judged, "tailored": tailored,
+            "enriched": new_enriched + engaged_enriched,
             "new_rows": new_rows, "notified": notified}
 
 
@@ -317,8 +341,10 @@ def cover_one(job_id: int) -> dict:
     return {"job_id": job_id, "cover_letter": str(path)}
 
 
-def tailor_one(job_id: int) -> dict:
-    """Tailor + compile a CV for one job, record it, and mark the job cv_ready."""
+def tailor_one(job_id: int, auto: bool = False) -> dict:
+    """Tailor + compile a CV for one job, record it, and mark the job cv_ready.
+    `auto=True` (daily_run's unsupervised path) also enforces the exact-2-page
+    rule -- see cv_engine.tailor_job."""
     db.init_db()
     with db.connect() as conn:
         row = db.get_job(conn, job_id)
@@ -326,7 +352,7 @@ def tailor_one(job_id: int) -> dict:
             return {"job_id": job_id, "error": "not found"}
         job = db.job_from_row(row)
 
-    tex_path, pdf_path = cv_engine.tailor_job(job, job_id)
+    tex_path, pdf_path = cv_engine.tailor_job(job, job_id, auto=auto)
 
     with db.connect() as conn:
         db.add_cv_artifact(conn, job_id, str(tex_path), str(pdf_path or ""),

@@ -251,6 +251,81 @@ def test_judge_one_skips_jobs_with_no_real_description(tmp_db, config, monkeypat
         assert db.get_job(conn, jid)["llm_score"] is None
 
 
+_LONG_REAL_JD = "x" * 250   # >200 chars so description_full=1 at insert -- skips enrich_new's throttled fetch
+
+
+def _make_judgeable_jobs(n):
+    return [Job(source="wttj", external_id=str(i), title="Machine Learning Engineer",
+                company=f"Co{i}", location="Paris, Ile-de-France, France",
+                url=f"http://x/{i}", description=_LONG_REAL_JD)
+            for i in range(1, n + 1)]
+
+
+def test_daily_run_auto_tailors_everything_but_weak_verdicts(tmp_db, config, monkeypatch):
+    jobs = _make_judgeable_jobs(4)
+    monkeypatch.setattr(pipeline, "_gather", lambda cfg: jobs)
+    monkeypatch.setattr(pipeline.provider, "available", lambda: True)
+    monkeypatch.setattr(pipeline.enrich, "fetch_full_text", lambda *a, **k: None)
+    monkeypatch.setattr(pipeline.notify_dispatch, "send", lambda rows, cfg: {"selected": 0, "results": {}})
+
+    verdicts = {"1": "strong", "2": "weak", "3": "good", "4": "stretch"}
+
+    def fake_judge(job, preferences=""):
+        v = verdicts[job.external_id]
+        return {"score": 10 if v == "weak" else 80, "verdict": v,
+                "seniority": "junior", "min_years": 0, "reasons": "r"}
+
+    monkeypatch.setattr(pipeline.llm_judge, "judge", fake_judge)
+    tailored_ids, covered_ids = [], []
+    monkeypatch.setattr(pipeline, "tailor_one", lambda jid, auto=False:
+                        tailored_ids.append(jid) or {"job_id": jid, "compiled": True})
+    monkeypatch.setattr(pipeline, "cover_one", lambda jid: covered_ids.append(jid) or {"job_id": jid})
+
+    summary = pipeline.daily_run(judge=True)
+
+    assert summary["tailored"] == 3
+    assert len(tailored_ids) == 3 and len(covered_ids) == 3   # not the "weak" job
+
+
+def test_daily_run_respects_auto_tailor_limit(tmp_db, config, monkeypatch):
+    jobs = _make_judgeable_jobs(3)
+    monkeypatch.setattr(pipeline, "_gather", lambda cfg: jobs)
+    monkeypatch.setattr(pipeline.provider, "available", lambda: True)
+    monkeypatch.setattr(pipeline.enrich, "fetch_full_text", lambda *a, **k: None)
+    monkeypatch.setattr(pipeline.notify_dispatch, "send", lambda rows, cfg: {"selected": 0, "results": {}})
+    monkeypatch.setattr(pipeline.llm_judge, "judge", lambda job, preferences="":
+                        {"score": 80, "verdict": "strong", "seniority": "junior",
+                         "min_years": 0, "reasons": "r"})
+    tailored_ids = []
+    monkeypatch.setattr(pipeline, "tailor_one", lambda jid, auto=False:
+                        tailored_ids.append(jid) or {"job_id": jid, "compiled": True})
+    monkeypatch.setattr(pipeline, "cover_one", lambda jid: {"job_id": jid})
+
+    summary = pipeline.daily_run(judge=True, auto_tailor_limit=2)
+
+    assert summary["tailored"] == 2
+    assert len(tailored_ids) == 2   # capped even though all 3 qualified
+
+
+def test_daily_run_auto_tailor_false_skips_entirely(tmp_db, config, monkeypatch):
+    jobs = _make_judgeable_jobs(1)
+    monkeypatch.setattr(pipeline, "_gather", lambda cfg: jobs)
+    monkeypatch.setattr(pipeline.provider, "available", lambda: True)
+    monkeypatch.setattr(pipeline.enrich, "fetch_full_text", lambda *a, **k: None)
+    monkeypatch.setattr(pipeline.notify_dispatch, "send", lambda rows, cfg: {"selected": 0, "results": {}})
+    monkeypatch.setattr(pipeline.llm_judge, "judge", lambda job, preferences="":
+                        {"score": 80, "verdict": "strong", "seniority": "junior",
+                         "min_years": 0, "reasons": "r"})
+    called = []
+    monkeypatch.setattr(pipeline, "tailor_one", lambda jid, auto=False: called.append(jid))
+    monkeypatch.setattr(pipeline, "cover_one", lambda jid: called.append(jid))
+
+    summary = pipeline.daily_run(judge=True, auto_tailor=False)
+
+    assert summary["tailored"] == 0
+    assert called == []
+
+
 def test_judge_one_does_not_hide_good_or_stretch_verdicts(tmp_db, config, monkeypatch):
     with db.connect() as conn:
         jid = _insert(conn, config, description=_REAL_JD)

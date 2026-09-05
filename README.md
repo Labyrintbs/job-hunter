@@ -48,6 +48,13 @@ cover letter per job, and track every application from a local web dashboard.
   or the ⬆ button in the dashboard.
 - **Cover-letter drafting** (Claude): grounded in your real CV, matches the
   posting's language, never fabricates.
+- **Auto-tailor on a good verdict**: during `jobhunter run`, any new job the LLM
+  judge doesn't rate `weak` (i.e. `strong`/`good`/`stretch`) automatically gets a
+  CV tailored and a cover letter drafted — capped at `--tailor-limit` (default 10)
+  per run since each cover letter is an LLM call. Draft-and-review only: nothing is
+  ever submitted for you. The dashboard's **Ready** column shows `✅ ready` once
+  both artifacts exist, or `⚠ CV failed` if a compile was attempted but failed
+  (check `data/cv/<job>/cv.compile.log`). Disable with `jobhunter run --no-tailor`.
 - **Feedback (explicit-only)**: 👍 interested / 👎 dismiss with fixed reason chips
   (`too_senior`, `wrong_domain`, `location`, …). Dismissed jobs leave the main list
   into a Dismissed view; 👍 rescues a job from the Filtered bucket. This is the
