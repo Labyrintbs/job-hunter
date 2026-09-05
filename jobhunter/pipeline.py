@@ -141,7 +141,7 @@ def run_fetch(config: dict | None = None, jobs: list | None = None) -> dict:
     return stats
 
 
-def daily_run(judge: bool = True, judge_min_score: int = 40, judge_limit: int = 15) -> dict:
+def daily_run(judge: bool = True, judge_min_score: int = 30, judge_limit: int = 15) -> dict:
     """One scheduled run: fetch everywhere, enrich every new job with real JD content
     (LinkedIn/SmartRecruiters cards carry none up front), re-score with that content,
     THEN LLM-judge the new promising jobs (highest rule-score first, capped to bound
