@@ -339,3 +339,61 @@ def test_judge_one_does_not_hide_good_or_stretch_verdicts(tmp_db, config, monkey
         row = db.get_job(conn, jid)
     assert row["llm_score"] == 55
     assert row["filtered"] == 0
+
+
+def test_process_backlog_judges_and_tailors_the_whole_backlog(tmp_db, config, monkeypatch):
+    """Unlike daily_run, process_backlog isn't scoped to "new this run" -- these
+    jobs are pre-existing DB rows, inserted directly (bypassing _gather/run_fetch
+    entirely), which is exactly the "stuck backlog" scenario this exists for."""
+    monkeypatch.setattr(pipeline.provider, "available", lambda: True)
+    monkeypatch.setattr(pipeline.enrich, "fetch_full_text", lambda *a, **k: None)
+    with db.connect() as conn:
+        strong_jid = _insert(conn, config, external_id="10", company="StrongCo", description=_LONG_REAL_JD)
+        weak_jid = _insert(conn, config, external_id="11", company="WeakCo", description=_LONG_REAL_JD)
+
+    verdicts = {"StrongCo": "strong", "WeakCo": "weak"}
+
+    def fake_judge(job, preferences=""):
+        v = verdicts[job.company]
+        return {"score": 10 if v == "weak" else 80, "verdict": v,
+                "seniority": "junior", "min_years": 0, "reasons": "r"}
+
+    monkeypatch.setattr(pipeline.llm_judge, "judge", fake_judge)
+    tailored_ids = []
+    monkeypatch.setattr(pipeline, "tailor_one",
+                        lambda jid, auto=False: tailored_ids.append(jid) or {"job_id": jid, "compiled": True})
+    monkeypatch.setattr(pipeline, "cover_one", lambda jid: {"job_id": jid})
+
+    summary = pipeline.process_backlog(judge_min_score=0, judge_limit=10, tailor_limit=10)
+
+    assert summary["judged"] == 2
+    assert summary["tailored"] == 1
+    assert tailored_ids == [strong_jid]   # not the weak-verdict job
+
+
+def test_process_backlog_retries_enrichment_for_stuck_jobs(tmp_db, config, monkeypatch):
+    monkeypatch.setattr(pipeline.provider, "available", lambda: True)
+    with db.connect() as conn:
+        jid = _insert(conn, config, external_id="20", description="")   # too short, never enriched
+    monkeypatch.setattr(pipeline.enrich, "fetch_full_text", lambda *a, **k: _LONG_REAL_JD)
+    monkeypatch.setattr(pipeline.llm_judge, "judge", lambda job, preferences="":
+                        {"score": 80, "verdict": "weak", "seniority": "junior",
+                         "min_years": 0, "reasons": "r"})
+
+    summary = pipeline.process_backlog(judge_min_score=0)
+
+    assert summary["enriched"] == 1
+    with db.connect() as conn:
+        row = db.get_job(conn, jid)
+    assert row["description_full"] == 1
+
+
+def test_process_backlog_noop_when_provider_unavailable(tmp_db, config, monkeypatch):
+    monkeypatch.setattr(pipeline.provider, "available", lambda: False)
+    called = []
+    monkeypatch.setattr(pipeline, "judge_all", lambda **k: called.append(1))
+
+    summary = pipeline.process_backlog()
+
+    assert summary == {"enriched": 0, "judged": 0, "skipped_no_description": 0, "tailored": 0}
+    assert called == []

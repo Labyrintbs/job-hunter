@@ -34,6 +34,13 @@ def test_without_marker_removes_only_ours():
     assert schedule.MARKER not in cleaned
 
 
+def test_process_cron_line_shape():
+    line = schedule.process_cron_line(2)
+    assert line.startswith("0 */2 * * *")
+    assert "jobhunter.cli process" in line
+    assert schedule.PROCESS_MARKER in line
+
+
 def test_python_resolution_prefers_override_then_conda(tmp_path, monkeypatch):
     monkeypatch.delenv("JOBHUNTER_PYTHON", raising=False)
     monkeypatch.delenv("CONDA_PREFIX", raising=False)

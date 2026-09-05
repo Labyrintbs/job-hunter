@@ -131,6 +131,30 @@ The interpreter in the cron line is resolved by `schedule._python()`: first the
 project `.venv`, then `sys.executable`. Install cron from the activated env to get
 the conda python.
 
+### Decoupling fetch from judge + auto-tailor cadence
+`jobhunter run`'s judge/auto-tailor steps only ever look at jobs fetched *in that
+same run* — anything that misses that run's `--tailor-limit`/judge cutoff is never
+revisited automatically. Since fetching is the proven, LLM-free half of this
+pipeline and judging/tailoring are the half that can hit an LLM quota, it's worth
+running them on two separate, independently-tunable crons instead of one combined
+one:
+```bash
+$P -m jobhunter.cli process               # judge + auto-tailor the whole backlog, once
+$P -m jobhunter.cli cron install --job process --interval-hours 1   # e.g. hourly
+```
+`jobhunter process` sweeps every not-yet-judged job and every judged-but-not-
+tailored job in the DB (not just this run's fresh crop), so nothing gets
+permanently stuck just because it missed a prior cutoff. Recommended split
+setup: fetch cron on its normal cadence with judge/tailor turned off there
+(`cron install --interval-hours 12` after also passing `--no-judge --no-tailor`
+to the underlying `run` call), plus the `process` cron running much more often.
+This way a quota/rate-limit problem only ever stalls the `process` cron — fetch
+keeps running unaffected — and you can throttle judge/tailor volume
+(`--judge-limit`/`--tailor-limit`/`--judge-min-score`) or pause it entirely
+(`cron uninstall --job process`) without touching the fetch schedule at all.
+Its own tagged `# jobhunter-process` crontab line is managed the same way as
+the watchdog's, and it logs to `data/process_cron.log`.
+
 ## Market trends (Grafana / Metabase)
 Trend data accumulates automatically: each `fetch`/`run` inserts a `fetch_runs` row
 and refreshes every job's `last_seen`. Four SQL views are the query surface:

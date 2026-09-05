@@ -7,7 +7,7 @@ from .config import DB_PATH, load_search_config
 from .llm import provider
 from .notify import dispatch as notify_dispatch
 from .pipeline import (cover_one, daily_run, enrich_one, enrich_pending, import_revised_cv,
-                       judge_all, judge_one, run_fetch, tailor_one)
+                       judge_all, judge_one, process_backlog, run_fetch, tailor_one)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -62,11 +62,17 @@ def main(argv: list[str] | None = None) -> int:
     p_cron = sub.add_parser("cron", help="manage the daily crontab entry")
     p_cron.add_argument("action", choices=["show", "install", "uninstall"], nargs="?", default="show")
     p_cron.add_argument("--time", default="08:00", help="HH:MM (default 08:00), used when --interval-hours is not given")
-    p_cron.add_argument("--job", choices=["daily", "watchdog"], default="daily",
+    p_cron.add_argument("--job", choices=["daily", "watchdog", "process"], default="daily",
                         help="which crontab entry to manage")
     p_cron.add_argument("--interval-hours", type=int, default=None,
                         help="run every N hours instead of once at --time (e.g. 12 for twice a day); "
-                             "for --job watchdog this is its check interval, default 1")
+                             "for --job watchdog/process this is its interval, default 1")
+
+    p_process = sub.add_parser("process", help="judge + auto-tailor the whole backlog "
+                               "(decoupled from fetch cadence, cron target)")
+    p_process.add_argument("--judge-min-score", type=int, default=30)
+    p_process.add_argument("--judge-limit", type=int, default=10)
+    p_process.add_argument("--tailor-limit", type=int, default=10)
 
     p_watchdog = sub.add_parser("watchdog", help="self-heal: refetch if the last run is "
                                 "older than --max-gap-hours (cron target)")
@@ -208,6 +214,15 @@ def main(argv: list[str] | None = None) -> int:
             print("  new by source:", dict(summary["new_by_source"]))
         return 0
 
+    if args.command == "process":
+        summary = process_backlog(judge_min_score=args.judge_min_score,
+                                  judge_limit=args.judge_limit,
+                                  tailor_limit=args.tailor_limit)
+        print(f"enriched={summary['enriched']} judged={summary['judged']} "
+              f"skipped_no_description={summary.get('skipped_no_description', 0)} "
+              f"tailored={summary['tailored']}")
+        return 0
+
     if args.command == "cron":
         if args.job == "watchdog":
             interval = args.interval_hours or 1
@@ -220,6 +235,18 @@ def main(argv: list[str] | None = None) -> int:
                 cur = schedule.current_watchdog()
                 print(f"current:\n  {cur}" if cur else "not installed")
                 print(f"\nwould install:\n  {schedule.watchdog_cron_line(interval)}")
+            return 0
+        if args.job == "process":
+            interval = args.interval_hours or 1
+            if args.action == "install":
+                line = schedule.install_process(interval)
+                print(f"installed:\n  {line}")
+            elif args.action == "uninstall":
+                print("removed" if schedule.uninstall_process() else "no process entry found")
+            else:
+                cur = schedule.current_process()
+                print(f"current:\n  {cur}" if cur else "not installed")
+                print(f"\nwould install:\n  {schedule.process_cron_line(interval)}")
             return 0
         try:
             hour, minute = (int(x) for x in args.time.split(":"))

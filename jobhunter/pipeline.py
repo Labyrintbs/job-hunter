@@ -141,6 +141,31 @@ def run_fetch(config: dict | None = None, jobs: list | None = None) -> dict:
     return stats
 
 
+def _auto_tailor_jobs(job_ids: list[int], limit: int) -> int:
+    """Tailor a CV + draft a cover letter for up to `limit` of the given job ids,
+    skipping any that already have an artifact (idempotency guard). Shared by
+    daily_run's inline "new this run" gate and process_backlog's backlog-wide
+    sweep. Returns the count that actually compiled."""
+    tailored = 0
+    for jid in job_ids[:limit]:
+        try:
+            with db.connect() as conn:
+                already = db.list_cv_artifacts(conn, jid)
+            if already:
+                continue
+            print(f"  tailoring #{jid}...")
+            result = tailor_one(jid, auto=True)
+            cover_one(jid)
+            if result.get("compiled"):
+                tailored += 1
+                print(f"  tailored #{jid}: compiled + cover letter drafted")
+            else:
+                print(f"  tailored #{jid}: compile failed (see cv.compile.log)")
+        except Exception as exc:
+            print(f"  auto-tailor warn: job {jid} failed: {exc}")
+    return tailored
+
+
 def daily_run(judge: bool = True, judge_min_score: int = 30, judge_limit: int = 15,
               auto_tailor: bool = True, auto_tailor_limit: int = 10) -> dict:
     """One scheduled run: fetch everywhere, enrich every new job with real JD content
@@ -171,25 +196,16 @@ def daily_run(judge: bool = True, judge_min_score: int = 30, judge_limit: int = 
             try:
                 result = judge_one(jid)
                 judged += 1
+                if result.get("skipped"):
+                    print(f"  judged #{jid}: skipped ({result['skipped']})")
+                else:
+                    print(f"  judged #{jid}: {result['verdict']} ({result['score']})")
                 if result.get("verdict") in ("strong", "good", "stretch"):
                     qualified.append(jid)
             except Exception as exc:
                 print(f"  judge warn: job {jid} failed: {exc}")
 
-    tailored = 0
-    if auto_tailor:
-        for jid in qualified[:auto_tailor_limit]:
-            try:
-                with db.connect() as conn:
-                    already = db.list_cv_artifacts(conn, jid)
-                if already:
-                    continue   # idempotency guard; not expected for brand-new jobs
-                result = tailor_one(jid, auto=True)
-                cover_one(jid)
-                if result.get("compiled"):
-                    tailored += 1
-            except Exception as exc:
-                print(f"  auto-tailor warn: job {jid} failed: {exc}")
+    tailored = _auto_tailor_jobs(qualified, auto_tailor_limit) if auto_tailor else 0
 
     with db.connect() as conn:
         new_rows = [dict(db.get_job(conn, jid)) for jid in stats["new_ids"]]
@@ -198,6 +214,40 @@ def daily_run(judge: bool = True, judge_min_score: int = 30, judge_limit: int = 
     return {**stats, "judged": judged, "tailored": tailored,
             "enriched": new_enriched + engaged_enriched,
             "new_rows": new_rows, "notified": notified}
+
+
+def process_backlog(judge_min_score: int = 30, judge_limit: int = 10,
+                     tailor_limit: int = 10) -> dict:
+    """Judge + auto-tailor cycle, decoupled from fetch cadence: sweeps the whole
+    backlog (every not-yet-judged job, every judged-but-not-yet-tailored job)
+    rather than only the jobs a single run just fetched. Meant to run on its own,
+    more frequent cron schedule than the fetch cron -- fetching is the proven,
+    LLM-free part of this pipeline; judging/tailoring are the parts that can hit
+    an LLM quota, so keeping them on a separate, independently throttleable cron
+    means a quota problem only ever stalls this side, never fetching itself."""
+    db.init_db()
+    if not provider.available():
+        return {"enriched": 0, "judged": 0, "skipped_no_description": 0, "tailored": 0}
+
+    with db.connect() as conn:
+        pending = [dict(r) for r in db.jobs_pending_enrichment_any(conn, judge_limit)]
+    enriched = 0
+    for r in pending:
+        try:
+            if enrich_one(r["id"]).get("enriched"):
+                enriched += 1
+        except Exception as exc:
+            print(f"  enrich warn: job {r['id']} failed: {exc}")
+
+    judge_stats = judge_all(min_score=judge_min_score, limit=judge_limit)
+
+    with db.connect() as conn:
+        candidates = [r["id"] for r in db.jobs_ready_for_auto_tailor(conn, tailor_limit)]
+    tailored = _auto_tailor_jobs(candidates, tailor_limit)
+
+    return {"enriched": enriched, "judged": judge_stats["judged"],
+            "skipped_no_description": judge_stats["skipped_no_description"],
+            "tailored": tailored}
 
 
 def enrich_one(job_id: int) -> dict:
@@ -319,8 +369,10 @@ def judge_all(min_score: int = 40, limit: int | None = None) -> dict:
             result = judge_one(r["id"])
             if result.get("skipped"):
                 skipped += 1
+                print(f"  judged #{r['id']}: skipped ({result['skipped']})")
             else:
                 judged += 1
+                print(f"  judged #{r['id']}: {result['verdict']} ({result['score']})")
         except Exception as exc:
             print(f"  judge warn: job {r['id']} failed: {exc}")
     return {"candidates": len(rows), "judged": judged, "skipped_no_description": skipped}

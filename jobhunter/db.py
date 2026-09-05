@@ -401,6 +401,22 @@ def jobs_by_id_needing_enrichment(conn: sqlite3.Connection, job_ids: list[int]) 
     ).fetchall()
 
 
+def jobs_pending_enrichment_any(conn: sqlite3.Connection, limit: int = 10) -> list[sqlite3.Row]:
+    """Any job (regardless of engagement) still lacking a real description --
+    a backlog-wide retry for enrichment that failed at fetch time, unlike
+    jobs_needing_enrichment (gated to engaged jobs only). Skips filtered/
+    dismissed jobs since there's no point enriching those. Oldest first."""
+    return conn.execute(
+        """SELECT id, source, external_id, url FROM jobs
+           WHERE COALESCE(description_full, 0) = 0
+             AND COALESCE(filtered, 0) = 0
+             AND COALESCE(user_label, '') != 'dismissed'
+           ORDER BY fetched_at ASC
+           LIMIT ?""",
+        (limit,),
+    ).fetchall()
+
+
 def jobs_with_full_description(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     """Every job that already has a full description stored -- used to backfill
     the local JD text files for jobs enriched before jd_store existed."""
@@ -557,11 +573,16 @@ def update_status(conn: sqlite3.Connection, job_id: int, status: str) -> None:
 
 
 def job_from_row(row: sqlite3.Row) -> Job:
+    """Reconstruct a Job from a stored row. The nullable TEXT columns are
+    coalesced to "" -- Job's fields are non-optional strings, but a handful of
+    old HelloWork-sourced rows have a genuine NULL description in the DB (a
+    stale-data issue, not a live code path -- current hellowork.py never sets
+    it), which would otherwise crash pydantic validation here."""
     return Job(
         source=row["source"], external_id=row["external_id"], title=row["title"],
-        company=row["company"], location=row["location"], language=row["language"],
-        url=row["url"], description=row["description"], contract_type=row["contract_type"],
-        posted_at=row["posted_at"],
+        company=row["company"], location=row["location"] or "", language=row["language"] or "",
+        url=row["url"] or "", description=row["description"] or "",
+        contract_type=row["contract_type"] or "", posted_at=row["posted_at"] or "",
     )
 
 
@@ -581,6 +602,22 @@ def list_cv_artifacts(conn: sqlite3.Connection, job_id: int) -> list[sqlite3.Row
     return conn.execute(
         "SELECT * FROM cv_artifacts WHERE job_id = ? ORDER BY generated_at DESC, id DESC",
         (job_id,),
+    ).fetchall()
+
+
+def jobs_ready_for_auto_tailor(conn: sqlite3.Connection, limit: int = 10) -> list[sqlite3.Row]:
+    """Backlog-wide: jobs the LLM judge rated strong/good/stretch that don't
+    have a CV artifact yet. Unlike daily_run's inline auto-tailor gate (scoped
+    to that run's freshly-judged jobs only), this sweeps every qualifying job
+    ever judged, so one that missed a prior cutoff isn't stuck forever.
+    Strongest fit first, in case the backlog exceeds the batch size."""
+    return conn.execute(
+        """SELECT id FROM jobs j
+           WHERE llm_verdict IN ('strong', 'good', 'stretch')
+             AND NOT EXISTS (SELECT 1 FROM cv_artifacts c WHERE c.job_id = j.id)
+           ORDER BY llm_score DESC
+           LIMIT ?""",
+        (limit,),
     ).fetchall()
 
 

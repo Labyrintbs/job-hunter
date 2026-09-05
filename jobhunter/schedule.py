@@ -14,6 +14,7 @@ from .config import REPO_ROOT
 
 MARKER = "# jobhunter-daily"
 WATCHDOG_MARKER = "# jobhunter-watchdog"
+PROCESS_MARKER = "# jobhunter-process"
 
 
 def _python() -> str:
@@ -111,5 +112,35 @@ def uninstall_watchdog() -> bool:
 def current_watchdog() -> str | None:
     for l in _read_crontab().splitlines():
         if WATCHDOG_MARKER in l:
+            return l
+    return None
+
+
+def process_cron_line(interval_hours: int = 1) -> str:
+    """Runs `jobhunter process` every interval_hours -- judges + auto-tailors
+    the whole backlog, decoupled from the fetch cron's own (slower) cadence."""
+    py = _python()
+    cmd = f"cd {REPO_ROOT} && {py} -m jobhunter.cli process >> {REPO_ROOT}/data/process_cron.log 2>&1"
+    return f"0 */{interval_hours} * * * {cmd} {PROCESS_MARKER}"
+
+
+def install_process(interval_hours: int = 1) -> str:
+    line = process_cron_line(interval_hours)
+    _write_crontab(with_entry(_read_crontab(), line, PROCESS_MARKER))
+    return line
+
+
+def uninstall_process() -> bool:
+    existing = _read_crontab()
+    if PROCESS_MARKER not in existing:
+        return False
+    remaining = without_marker(existing, PROCESS_MARKER).strip()
+    _write_crontab(remaining + "\n" if remaining else "")
+    return True
+
+
+def current_process() -> str | None:
+    for l in _read_crontab().splitlines():
+        if PROCESS_MARKER in l:
             return l
     return None

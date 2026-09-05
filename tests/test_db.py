@@ -166,6 +166,21 @@ def test_role_category_backfilled_for_preexisting_rows(tmp_db):
         assert db.get_job(conn, jid)["role_category"] == "CV"
 
 
+def test_job_from_row_tolerates_null_text_columns(tmp_db):
+    """A handful of old HelloWork rows have a genuine NULL description (stale
+    data, not a live code path) -- job_from_row must coalesce nullable TEXT
+    columns to "" rather than crash Job's pydantic validation."""
+    with db.connect() as conn:
+        jid, _ = db.upsert_job(conn, J("1", url="http://x/1"), 60, "r")
+        conn.execute(
+            "UPDATE jobs SET description = NULL, location = NULL, url = NULL WHERE id = ?",
+            (jid,),
+        )
+        row = db.get_job(conn, jid)
+        job = db.job_from_row(row)
+    assert job.description == "" and job.location == "" and job.url == ""
+
+
 def test_llm_and_cover_setters(tmp_db):
     with db.connect() as conn:
         jid, _ = db.upsert_job(conn, J("1", url="http://x/1"), 60, "r")
@@ -174,6 +189,45 @@ def test_llm_and_cover_setters(tmp_db):
         rows = db.list_jobs(conn)
         assert rows[0]["llm_score"] == 88
         assert rows[0]["cover_letter_path"] == "/tmp/cl.md"
+
+
+def test_jobs_pending_enrichment_any_ignores_engagement_but_not_filtered_or_dismissed(tmp_db):
+    with db.connect() as conn:
+        plain, _ = db.upsert_job(conn, J("1", title="ML Engineer A", url="http://x/1"), 60, "r")
+        hidden, _ = db.upsert_job(conn, J("2", title="ML Engineer B", url="http://x/2"), 55, "r",
+                                  filtered=True, filter_reason="senior title")
+        dismissed, _ = db.upsert_job(conn, J("3", title="ML Engineer C", url="http://x/3"), 60, "r")
+        db.set_feedback(conn, dismissed, "dismissed")
+        already_full, _ = db.upsert_job(conn, J("4", title="ML Engineer D", url="http://x/4"), 60, "r")
+        db.set_description(conn, already_full, "x" * 300)
+
+        pending = [r["id"] for r in db.jobs_pending_enrichment_any(conn, limit=10)]
+    assert pending == [plain]   # not the filtered, dismissed, or already-full one
+
+
+def test_jobs_ready_for_auto_tailor_needs_qualifying_verdict_and_no_cv(tmp_db):
+    with db.connect() as conn:
+        strong, _ = db.upsert_job(conn, J("1", title="A", url="http://x/1"), 60, "r")
+        db.set_llm_judgment(conn, strong, 90, "strong", "great fit")
+        weak, _ = db.upsert_job(conn, J("2", title="B", url="http://x/2"), 60, "r")
+        db.set_llm_judgment(conn, weak, 10, "weak", "poor fit")
+        already_tailored, _ = db.upsert_job(conn, J("3", title="C", url="http://x/3"), 60, "r")
+        db.set_llm_judgment(conn, already_tailored, 80, "good", "solid fit")
+        db.add_cv_artifact(conn, already_tailored, "/tmp/cv.tex", "/tmp/cv.pdf", origin="ai")
+
+        candidates = [r["id"] for r in db.jobs_ready_for_auto_tailor(conn, limit=10)]
+    assert candidates == [strong]   # not the weak verdict, not the already-tailored one
+
+
+def test_jobs_ready_for_auto_tailor_orders_by_score_and_respects_limit(tmp_db):
+    with db.connect() as conn:
+        low, _ = db.upsert_job(conn, J("1", title="A", url="http://x/1"), 60, "r")
+        db.set_llm_judgment(conn, low, 55, "stretch", "uncertain fit")
+        high, _ = db.upsert_job(conn, J("2", title="B", url="http://x/2"), 60, "r")
+        db.set_llm_judgment(conn, high, 85, "good", "solid fit")
+
+        candidates = [r["id"] for r in db.jobs_ready_for_auto_tailor(conn, limit=1)]
+    assert candidates == [high]   # best fit first, capped at limit
 
 
 def test_default_sort_prefers_llm_score_over_rule_score(tmp_db):
