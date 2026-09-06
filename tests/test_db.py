@@ -259,3 +259,201 @@ def test_set_llm_filter_hides_job_and_preserves_existing_reason(tmp_db):
         db.set_llm_filter(conn, jid, "llm judge: weak fit (re-judged)")
         assert db.get_job(conn, jid)["filter_reason"] == \
             "llm judge: weak fit; llm judge: weak fit (re-judged)"
+
+
+def _events(conn, job_id, event_type=None):
+    rows = db.job_event_history(conn, job_id)
+    if event_type:
+        rows = [r for r in rows if r["event_type"] == event_type]
+    return rows
+
+
+def test_created_event_logged_on_new_job(tmp_db):
+    with db.connect() as conn:
+        jid, _ = db.upsert_job(conn, J("1", url="http://x/1"), 60, "r")
+        rows = _events(conn, jid)
+        assert len(rows) == 1
+        assert rows[0]["event_type"] == "created"
+        assert rows[0]["from_value"] == "" and rows[0]["to_value"] == "new"
+
+
+def test_no_created_event_on_reseen_job(tmp_db):
+    with db.connect() as conn:
+        jid, _ = db.upsert_job(conn, J("1", url="http://x/1"), 60, "r")
+        db.upsert_job(conn, J("1", url="http://x/1"), 65, "r2")
+        assert len(_events(conn, jid, "created")) == 1
+
+
+def test_status_transition_logged_and_noop_skipped(tmp_db):
+    with db.connect() as conn:
+        jid, _ = db.upsert_job(conn, J("1", url="http://x/1"), 60, "r")
+        db.update_status(conn, jid, "shortlisted")
+        rows = _events(conn, jid, "status")
+        assert len(rows) == 1
+        assert rows[0]["from_value"] == "new" and rows[0]["to_value"] == "shortlisted"
+
+        db.update_status(conn, jid, "shortlisted")   # re-asserting the same status
+        assert len(_events(conn, jid, "status")) == 1   # no new row
+
+
+def test_filtered_transition_via_update_screening(tmp_db):
+    with db.connect() as conn:
+        jid, _ = db.upsert_job(conn, J("1", url="http://x/1"), 60, "r", filtered=False)
+        db.update_screening(conn, jid, 60, "r", filtered=True, filter_reason="too senior",
+                            seniority="senior", min_years=5)
+        db.update_screening(conn, jid, 60, "r", filtered=False, filter_reason="",
+                            seniority="senior", min_years=5)
+        rows = _events(conn, jid, "filtered")
+        assert [r["from_value"] for r in rows] == ["0", "1"]
+        assert [r["to_value"] for r in rows] == ["1", "0"]
+
+
+def test_set_llm_filter_logs_event(tmp_db):
+    with db.connect() as conn:
+        jid, _ = db.upsert_job(conn, J("1", url="http://x/1"), 60, "r")
+        db.set_llm_filter(conn, jid, "weak fit")
+        rows = _events(conn, jid, "filtered")
+        assert len(rows) == 1
+        assert rows[0]["from_value"] == "0" and rows[0]["to_value"] == "1"
+        assert rows[0]["detail"] == "weak fit"
+
+
+def test_set_filtered_restore_logs_event(tmp_db):
+    with db.connect() as conn:
+        jid, _ = db.upsert_job(conn, J("1", url="http://x/1"), 60, "r")
+        db.set_filtered(conn, jid, True, "manual hide")
+        db.set_filtered(conn, jid, False, "")
+        rows = _events(conn, jid, "filtered")
+        assert [r["from_value"] for r in rows] == ["0", "1"]
+        assert [r["to_value"] for r in rows] == ["1", "0"]
+
+
+def test_set_feedback_interested_logs_two_events_when_was_filtered(tmp_db):
+    with db.connect() as conn:
+        jid, _ = db.upsert_job(conn, J("1", url="http://x/1"), 60, "r")
+        db.set_llm_filter(conn, jid, "weak fit")
+        db.set_feedback(conn, jid, "interested", "actually a great fit")
+        labels = _events(conn, jid, "label")
+        filtereds = _events(conn, jid, "filtered")
+        assert len(labels) == 1
+        assert labels[0]["from_value"] == "" and labels[0]["to_value"] == "interested"
+        # one filtered event from set_llm_filter, one from the interested rescue
+        assert len(filtereds) == 2
+        assert filtereds[-1]["from_value"] == "1" and filtereds[-1]["to_value"] == "0"
+
+
+def test_set_feedback_interested_logs_only_label_when_not_filtered(tmp_db):
+    with db.connect() as conn:
+        jid, _ = db.upsert_job(conn, J("1", url="http://x/1"), 60, "r")
+        db.set_feedback(conn, jid, "interested", "great fit")
+        assert len(_events(conn, jid, "label")) == 1
+        assert len(_events(conn, jid, "filtered")) == 0   # no-op skipped, job was never filtered
+
+
+def test_set_feedback_dismissed_and_clear_chain_from_values(tmp_db):
+    with db.connect() as conn:
+        jid, _ = db.upsert_job(conn, J("1", url="http://x/1"), 60, "r")
+        db.set_feedback(conn, jid, "dismissed", "wrong_domain")
+        db.set_feedback(conn, jid, "", "")
+        rows = _events(conn, jid, "label")
+        assert [r["from_value"] for r in rows] == ["", "dismissed"]
+        assert [r["to_value"] for r in rows] == ["dismissed", ""]
+
+
+def test_job_event_history_ordered(tmp_db):
+    with db.connect() as conn:
+        jid, _ = db.upsert_job(conn, J("1", url="http://x/1"), 60, "r")
+        db.update_status(conn, jid, "shortlisted")
+        db.update_status(conn, jid, "cv_ready")
+        rows = db.job_event_history(conn, jid)
+        assert [r["event_type"] for r in rows] == ["created", "status", "status"]
+        assert [r["to_value"] for r in rows] == ["new", "shortlisted", "cv_ready"]
+
+
+def test_all_job_events_filters_by_type_and_since(tmp_db):
+    with db.connect() as conn:
+        jid1, _ = db.upsert_job(conn, J("1", url="http://x/1", company="CoA"), 60, "r")
+        jid2, _ = db.upsert_job(conn, J("2", url="http://x/2", company="CoB"), 60, "r")
+        db.update_status(conn, jid1, "shortlisted")
+        status_events = db.all_job_events(conn, event_type="status")
+        assert len(status_events) == 1
+        assert status_events[0]["job_id"] == jid1
+        assert status_events[0]["company"] == "CoA"
+
+        all_events = db.all_job_events(conn)
+        assert len(all_events) == 3   # 2 created + 1 status
+
+
+def test_status_transition_counts_aggregates(tmp_db):
+    with db.connect() as conn:
+        jid1, _ = db.upsert_job(conn, J("1", url="http://x/1", company="CoA"), 60, "r")
+        jid2, _ = db.upsert_job(conn, J("2", url="http://x/2", company="CoB"), 60, "r")
+        db.update_status(conn, jid1, "shortlisted")
+        db.update_status(conn, jid2, "shortlisted")
+        db.update_status(conn, jid1, "cv_ready")
+        counts = {(r["from_value"], r["to_value"]): r["n"] for r in db.status_transition_counts(conn)}
+        assert counts[("new", "shortlisted")] == 2
+        assert counts[("shortlisted", "cv_ready")] == 1
+
+
+def test_stage_reach_counts(tmp_db):
+    with db.connect() as conn:
+        jid1, _ = db.upsert_job(conn, J("1", url="http://x/1", company="CoA"), 60, "r")
+        jid2, _ = db.upsert_job(conn, J("2", url="http://x/2", company="CoB"), 60, "r")
+        db.update_status(conn, jid1, "shortlisted")
+        db.update_status(conn, jid1, "cv_ready")
+        db.update_status(conn, jid1, "applied")
+        db.update_status(conn, jid2, "shortlisted")
+        counts = {r["stage"]: r["n"] for r in db.stage_reach_counts(conn, ("shortlisted", "cv_ready", "applied"))}
+        assert counts == {"shortlisted": 2, "cv_ready": 1, "applied": 1}
+
+
+def test_backfill_creates_events_for_preexisting_rows(tmp_db):
+    with db.connect() as conn:
+        conn.execute(
+            "INSERT INTO jobs (source, external_id, title, company, fetched_at, "
+            "filtered, user_label, labeled_at) VALUES "
+            "('wttj', 'preexist-1', 'ML Engineer', 'Acme', '2026-01-01 00:00:00', "
+            "1, 'interested', '2026-01-02 00:00:00')"
+        )
+        jid = conn.execute("SELECT id FROM jobs WHERE external_id = 'preexist-1'").fetchone()[0]
+        conn.execute(
+            "INSERT INTO applications (job_id, status, updated_at) VALUES (?, 'applied', '2026-01-03 00:00:00')",
+            (jid,))
+    # simulate a pre-feature row: no job_events yet for this job_id
+    with db.connect() as conn:
+        assert len(_events(conn, jid)) == 0
+
+    db.init_db(db_path=db.DB_PATH)
+
+    with db.connect() as conn:
+        rows = _events(conn, jid)
+        types = sorted(r["event_type"] for r in rows)
+        assert types == ["created", "filtered", "label", "status"]
+        for r in rows:
+            assert r["source"] == "backfill"
+
+
+def test_backfill_is_idempotent(tmp_db):
+    with db.connect() as conn:
+        conn.execute(
+            "INSERT INTO jobs (source, external_id, title, company, fetched_at) "
+            "VALUES ('wttj', 'preexist-2', 'ML Engineer', 'Acme', '2026-01-01 00:00:00')")
+        jid = conn.execute("SELECT id FROM jobs WHERE external_id = 'preexist-2'").fetchone()[0]
+        conn.execute("INSERT INTO applications (job_id, status) VALUES (?, 'new')", (jid,))
+
+    db.init_db(db_path=db.DB_PATH)
+    with db.connect() as conn:
+        count1 = len(_events(conn, jid))
+    db.init_db(db_path=db.DB_PATH)
+    with db.connect() as conn:
+        count2 = len(_events(conn, jid))
+    assert count1 == count2 == 1   # just the 'created' event, status stayed 'new'
+
+
+def test_backfill_skips_jobs_with_live_events(tmp_db):
+    with db.connect() as conn:
+        jid, _ = db.upsert_job(conn, J("1", url="http://x/1"), 60, "r")
+    db.init_db(db_path=db.DB_PATH)   # re-run backfill after a normal, live-logged insert
+    with db.connect() as conn:
+        assert len(_events(conn, jid)) == 1   # still just the one live 'created' event

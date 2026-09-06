@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 from . import db, export as export_mod, jd_store, learn, schedule
 from .config import DB_PATH, load_search_config
@@ -106,6 +107,10 @@ def main(argv: list[str] | None = None) -> int:
     p_web = sub.add_parser("web", help="run the dashboard")
     p_web.add_argument("--host", default="127.0.0.1")
     p_web.add_argument("--port", type=int, default=8000)
+
+    p_history = sub.add_parser("history", help="run the Streamlit history/funnel dashboard")
+    p_history.add_argument("--host", default="127.0.0.1")
+    p_history.add_argument("--port", type=int, default=8501)
 
     args = parser.parse_args(argv)
 
@@ -377,7 +382,6 @@ def main(argv: list[str] | None = None) -> int:
         if args.action == "upload":
             if not args.pdf:
                 print("upload needs --pdf PATH"); return 1
-            from pathlib import Path
             res = import_revised_cv(args.job_id, Path(args.pdf),
                                     Path(args.tex) if args.tex else None)
             if res.get("error"):
@@ -413,6 +417,18 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "web":
         import uvicorn
         uvicorn.run("jobhunter.web.app:app", host=args.host, port=args.port, reload=False)
+        return 0
+
+    if args.command == "history":
+        import subprocess
+        import sys
+
+        db.init_db()   # ensure schema + backfill are applied before the dashboard reads job_events
+        app_path = Path(__file__).parent / "history_app" / "app.py"
+        subprocess.run([
+            sys.executable, "-m", "streamlit", "run", str(app_path),
+            "--server.address", args.host, "--server.port", str(args.port),
+        ])
         return 0
 
     return 1

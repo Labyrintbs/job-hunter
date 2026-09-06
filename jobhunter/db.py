@@ -21,6 +21,8 @@ STATUSES = [
     "unavailable",
 ]
 
+EVENT_TYPES = ("created", "status", "filtered", "label")
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS jobs (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -57,6 +59,19 @@ CREATE TABLE IF NOT EXISTS cv_artifacts (
     origin       TEXT DEFAULT 'ai',      -- base | ai | revised (human-uploaded)
     generated_at TEXT DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS job_events (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id      INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    event_type  TEXT NOT NULL,                -- created | status | filtered | label
+    from_value  TEXT DEFAULT '',
+    to_value    TEXT DEFAULT '',
+    detail      TEXT DEFAULT '',               -- filter_reason / dismiss_reasons, optional
+    source      TEXT NOT NULL DEFAULT 'live',  -- live | backfill
+    occurred_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_job_events_job_id ON job_events(job_id);
+CREATE INDEX IF NOT EXISTS idx_job_events_type_time ON job_events(event_type, occurred_at);
 
 CREATE TABLE IF NOT EXISTS filter_rules (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -207,12 +222,58 @@ def _backfill_role_category(conn: sqlite3.Connection) -> None:
         conn.execute("UPDATE jobs SET role_category = ? WHERE id = ?", (cat, r["id"]))
 
 
+def _backfill_job_events(conn: sqlite3.Connection) -> None:
+    """Synthesize job_events for jobs that predate this feature, from currently
+    available timestamps only (fetched_at, applications.updated_at, labeled_at).
+    Idempotent: only touches job_ids with zero existing job_events rows -- once the
+    write-site hooks are live, every job gets at least one row on its next write, so
+    "zero rows" can only mean "predates this feature". Safe to call on every startup.
+
+    Known limitation: intermediate status hops aren't reconstructable (updated_at only
+    ever held the *latest* transition), so a job now 'applied' that actually passed
+    through shortlisted/cv_ready first collapses into one synthetic 'new'->'applied'
+    event. Similarly, a currently-unfiltered job that was once filtered but never
+    explicitly rescued via 'interested' has no recoverable un-filter timestamp and is
+    left alone."""
+    rows = conn.execute(
+        """SELECT j.id, j.fetched_at, j.filtered, j.was_filtered, j.user_label, j.labeled_at,
+                  a.status, a.updated_at
+           FROM jobs j JOIN applications a ON a.job_id = j.id
+           WHERE NOT EXISTS (SELECT 1 FROM job_events e WHERE e.job_id = j.id)"""
+    ).fetchall()
+    for r in rows:
+        conn.execute(
+            "INSERT INTO job_events (job_id, event_type, from_value, to_value, source, occurred_at) "
+            "VALUES (?, 'created', '', 'new', 'backfill', ?)", (r["id"], r["fetched_at"]))
+        if r["status"] != "new":
+            conn.execute(
+                "INSERT INTO job_events (job_id, event_type, from_value, to_value, source, occurred_at) "
+                "VALUES (?, 'status', 'new', ?, 'backfill', ?)",
+                (r["id"], r["status"], r["updated_at"] or r["fetched_at"]))
+        if r["filtered"]:
+            conn.execute(
+                "INSERT INTO job_events (job_id, event_type, from_value, to_value, detail, source, occurred_at) "
+                "VALUES (?, 'filtered', '0', '1', 'backfilled: original reason unknown', 'backfill', ?)",
+                (r["id"], r["fetched_at"]))
+        if r["user_label"]:
+            label_time = r["labeled_at"] or r["fetched_at"]
+            conn.execute(
+                "INSERT INTO job_events (job_id, event_type, from_value, to_value, source, occurred_at) "
+                "VALUES (?, 'label', '', ?, 'backfill', ?)", (r["id"], r["user_label"], label_time))
+            if r["user_label"] == "interested" and r["was_filtered"] and not r["filtered"]:
+                conn.execute(
+                    "INSERT INTO job_events (job_id, event_type, from_value, to_value, detail, source, occurred_at) "
+                    "VALUES (?, 'filtered', '1', '0', 'backfilled: rescued by interested label', 'backfill', ?)",
+                    (r["id"], label_time))
+
+
 def init_db(db_path: Path | None = None) -> None:
     with get_connection(db_path) as conn:
         conn.executescript(SCHEMA)
         _migrate(conn)
         _backfill_geo_tier(conn)
         _backfill_role_category(conn)
+        _backfill_job_events(conn)
 
 
 @contextmanager
@@ -258,6 +319,21 @@ def _find_content_match(conn: sqlite3.Connection, job: Job) -> sqlite3.Row | Non
     return None
 
 
+def _log_event(conn: sqlite3.Connection, job_id: int, event_type: str,
+                from_value, to_value, detail: str = "", source: str = "live") -> None:
+    """Record one job_events row. Skips true no-op transitions (old == new) so a
+    write site that re-asserts the same value never pollutes the timeline."""
+    from_s = "" if from_value is None else str(from_value)
+    to_s = "" if to_value is None else str(to_value)
+    if from_s == to_s:
+        return
+    conn.execute(
+        "INSERT INTO job_events (job_id, event_type, from_value, to_value, detail, source) "
+        "VALUES (?,?,?,?,?,?)",
+        (job_id, event_type, from_s, to_s, detail, source),
+    )
+
+
 def upsert_job(conn: sqlite3.Connection, job: Job, score: int, reasons: str, *,
                filtered: bool = False, filter_reason: str = "",
                seniority: str = "", min_years: int | None = None,
@@ -279,6 +355,7 @@ def upsert_job(conn: sqlite3.Connection, job: Job, score: int, reasons: str, *,
     if not row:
         row = _find_content_match(conn, job)
     if row:
+        old = conn.execute("SELECT filtered FROM jobs WHERE id = ?", (row["id"],)).fetchone()
         conn.execute(
             """UPDATE jobs SET score = ?, match_reasons = ?, filtered = ?,
                filter_reason = ?, seniority = ?, min_years = ?, geo_tier = ?,
@@ -287,6 +364,8 @@ def upsert_job(conn: sqlite3.Connection, job: Job, score: int, reasons: str, *,
             (score, reasons, int(filtered), filter_reason, seniority, min_years, geo_tier,
              role_category, int(filtered), row["id"]),
         )
+        _log_event(conn, row["id"], "filtered", old["filtered"] if old else 0, int(filtered),
+                   detail=filter_reason)
         return row["id"], False
 
     cur = conn.execute(
@@ -306,6 +385,7 @@ def upsert_job(conn: sqlite3.Connection, job: Job, score: int, reasons: str, *,
     )
     job_id = cur.lastrowid
     conn.execute("INSERT INTO applications (job_id, status) VALUES (?, 'new')", (job_id,))
+    _log_event(conn, job_id, "created", "", "new")
     return job_id, True
 
 
@@ -434,6 +514,7 @@ def update_screening(conn: sqlite3.Connection, job_id: int, score: int, reasons:
     description lands, which can also flip its filtered bucket (e.g. a '5+ years'
     requirement only visible in the body) or its role category (e.g. a generic "ML
     Engineer" title that's actually NLP-focused per the body)."""
+    old = conn.execute("SELECT filtered FROM jobs WHERE id = ?", (job_id,)).fetchone()
     conn.execute(
         """UPDATE jobs SET score = ?, match_reasons = ?, filtered = ?, filter_reason = ?,
            seniority = ?, min_years = ?, role_category = ?,
@@ -441,13 +522,17 @@ def update_screening(conn: sqlite3.Connection, job_id: int, score: int, reasons:
         (score, reasons, int(filtered), filter_reason, seniority, min_years, role_category,
          int(filtered), job_id),
     )
+    _log_event(conn, job_id, "filtered", old["filtered"] if old else 0, int(filtered),
+               detail=filter_reason)
 
 
 def set_filtered(conn: sqlite3.Connection, job_id: int, filtered: bool, reason: str = "") -> None:
+    old = conn.execute("SELECT filtered FROM jobs WHERE id = ?", (job_id,)).fetchone()
     conn.execute(
         "UPDATE jobs SET filtered = ?, filter_reason = ? WHERE id = ?",
         (int(filtered), reason, job_id),
     )
+    _log_event(conn, job_id, "filtered", old["filtered"] if old else 0, int(filtered), detail=reason)
 
 
 def set_seniority(conn: sqlite3.Connection, job_id: int, seniority: str, min_years: int | None) -> None:
@@ -475,12 +560,16 @@ def set_feedback(conn: sqlite3.Connection, job_id: int, label: str, reasons: str
     the auto-Filtered bucket (an explicit positive overrides the heuristic)."""
     if label not in FEEDBACK_LABELS:
         raise ValueError(f"unknown feedback label: {label}")
+    old = conn.execute("SELECT user_label, filtered FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    old_label = (old["user_label"] or "") if old else ""
+    old_filtered = (old["filtered"] if old else 0) or 0
     if label == "dismissed":
         conn.execute(
             "UPDATE jobs SET user_label = 'dismissed', dismiss_reasons = ?, "
             "interested_reasons = '', labeled_at = datetime('now') WHERE id = ?",
             (reasons, job_id),
         )
+        _log_event(conn, job_id, "label", old_label, "dismissed", detail=reasons)
     elif label == "interested":
         conn.execute(
             "UPDATE jobs SET user_label = 'interested', dismiss_reasons = '', "
@@ -488,12 +577,15 @@ def set_feedback(conn: sqlite3.Connection, job_id: int, label: str, reasons: str
             "labeled_at = datetime('now') WHERE id = ?",
             (reasons, job_id),
         )
+        _log_event(conn, job_id, "label", old_label, "interested", detail=reasons)
+        _log_event(conn, job_id, "filtered", old_filtered, 0, detail="rescued by interested label")
     else:
         conn.execute(
             "UPDATE jobs SET user_label = '', dismiss_reasons = '', "
             "interested_reasons = '', labeled_at = '' WHERE id = ?",
             (job_id,),
         )
+        _log_event(conn, job_id, "label", old_label, "")
 
 
 def dismissed_count(conn: sqlite3.Connection) -> int:
@@ -566,10 +658,12 @@ def get_job(conn: sqlite3.Connection, job_id: int) -> sqlite3.Row | None:
 def update_status(conn: sqlite3.Connection, job_id: int, status: str) -> None:
     if status not in STATUSES:
         raise ValueError(f"unknown status: {status}")
+    old = conn.execute("SELECT status FROM applications WHERE job_id = ?", (job_id,)).fetchone()
     conn.execute(
         "UPDATE applications SET status = ?, updated_at = datetime('now') WHERE job_id = ?",
         (status, job_id),
     )
+    _log_event(conn, job_id, "status", old["status"] if old else "", status)
 
 
 def job_from_row(row: sqlite3.Row) -> Job:
@@ -625,13 +719,15 @@ def set_llm_filter(conn: sqlite3.Connection, job_id: int, filter_reason: str) ->
     """Auto-hide a job into the Filtered bucket on a weak LLM verdict, without touching
     its rule-based score/reasons. Appends to any existing filter_reason rather than
     clobbering it, in case a rule-based reason is already there."""
-    row = conn.execute("SELECT filter_reason FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    row = conn.execute("SELECT filter_reason, filtered FROM jobs WHERE id = ?", (job_id,)).fetchone()
     existing = (row["filter_reason"] or "").strip() if row else ""
+    old_filtered = (row["filtered"] if row else 0) or 0
     combined = f"{existing}; {filter_reason}" if existing else filter_reason
     conn.execute(
         "UPDATE jobs SET filtered = 1, filter_reason = ? WHERE id = ?",
         (combined, job_id),
     )
+    _log_event(conn, job_id, "filtered", old_filtered, 1, detail=filter_reason)
 
 
 def set_llm_judgment(conn: sqlite3.Connection, job_id: int, score: int,
@@ -738,3 +834,57 @@ def status_counts(conn: sqlite3.Connection) -> dict[str, int]:
         "SELECT status, COUNT(*) AS n FROM applications GROUP BY status"
     ).fetchall()
     return {r["status"]: r["n"] for r in rows}
+
+
+def job_event_history(conn: sqlite3.Connection, job_id: int) -> list[sqlite3.Row]:
+    """Full ordered event history for one job (oldest first)."""
+    return conn.execute(
+        "SELECT * FROM job_events WHERE job_id = ? ORDER BY occurred_at ASC, id ASC",
+        (job_id,),
+    ).fetchall()
+
+
+def all_job_events(conn: sqlite3.Connection, event_type: str | None = None,
+                   since: str | None = None) -> list[sqlite3.Row]:
+    """All events, optionally filtered by type / since a timestamp, oldest first.
+    Joins in title/company/source/score for readable tooltips."""
+    q = ("SELECT e.*, j.title, j.company, j.source, j.score, j.llm_verdict "
+         "FROM job_events e JOIN jobs j ON j.id = e.job_id WHERE 1=1")
+    params: list = []
+    if event_type:
+        q += " AND e.event_type = ?"
+        params.append(event_type)
+    if since:
+        q += " AND e.occurred_at >= ?"
+        params.append(since)
+    q += " ORDER BY e.occurred_at ASC, e.id ASC"
+    return conn.execute(q, params).fetchall()
+
+
+def status_transition_counts(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """(from_value, to_value, n) for every status event -- the Sankey's edge list."""
+    return conn.execute(
+        "SELECT from_value, to_value, COUNT(*) AS n FROM job_events "
+        "WHERE event_type = 'status' GROUP BY from_value, to_value"
+    ).fetchall()
+
+
+def stage_reach_counts(conn: sqlite3.Connection, stages: tuple[str, ...]) -> list[sqlite3.Row]:
+    """For each stage in `stages`, how many distinct jobs ever reached it (to_value =
+    stage in a status event) -- the funnel's monotonic bar heights, unlike current
+    applications.status which only shows where a job is *now*."""
+    marks = ",".join("?" for _ in stages)
+    return conn.execute(
+        f"SELECT to_value AS stage, COUNT(DISTINCT job_id) AS n FROM job_events "
+        f"WHERE event_type = 'status' AND to_value IN ({marks}) GROUP BY to_value",
+        stages,
+    ).fetchall()
+
+
+def events_by_day(conn: sqlite3.Connection, event_type: str) -> list[sqlite3.Row]:
+    """date(occurred_at), to_value, count -- backs the timeline chart."""
+    return conn.execute(
+        "SELECT date(occurred_at) AS day, to_value, COUNT(*) AS n FROM job_events "
+        "WHERE event_type = ? GROUP BY day, to_value ORDER BY day",
+        (event_type,),
+    ).fetchall()
