@@ -26,7 +26,7 @@ def dashboard(request: Request, status: str | None = None, min_score: int = 0,
               filtered: int = 0, dismissed: int = 0, stale: int = 0,
               interested: int = 0, sort: str = "score"):
     days = load_search_config().get("staleness_days", 14)
-    exclude = ("unavailable", "rejected") if not (status or dismissed or interested) else ()
+    exclude = ("unavailable", "rejected") if not (status or dismissed or interested or filtered) else ()
     sort = sort if sort in db.SORT_ORDERS else "score"
     with db.connect() as conn:
         if dismissed:
