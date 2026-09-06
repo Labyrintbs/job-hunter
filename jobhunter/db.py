@@ -429,12 +429,15 @@ def list_jobs(conn: sqlite3.Connection, status: str | None = None, min_score: in
     sort picks an entry from SORT_ORDERS ("score" or "fetched_at"), falling back to score.
     Adds computed `is_stale` / `days_since_seen` (relative to the latest fetch run)."""
     q = """
-        SELECT j.*, a.status, a.notes, a.submitted_url, a.cover_letter_path,
+        SELECT j.*, a.status, a.notes, a.submitted_url, a.cover_letter_path, a.updated_at,
                (SELECT pdf_path FROM cv_artifacts c WHERE c.job_id = j.id
                 ORDER BY c.generated_at DESC LIMIT 1) AS cv_pdf,
                (SELECT origin FROM cv_artifacts c WHERE c.job_id = j.id
                 ORDER BY c.generated_at DESC LIMIT 1) AS cv_origin,
                (SELECT COUNT(*) FROM cv_artifacts c WHERE c.job_id = j.id) AS cv_versions,
+               (SELECT GROUP_CONCAT(to_value || ' (' || substr(occurred_at, 1, 10) || ')', ' -> ')
+                FROM job_events e WHERE e.job_id = j.id AND e.event_type IN ('created', 'status')
+                ORDER BY e.occurred_at, e.id) AS status_timeline,
                CAST(julianday((SELECT MAX(ran_at) FROM fetch_runs))
                     - julianday(NULLIF(j.last_seen, '')) AS INTEGER) AS days_since_seen,
                CASE WHEN COALESCE(j.last_seen, '') <> ''

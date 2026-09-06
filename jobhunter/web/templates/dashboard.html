@@ -32,7 +32,7 @@
 
 <table>
   <thead>
-    <tr><th>#</th><th>Score</th><th>LLM</th><th>Ready</th><th>Role</th><th>Category</th><th>Company</th><th>Location</th><th>Source</th><th>Added</th><th>Why</th><th>You</th><th>Status</th><th>Docs</th></tr>
+    <tr><th>#</th><th>Score</th><th>LLM</th><th>Ready</th><th>Role</th><th>Category</th><th>Company</th><th>Location</th><th>Source</th><th>Last changed</th><th>Why</th><th>You</th><th>Status</th><th>Docs</th></tr>
   </thead>
   <tbody>
   {% for j in jobs %}
@@ -64,7 +64,7 @@
       <td>{{ j["company"] }}</td>
       <td class="muted">{{ j["location"] }}</td>
       <td class="muted" style="white-space:nowrap">{{ j["source"] }}</td>
-      <td class="muted" style="white-space:nowrap" title="{{ j['fetched_at'] }}">{{ j["fetched_at"][:10] if j["fetched_at"] else "—" }}</td>
+      <td class="muted" style="white-space:nowrap" title="{{ j['status_timeline'] or ('added ' + j['fetched_at']) }}">{{ (j["updated_at"] or j["fetched_at"])[:10] if (j["updated_at"] or j["fetched_at"]) else "—" }}</td>
       <td class="reasons">{% if filtered and j["filter_reason"] %}<span style="color:var(--danger)">{{ j["filter_reason"] }}</span><br>{% endif %}{{ j["match_reasons"] }}</td>
       <td class="feedback">
         {% if dismissed %}
