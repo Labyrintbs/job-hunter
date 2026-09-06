@@ -63,6 +63,43 @@ def test_generate_json_falls_back_to_extraction_if_schema_output_isnt_clean(monk
     assert data["score"] == 7
 
 
+def test_cli_env_prepends_paths_node_lives_under(monkeypatch):
+    # macOS cron's default PATH is just /usr/bin:/bin -- `claude` itself is found via
+    # _CLI_FALLBACKS, but its own SessionEnd hook shells out to `node`, which lives
+    # under /usr/local/bin or /opt/homebrew/bin, neither on cron's PATH.
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    env = provider._cli_env()
+    for p in provider._CLI_EXTRA_PATHS:
+        assert p in env["PATH"]
+    assert "/usr/bin:/bin" in env["PATH"]   # existing PATH preserved, not replaced
+
+
+def test_cli_env_does_not_duplicate_already_present_paths(monkeypatch):
+    already = provider._CLI_EXTRA_PATHS[0]
+    monkeypatch.setenv("PATH", f"{already}:/usr/bin")
+    env = provider._cli_env()
+    assert env["PATH"].count(already) == 1
+
+
+def test_generate_cli_passes_env_with_extra_paths(monkeypatch):
+    captured = {}
+
+    def fake_run(cmd, **kw):
+        captured["env"] = kw.get("env")
+        class R:
+            returncode = 0
+            stdout = "hi"
+            stderr = ""
+        return R()
+
+    monkeypatch.setattr(provider.subprocess, "run", fake_run)
+    monkeypatch.setattr(provider, "_cli_path", lambda: "/usr/bin/claude")
+    provider._generate_cli("prompt", None, 30)
+    assert captured["env"] is not None
+    for p in provider._CLI_EXTRA_PATHS:
+        assert p in captured["env"]["PATH"]
+
+
 def test_generate_cli_passes_json_schema_flag(monkeypatch):
     captured = {}
 

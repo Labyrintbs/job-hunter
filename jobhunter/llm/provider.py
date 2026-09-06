@@ -26,6 +26,20 @@ _CLI_FALLBACKS = [
     Path("/usr/local/bin/claude"),
 ]
 
+# macOS cron's default PATH is just /usr/bin:/bin -- it never sees /usr/local/bin or
+# /opt/homebrew/bin, so `claude`'s own SessionEnd hook (which shells out to `node`)
+# fails with "node: command not found" and takes the whole CLI call down with it,
+# even though `claude` itself was found via _CLI_FALLBACKS above.
+_CLI_EXTRA_PATHS = ["/usr/local/bin", "/opt/homebrew/bin"]
+
+
+def _cli_env() -> dict:
+    env = os.environ.copy()
+    extra = [p for p in _CLI_EXTRA_PATHS if p not in env.get("PATH", "")]
+    if extra:
+        env["PATH"] = ":".join(extra + [env.get("PATH", "")])
+    return env
+
 
 class LLMUnavailable(RuntimeError):
     pass
@@ -84,7 +98,7 @@ def _generate_cli(prompt: str, system: str | None, timeout: int,
         # (not a token cap) is what actually prevents truncated/invalid JSON on longer
         # responses: the model is constrained to emit a complete object matching the schema.
         cmd += ["--json-schema", json.dumps(json_schema)]
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=_cli_env())
     if proc.returncode != 0:
         raise LLMUnavailable(f"claude CLI failed: {proc.stderr[:300]}")
     return proc.stdout.strip()
