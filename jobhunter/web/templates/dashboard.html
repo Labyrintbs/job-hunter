@@ -64,7 +64,10 @@
       <td>{{ j["company"] }}</td>
       <td class="muted">{{ j["location"] }}</td>
       <td class="muted" style="white-space:nowrap">{{ j["source"] }}</td>
-      <td class="muted" style="white-space:nowrap" title="{{ j['status_timeline'] or ('added ' + j['fetched_at']) }}">{{ (j["updated_at"] or j["fetched_at"])[:10] if (j["updated_at"] or j["fetched_at"]) else "—" }}</td>
+      <td class="muted" style="white-space:nowrap; max-width:220px">
+        {{ (j["updated_at"] or j["fetched_at"])[:10] if (j["updated_at"] or j["fetched_at"]) else "—" }}
+        <div class="muted" style="font-size:11px; white-space:normal">{{ j["status_timeline"] or ("added " + j["fetched_at"]) }}</div>
+      </td>
       <td class="reasons">{% if filtered and j["filter_reason"] %}<span style="color:var(--danger)">{{ j["filter_reason"] }}</span><br>{% endif %}{{ j["match_reasons"] }}</td>
       <td class="feedback">
         {% if dismissed %}
