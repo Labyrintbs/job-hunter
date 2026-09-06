@@ -38,8 +38,13 @@ def dashboard(request: Request, status: str | None = None, min_score: int = 0,
                                 filtered=None, dismissed=None, interested=True,
                                 staleness_days=days, exclude_statuses=exclude, sort=sort)
         else:
+            # explicitly picking a status (e.g. the "unavailable" pill) should show every
+            # job in that status, regardless of filtered/dismissed/interested labels --
+            # otherwise the count badge (status_counts, unfiltered) doesn't match what's shown.
             jobs = db.list_jobs(conn, status=status or None, min_score=min_score,
-                                filtered=filtered, dismissed=False, interested=False,
+                                filtered=None if status else filtered,
+                                dismissed=None if status else False,
+                                interested=None if status else False,
                                 staleness_days=days, exclude_statuses=exclude, sort=sort)
         if stale:
             jobs = [j for j in jobs if j["is_stale"]]

@@ -37,7 +37,7 @@
   <tbody>
   {% for j in jobs %}
     <tr>
-      <td class="muted">{{ loop.index }}</td>
+      <td class="muted" title="data/cv/{{ j['id'] }}-...">{{ j["id"] }}</td>
       <td class="score">{{ j["score"] }}</td>
       <td>
         {% if j["llm_score"] is not none %}
