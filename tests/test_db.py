@@ -45,6 +45,21 @@ def test_cross_source_content_dedup(tmp_db):
         assert db.get_job(conn, jid1)["score"] == 65   # refreshed by the second sighting
 
 
+def test_cross_source_content_dedup_hellowork_department_code_location(tmp_db):
+    # HelloWork has no comma in its location field at all -- it appends a trailing
+    # department code instead ("Paris - 75"), which used to normalize to "paris 75"
+    # and never match another source's bare "Paris" for the same city.
+    wttj = Job(source="wttj", external_id="w1", title="Machine Learning Engineer",
+               company="Doctolib", location="Paris", url="https://wttj.example/w1")
+    hellowork = Job(source="hellowork", external_id="h1", title="Machine Learning Engineer",
+                    company="Doctolib", location="Paris - 75", url="https://hellowork.example/h1")
+    with db.connect() as conn:
+        jid1, new1 = db.upsert_job(conn, wttj, 60, "r")
+        jid2, new2 = db.upsert_job(conn, hellowork, 65, "r2")
+        assert new1 is True and new2 is False
+        assert jid1 == jid2
+
+
 def test_cross_source_no_dedup_for_different_title(tmp_db):
     # Same company/location but a genuinely different role must stay separate.
     a = Job(source="wttj", external_id="1", title="Machine Learning Engineer",
@@ -56,6 +71,56 @@ def test_cross_source_no_dedup_for_different_title(tmp_db):
         _, new2 = db.upsert_job(conn, b, 60, "r")
         assert new1 is True and new2 is True
         assert conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 2
+
+
+def test_find_possible_duplicates_flags_related_company_and_similar_title(tmp_db):
+    # Regression for the real Ubisoft case: HelloWork's "Ubisoft" vs LinkedIn's
+    # "Ubisoft Paris Studio" for what's functionally the same posting -- different
+    # enough (company string, title suffix) that upsert_job correctly keeps them as
+    # two rows, but they should still surface as a "maybe check this" candidate.
+    with db.connect() as conn:
+        a, _ = db.upsert_job(conn, J("1", title="Machine Learning Engineer H/F",
+                                     company="Ubisoft", loc="Paris - 75"), 60, "r")
+        b, _ = db.upsert_job(conn, J("2", title="Machine Learning Engineer - H/F/NB",
+                                     company="Ubisoft Paris Studio", loc="Paris"), 60, "r2")
+        pairs = db.find_possible_duplicates(conn)
+        assert len(pairs) == 1
+        assert {pairs[0]["a"], pairs[0]["b"]} == {a, b}
+        dup_map = db.possible_duplicates_map(conn)
+        assert dup_map[a] == [b]
+        assert dup_map[b] == [a]
+
+
+def test_find_possible_duplicates_ignores_generic_title_at_unrelated_company(tmp_db):
+    # A common, generic title alone must never be treated as a duplicate signal --
+    # two genuinely different employers frequently post an identically-titled role.
+    with db.connect() as conn:
+        db.upsert_job(conn, J("1", title="AI Engineer", company="Acme", loc="Paris"), 60, "r")
+        db.upsert_job(conn, J("2", title="AI Engineer", company="Globex", loc="Paris"), 60, "r2")
+        assert db.find_possible_duplicates(conn) == []
+
+
+def test_find_possible_duplicates_excludes_exact_same_company(tmp_db):
+    # Two similarly-worded titles at the EXACT same employer are far more often two
+    # genuinely different open roles (different squad/level/specialization) than a
+    # stray duplicate -- title-ratio alone can't reliably tell these apart (verified
+    # against this project's real data), so the company axis must require a
+    # related-but-different name, not just any match.
+    with db.connect() as conn:
+        db.upsert_job(conn, J("1", title="Senior Data Scientist I",
+                              company="Rockerbox", loc="Paris"), 60, "r")
+        db.upsert_job(conn, J("2", title="Sr Data Scientist II",
+                              company="Rockerbox", loc="Paris"), 60, "r2")
+        assert db.find_possible_duplicates(conn) == []
+
+
+def test_find_possible_duplicates_requires_same_city(tmp_db):
+    with db.connect() as conn:
+        db.upsert_job(conn, J("1", title="Machine Learning Engineer H/F",
+                              company="Ubisoft", loc="Paris"), 60, "r")
+        db.upsert_job(conn, J("2", title="Machine Learning Engineer - H/F/NB",
+                              company="Ubisoft Paris Studio", loc="Lyon"), 60, "r2")
+        assert db.find_possible_duplicates(conn) == []
 
 
 def test_status_preserved_on_refetch(tmp_db):

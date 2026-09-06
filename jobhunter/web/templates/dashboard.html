@@ -52,7 +52,15 @@
           {% if j["seniority"] == "senior" %}<span class="pill" style="font-size:10px; padding:1px 6px; border-color:var(--tag-red)">senior</span>{% elif j["seniority"] == "junior" %}<span class="pill" style="font-size:10px; padding:1px 6px; border-color:var(--tag-green)">junior</span>{% endif %}
           {% if j["min_years"] %}<span class="muted" style="font-size:11px">· {{ j["min_years"] }}+ yrs</span>{% endif %}
           {% if j["is_stale"] %}<span class="pill" style="font-size:10px; padding:1px 6px; border-color:var(--danger); color:var(--danger)" title="not seen for {{ j['days_since_seen'] }} days — likely delisted">⚠ stale {{ j['days_since_seen'] }}d</span>{% endif %}
-          <div class="muted" style="font-size:12px">{{ j["contract_type"] }} · {{ j["language"] }}</div></td>
+          <div class="muted" style="font-size:12px">{{ j["contract_type"] }} · {{ j["language"] }}</div>
+          {% if j["id"] in dup_map %}
+          <div style="font-size:11px; color:var(--danger)">
+            {% for other_id in dup_map[j["id"]] %}
+              {% set o = dup_jobs.get(other_id) %}
+              ⚠ possible dup of #{{ other_id }}{% if o %} — {{ o["company"] }} ({{ o["status"] }}){% endif %}<br>
+            {% endfor %}
+          </div>
+          {% endif %}</td>
       <td>
         {% if j["cv_pdf"] and j["cover_letter_path"] %}
           <span class="pill" style="font-size:11px; padding:2px 7px; border-color:var(--tag-green)" title="CV + cover letter ready to review">✅ ready</span>

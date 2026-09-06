@@ -53,6 +53,16 @@ def dashboard(request: Request, status: str | None = None, min_score: int = 0,
         n_dismissed = db.dismissed_count(conn)
         n_stale = db.stale_count(conn, days)
         n_interested = db.interested_count(conn)
+        dup_map = db.possible_duplicates_map(conn)
+        dup_ids = {i for ids in dup_map.values() for i in ids}
+        dup_jobs = {}
+        if dup_ids:
+            marks = ",".join("?" for _ in dup_ids)
+            dup_jobs = {r["id"]: dict(r) for r in conn.execute(
+                f"SELECT j.id, j.company, j.title, a.status FROM jobs j "
+                f"JOIN applications a ON a.job_id = j.id WHERE j.id IN ({marks})",
+                tuple(dup_ids),
+            ).fetchall()}
     return TEMPLATES.TemplateResponse(
         request,
         "dashboard.html",
@@ -74,6 +84,8 @@ def dashboard(request: Request, status: str | None = None, min_score: int = 0,
             "dismiss_reasons": db.DISMISS_REASONS,
             "total": sum(counts.values()),
             "llm_available": provider.available(),
+            "dup_map": dup_map,
+            "dup_jobs": dup_jobs,
         },
     )
 

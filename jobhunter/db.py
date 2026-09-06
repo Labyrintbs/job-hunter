@@ -3,7 +3,9 @@ from __future__ import annotations
 import re
 import sqlite3
 import unicodedata
+from collections import defaultdict
 from contextlib import contextmanager
+from difflib import SequenceMatcher
 from pathlib import Path
 
 from .config import DATA_DIR, DB_PATH
@@ -298,8 +300,77 @@ def _norm_city(location: str) -> str:
     """Just the city, normalized. Sources format the full location wildly differently
     for the same posting -- WTTJ: "Paris, Ile-de-France, France", an ATS board: "Paris",
     LinkedIn: "Paris, Île-de-France" -- so matching the full string never lines up across
-    sources. The city (first comma-separated segment) is the one part they share."""
-    return _normalize((location or "").split(",")[0])
+    sources. The city (first comma-separated segment) is the one part they share.
+    HelloWork has no comma at all -- it appends a trailing department code instead
+    ("Paris - 75"), which without stripping would normalize to "paris 75" and never
+    match another source's bare "paris" for the same city."""
+    city = (location or "").split(",")[0]
+    city = re.sub(r"\s*-\s*\d+\s*$", "", city)
+    return _normalize(city)
+
+
+_TITLE_JUNK_TOKENS = {"h", "f", "m", "w", "d", "nb", "cdi", "cdd", "stage"}
+
+
+def _strip_title_junk(norm_title: str) -> str:
+    """Drop gender/contract boilerplate tokens (H/F, F/M/D, CDI, ...) that inflate or
+    deflate a title's apparent difference without carrying any real signal."""
+    return " ".join(w for w in norm_title.split() if w not in _TITLE_JUNK_TOKENS)
+
+
+def _companies_related(a: str, b: str) -> bool:
+    """True if one normalized company name contains the other, but they aren't
+    identical -- catches a parent/subsidiary naming drift across sources (e.g.
+    HelloWork's "Ubisoft" vs LinkedIn's "Ubisoft Paris Studio" for the same posting).
+    Deliberately excludes an exact match: at the exact same employer, a near-identical
+    title is far more often two genuinely different open roles (different squad,
+    seniority level, or specialization) than a stray duplicate -- title-similarity
+    ratios for those two cases overlap too heavily (tested against this DB's real
+    data) to separate with a threshold, so the company axis has to do the work here."""
+    na, nb = _normalize(a), _normalize(b)
+    if na == nb or len(na) < 4 or len(nb) < 4:
+        return False
+    return na in nb or nb in na
+
+
+def find_possible_duplicates(conn: sqlite3.Connection, title_ratio: float = 0.80) -> list[dict]:
+    """Non-destructive 'maybe the same posting' detector: same city + related company
+    names + near-identical title (after stripping boilerplate). Deliberately NOT used
+    to auto-merge -- company-name relatedness alone is too risky to silently collapse
+    (a conglomerate like VINCI has genuinely separate subsidiaries hiring
+    independently), so this only surfaces candidates for a human to judge. Title
+    similarity alone is also not a safe signal on its own (many genuinely different
+    employers share a generic title like "AI Engineer"), which is why both gates are
+    required together. Uses only the stdlib (difflib) -- no embeddings needed at this
+    scale (a few hundred rows)."""
+    rows = conn.execute("SELECT id, company, title, location FROM jobs").fetchall()
+    by_city: dict[str, list[tuple[int, str, str]]] = defaultdict(list)
+    for r in rows:
+        title = _strip_title_junk(_normalize(r["title"]))
+        if title:
+            by_city[_norm_city(r["location"])].append((r["id"], r["company"], title))
+
+    pairs = []
+    for bucket in by_city.values():
+        n = len(bucket)
+        for i in range(n):
+            id_a, co_a, ta = bucket[i]
+            for k in range(i + 1, n):
+                id_b, co_b, tb = bucket[k]
+                if not _companies_related(co_a, co_b):
+                    continue
+                if SequenceMatcher(None, ta, tb).ratio() >= title_ratio:
+                    pairs.append({"a": id_a, "b": id_b})
+    return pairs
+
+
+def possible_duplicates_map(conn: sqlite3.Connection) -> dict[int, list[int]]:
+    """job_id -> ids of its likely duplicates, both directions, for O(1) template lookup."""
+    m: dict[int, list[int]] = defaultdict(list)
+    for p in find_possible_duplicates(conn):
+        m[p["a"]].append(p["b"])
+        m[p["b"]].append(p["a"])
+    return dict(m)
 
 
 def _find_content_match(conn: sqlite3.Connection, job: Job) -> sqlite3.Row | None:
