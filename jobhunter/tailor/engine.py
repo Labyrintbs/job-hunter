@@ -107,7 +107,8 @@ def _menu_pairs(blocks: list[Block]) -> list[tuple[str, list[str]]]:
     return [(b.text, b.bullets()) for b in blocks]
 
 
-def _select_blocks(job: Job, parsed: ParsedCV, terms: set[str], feedback: str | None = None
+def _select_blocks(job: Job, parsed: ParsedCV, terms: set[str], feedback: str | None = None,
+                    judge_context: str | None = None
                     ) -> tuple[list[Block], list[Block], list[SkillCategory]]:
     """Decide which experiences/projects/skill categories (and which bullets
     within them) to keep, mirroring templates/cv_tailoring_workflow.md (same
@@ -117,7 +118,9 @@ def _select_blocks(job: Job, parsed: ParsedCV, terms: set[str], feedback: str | 
     backend is unavailable or its response is unusable, so tailoring never
     hard-fails just because that call did. `feedback` (optional) is a hint from
     a previous compile attempt that didn't fit the page -- see tailor_job's
-    retry. Returns (projects, experiences, skills)."""
+    retry. `judge_context` (optional) is the fit-judge's own verdict/reasons
+    for this posting, already computed and stored -- passed through as extra
+    background, not re-derived. Returns (projects, experiences, skills)."""
     if provider.available():
         try:
             result = llm_select.select(
@@ -126,6 +129,7 @@ def _select_blocks(job: Job, parsed: ParsedCV, terms: set[str], feedback: str | 
                 _menu_pairs(parsed.projects),
                 [c.name for c in parsed.skills],
                 feedback=feedback,
+                judge_context=judge_context,
             )
             experiences = _apply_selection(parsed.experiences, result.get("experience_ids"),
                                             result.get("experience_bullets"), MAX_EXPERIENCES)
@@ -160,12 +164,14 @@ def _slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:40] or "job"
 
 
-def tailor_tex(job: Job, parsed: ParsedCV | None = None, feedback: str | None = None) -> str:
+def tailor_tex(job: Job, parsed: ParsedCV | None = None, feedback: str | None = None,
+               judge_context: str | None = None) -> str:
     parsed = parsed or snippet_bank.parse(BASE_CV)
     terms = _job_terms(job)
     doc = parsed.document
 
-    projects, experiences, skills = _select_blocks(job, parsed, terms, feedback=feedback)
+    projects, experiences, skills = _select_blocks(job, parsed, terms, feedback=feedback,
+                                                    judge_context=judge_context)
     doc = snippet_bank.reassemble(doc, r"PROJECTS[^}]*", projects)
     doc = snippet_bank.reassemble(doc, r"PROFESSIONAL EXPERIENCE", experiences)
     doc = snippet_bank.reassemble_skills(doc, skills)
@@ -319,7 +325,8 @@ def _retry_feedback(pdf: Path | None, out_dir: Path) -> str | None:
     return None
 
 
-def tailor_job(job: Job, job_id: int, auto: bool = False) -> tuple[Path, Path | None]:
+def tailor_job(job: Job, job_id: int, auto: bool = False,
+              judge_context: str | None = None) -> tuple[Path, Path | None]:
     """Generate + compile a tailored CV for a job. Returns (tex_path, pdf_path).
 
     `auto=True` is the unsupervised daily_run path: it also enforces the exact
@@ -329,16 +336,18 @@ def tailor_job(job: Job, job_id: int, auto: bool = False) -> tuple[Path, Path | 
     the second page looks sparse -- mirroring the look-then-adjust pass done
     when tailoring by hand. `auto=False` (the interactive CLI `tailor <job_id>`
     command) skips both -- its output is a starting point for a hand-editing
-    pass, not a finished CV (cv_tailoring_workflow.md Step 0)."""
+    pass, not a finished CV (cv_tailoring_workflow.md Step 0). `judge_context`
+    (optional) is the fit-judge's own verdict/reasons for this posting, passed
+    through to the block-selection call as background."""
     out_dir = CV_OUT_DIR / f"{job_id}-{_slug(job.company)}"
 
-    tex = tailor_tex(job)
+    tex = tailor_tex(job, judge_context=judge_context)
     pdf = compile_tex(tex, out_dir, name="cv", expected_pages=2 if auto else None)
 
     if auto:
         feedback = _retry_feedback(pdf, out_dir)
         if feedback:
-            tex = tailor_tex(job, feedback=feedback)
+            tex = tailor_tex(job, feedback=feedback, judge_context=judge_context)
             pdf = compile_tex(tex, out_dir, name="cv", expected_pages=2)
 
     return out_dir / "cv.tex", pdf

@@ -141,7 +141,7 @@ def test_tailor_uses_llm_selection_when_available(monkeypatch):
     parsed = snippet_bank.parse(BASE_CV)
     captured = {}
 
-    def fake_select(job, experiences, projects, skill_names, feedback=None):
+    def fake_select(job, experiences, projects, skill_names, feedback=None, judge_context=None):
         captured["job"] = job
         captured["n_experiences"] = len(experiences)
         captured["n_projects"] = len(projects)
@@ -172,7 +172,7 @@ def test_tailor_uses_llm_selection_when_available(monkeypatch):
 def test_tailor_passes_feedback_through_to_the_llm_selection_call(monkeypatch):
     monkeypatch.setattr(engine.provider, "available", lambda: True)
     captured = {}
-    monkeypatch.setattr(engine.llm_select, "select", lambda job, e, p, s, feedback=None:
+    monkeypatch.setattr(engine.llm_select, "select", lambda job, e, p, s, feedback=None, judge_context=None:
                         captured.update(feedback=feedback) or {
                             "experience_ids": [0], "experience_bullets": [[]],
                             "project_ids": [0], "project_bullets": [[]],
@@ -192,7 +192,7 @@ def test_tailor_llm_selection_trims_bullets_within_kept_entries(monkeypatch):
     deepwise_idx = next(i for i, b in enumerate(parsed.experiences) if "DeepWise" in b.text)
     assert len(parsed.experiences[deepwise_idx].bullets()) == 5  # sanity: master has 5
 
-    monkeypatch.setattr(engine.llm_select, "select", lambda job, e, p, s, feedback=None: {
+    monkeypatch.setattr(engine.llm_select, "select", lambda job, e, p, s, feedback=None, judge_context=None: {
         "experience_ids": [deepwise_idx],
         "experience_bullets": [[0, 2, 3]],   # keep only 3 of DeepWise's 5 bullets
         "project_ids": [0],

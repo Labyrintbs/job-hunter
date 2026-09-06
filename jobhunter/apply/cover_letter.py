@@ -36,23 +36,29 @@ Title: {title}
 Company: {company}
 Description:
 {description}
-
+{judge_block}
 Write the cover letter body only (no address block, no placeholders like [Name])."""
 
 
-def draft(job: Job) -> str:
+def draft(job: Job, judge_context: str | None = None) -> str:
+    """`judge_context` (optional) is the LLM fit-judge's own verdict/reasons for
+    this same posting -- already computed and stored on the job before the
+    cover letter is drafted, so this reuses it as background rather than
+    re-deriving the fit assessment from scratch."""
+    judge_block = f"\nFIT-JUDGE'S OWN ASSESSMENT OF THIS POSTING (background only, don't quote it back):\n{judge_context}\n" if judge_context else ""
     prompt = PROMPT.format(
         profile=profile_text()[:6000],
         title=job.title,
         company=job.company,
         description=(job.description or "")[:4000],
+        judge_block=judge_block,
     )
     return provider.generate(prompt, system=SYSTEM, max_tokens=1400).strip()
 
 
-def draft_to_file(job: Job, out_dir: Path) -> Path:
+def draft_to_file(job: Job, out_dir: Path, judge_context: str | None = None) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
-    text = draft(job)
+    text = draft(job, judge_context=judge_context)
     path = out_dir / "cover_letter.md"
     header = f"# {job.title} — {job.company}\n\n{job.url}\n\n---\n\n"
     path.write_text(header + text + "\n", encoding="utf-8")

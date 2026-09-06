@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from jobhunter import db, pipeline
 from jobhunter.models import Job
 from jobhunter.tailor import engine as cv_engine
@@ -397,3 +399,38 @@ def test_process_backlog_noop_when_provider_unavailable(tmp_db, config, monkeypa
 
     assert summary == {"enriched": 0, "judged": 0, "skipped_no_description": 0, "tailored": 0}
     assert called == []
+
+
+def test_tailor_one_and_cover_one_pass_the_judge_context_through(tmp_db, config, monkeypatch):
+    with db.connect() as conn:
+        jid = _insert(conn, config, description=_REAL_JD)
+        db.set_llm_judgment(conn, jid, 89, "strong", "great domain match")
+
+    captured = {}
+    monkeypatch.setattr(pipeline.cv_engine, "tailor_job",
+                        lambda job, job_id, auto=False, judge_context=None:
+                        captured.update(tailor_ctx=judge_context) or (Path("/tmp/cv.tex"), Path("/tmp/cv.pdf")))
+    monkeypatch.setattr(pipeline.cover_letter, "draft_to_file",
+                        lambda job, out_dir, judge_context=None:
+                        captured.update(cover_ctx=judge_context) or Path("/tmp/cover_letter.md"))
+
+    pipeline.tailor_one(jid)
+    pipeline.cover_one(jid)
+
+    expected = "Rated 'strong' fit (89/100): great domain match"
+    assert captured["tailor_ctx"] == expected
+    assert captured["cover_ctx"] == expected
+
+
+def test_judge_context_is_none_when_job_not_yet_judged(tmp_db, config, monkeypatch):
+    with db.connect() as conn:
+        jid = _insert(conn, config, description=_REAL_JD)
+
+    captured = {}
+    monkeypatch.setattr(pipeline.cv_engine, "tailor_job",
+                        lambda job, job_id, auto=False, judge_context=None:
+                        captured.update(tailor_ctx=judge_context) or (Path("/tmp/cv.tex"), Path("/tmp/cv.pdf")))
+
+    pipeline.tailor_one(jid)
+
+    assert captured["tailor_ctx"] is None

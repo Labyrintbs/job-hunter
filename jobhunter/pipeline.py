@@ -378,6 +378,15 @@ def judge_all(min_score: int = 40, limit: int | None = None) -> dict:
     return {"candidates": len(rows), "judged": judged, "skipped_no_description": skipped}
 
 
+def _judge_context(row) -> str | None:
+    """The fit-judge's own verdict/reasons for this job, formatted as background
+    for the tailor/cover-letter prompts -- already computed and stored on the
+    job by judge_one, reused here rather than re-derived from scratch."""
+    if not row["llm_verdict"]:
+        return None
+    return f"Rated '{row['llm_verdict']}' fit ({row['llm_score']}/100): {row['llm_reasons']}"
+
+
 def cover_one(job_id: int) -> dict:
     """Draft a cover letter for one job; store the file path on the application."""
     db.init_db()
@@ -387,7 +396,7 @@ def cover_one(job_id: int) -> dict:
             return {"job_id": job_id, "error": "not found"}
         job = db.job_from_row(row)
     out_dir = cv_engine.CV_OUT_DIR / f"{job_id}-{cv_engine._slug(job.company)}"
-    path = cover_letter.draft_to_file(job, out_dir)
+    path = cover_letter.draft_to_file(job, out_dir, judge_context=_judge_context(row))
     with db.connect() as conn:
         db.set_cover_letter(conn, job_id, str(path))
     return {"job_id": job_id, "cover_letter": str(path)}
@@ -404,7 +413,7 @@ def tailor_one(job_id: int, auto: bool = False) -> dict:
             return {"job_id": job_id, "error": "not found"}
         job = db.job_from_row(row)
 
-    tex_path, pdf_path = cv_engine.tailor_job(job, job_id, auto=auto)
+    tex_path, pdf_path = cv_engine.tailor_job(job, job_id, auto=auto, judge_context=_judge_context(row))
 
     with db.connect() as conn:
         db.add_cv_artifact(conn, job_id, str(tex_path), str(pdf_path or ""),
