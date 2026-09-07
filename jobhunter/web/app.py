@@ -24,12 +24,18 @@ def _startup() -> None:
 @app.get("/", response_class=HTMLResponse)
 def dashboard(request: Request, status: str | None = None, min_score: int = 0,
               filtered: int = 0, dismissed: int = 0, stale: int = 0,
-              interested: int = 0, sort: str = "score"):
+              interested: int = 0, sort: str = "score", q: str = ""):
     days = load_search_config().get("staleness_days", 14)
     exclude = ("unavailable", "rejected") if not (status or dismissed or interested or filtered) else ()
     sort = sort if sort in db.SORT_ORDERS else "score"
+    q = q.strip()
     with db.connect() as conn:
-        if dismissed:
+        if q:
+            # a search should find the job no matter its bucket/score, so every
+            # bucket-restricting filter is neutralized while a query is active.
+            jobs = db.list_jobs(conn, min_score=0, filtered=None, dismissed=None,
+                                interested=None, staleness_days=days, sort=sort, q=q)
+        elif dismissed:
             jobs = db.list_jobs(conn, status=status or None, min_score=min_score,
                                 filtered=None, dismissed=True, staleness_days=days,
                                 exclude_statuses=exclude, sort=sort)
@@ -77,6 +83,7 @@ def dashboard(request: Request, status: str | None = None, min_score: int = 0,
             "stale": stale,
             "interested": interested,
             "sort": sort,
+            "q": q,
             "n_filtered": n_filtered,
             "n_dismissed": n_dismissed,
             "n_stale": n_stale,

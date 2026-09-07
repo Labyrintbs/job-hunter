@@ -556,3 +556,37 @@ def test_backfill_skips_jobs_with_live_events(tmp_db):
     db.init_db(db_path=db.DB_PATH)   # re-run backfill after a normal, live-logged insert
     with db.connect() as conn:
         assert len(_events(conn, jid)) == 1   # still just the one live 'created' event
+
+
+def test_search_matches_company_title_or_location_case_insensitive(tmp_db):
+    with db.connect() as conn:
+        by_company, _ = db.upsert_job(
+            conn, J("1", title="ML Engineer", company="Ubisoft", loc="Paris", url="http://x/1"), 60, "r")
+        by_title, _ = db.upsert_job(
+            conn, J("2", title="Senior Data Scientist", company="Acme", loc="Paris", url="http://x/2"), 60, "r")
+        by_location, _ = db.upsert_job(
+            conn, J("3", title="ML Engineer", company="Globex", loc="Lyon", url="http://x/3"), 60, "r")
+        db.upsert_job(
+            conn, J("4", title="Backend Engineer", company="Other Co", loc="Nantes", url="http://x/4"), 60, "r")
+
+        assert [r["id"] for r in db.list_jobs(conn, q="ubisoft")] == [by_company]
+        assert [r["id"] for r in db.list_jobs(conn, q="DATA SCIENTIST")] == [by_title]
+        assert [r["id"] for r in db.list_jobs(conn, q="lyon")] == [by_location]
+        assert db.list_jobs(conn, q="nonexistentxyz") == []
+
+
+def test_search_bypasses_filtered_dismissed_and_score_when_buckets_neutralized(tmp_db):
+    # Mirrors what the dashboard route does when a search query is active: a job
+    # can be filtered, dismissed, and below the usual score cutoff, and still be
+    # found by name once filtered/dismissed/interested are passed as None.
+    with db.connect() as conn:
+        hidden, _ = db.upsert_job(
+            conn, J("1", title="ML Engineer", company="Shift Technology", loc="Paris", url="http://x/1"),
+            10, "r", filtered=True, filter_reason="senior title")
+        db.set_feedback(conn, hidden, "dismissed", "too_senior")
+
+        assert db.list_jobs(conn) == []   # default main-list view hides it (filtered)
+
+        results = db.list_jobs(conn, min_score=0, filtered=None, dismissed=None,
+                               interested=None, q="shift")
+        assert [r["id"] for r in results] == [hidden]

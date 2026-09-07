@@ -28,7 +28,16 @@
     {% if sort and sort != 'score' %}<input type="hidden" name="sort" value="{{ sort }}">{% endif %}
     <button class="ghost" type="submit">apply</button>
   </form>
+  <form method="get" style="margin:0; display:flex; gap:8px; align-items:center;">
+    <input type="text" name="q" value="{{ q }}" placeholder="search company / title / location..." style="width:220px; background:var(--panel); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:5px;">
+    {% if sort and sort != 'score' %}<input type="hidden" name="sort" value="{{ sort }}">{% endif %}
+    <button class="ghost" type="submit">🔍 search</button>
+    {% if q %}<a class="pill" href="/{{ ('?' + sort_qs[1:]) if sort_qs else '' }}">✕ clear</a>{% endif %}
+  </form>
 </div>
+{% if q %}
+<div class="muted" style="margin:4px 0 10px">searching all jobs (any status/bucket/score) for "{{ q }}" — {{ jobs|length }} match{{ 'es' if jobs|length != 1 else '' }}</div>
+{% endif %}
 
 <table>
   <thead>
@@ -52,6 +61,11 @@
           {% if j["seniority"] == "senior" %}<span class="pill" style="font-size:10px; padding:1px 6px; border-color:var(--tag-red)">senior</span>{% elif j["seniority"] == "junior" %}<span class="pill" style="font-size:10px; padding:1px 6px; border-color:var(--tag-green)">junior</span>{% endif %}
           {% if j["min_years"] %}<span class="muted" style="font-size:11px">· {{ j["min_years"] }}+ yrs</span>{% endif %}
           {% if j["is_stale"] %}<span class="pill" style="font-size:10px; padding:1px 6px; border-color:var(--danger); color:var(--danger)" title="not seen for {{ j['days_since_seen'] }} days — likely delisted">⚠ stale {{ j['days_since_seen'] }}d</span>{% endif %}
+          {% if q %}
+            {% if j["user_label"] == "dismissed" %}<span class="pill" style="font-size:10px; padding:1px 6px">👎 dismissed</span>{% endif %}
+            {% if j["user_label"] == "interested" %}<span class="pill" style="font-size:10px; padding:1px 6px; border-color:var(--tag-green)">👍 liked</span>{% endif %}
+            {% if j["filtered"] %}<span class="pill" style="font-size:10px; padding:1px 6px" title="{{ j['filter_reason'] }}">🕳 filtered</span>{% endif %}
+          {% endif %}
           <div class="muted" style="font-size:12px">{{ j["contract_type"] }} · {{ j["language"] }}</div>
           {% if j["id"] in dup_map %}
           <div style="font-size:11px; color:var(--danger)">
@@ -131,7 +145,7 @@
       </td>
     </tr>
   {% else %}
-    <tr><td colspan="14" class="muted">{% if dismissed %}No dismissed jobs.{% elif interested %}No liked jobs yet — click 👍 on a job you're interested in.{% elif filtered %}Nothing in the Filtered bucket.{% elif stale %}No stale jobs — all postings are still appearing.{% else %}No jobs yet. Click “Fetch new jobs”.{% endif %}</td></tr>
+    <tr><td colspan="14" class="muted">{% if q %}No jobs match "{{ q }}".{% elif dismissed %}No dismissed jobs.{% elif interested %}No liked jobs yet — click 👍 on a job you're interested in.{% elif filtered %}Nothing in the Filtered bucket.{% elif stale %}No stale jobs — all postings are still appearing.{% else %}No jobs yet. Click “Fetch new jobs”.{% endif %}</td></tr>
   {% endfor %}
   </tbody>
 </table>

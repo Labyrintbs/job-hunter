@@ -508,15 +508,18 @@ def list_jobs(conn: sqlite3.Connection, status: str | None = None, min_score: in
               filtered: int | None = 0, dismissed: bool | None = False,
               interested: bool | None = None,
               staleness_days: int = 14, exclude_statuses: tuple = (),
-              sort: str = "score") -> list[sqlite3.Row]:
+              sort: str = "score", q: str | None = None) -> list[sqlite3.Row]:
     """filtered=0 (default) shows the main list, filtered=1 the auto-hidden bucket,
     filtered=None shows both. dismissed=False (default) hides jobs you rejected,
     dismissed=True shows only those, dismissed=None ignores the label. interested
     mirrors dismissed but for the 'interested' label (default None: ignore it).
     exclude_statuses hides those statuses unless `status` names one of them.
     sort picks an entry from SORT_ORDERS ("score" or "fetched_at"), falling back to score.
+    q is a free-text substring search over company/title/location -- callers that want
+    a job found regardless of its bucket should pass filtered=None, dismissed=None,
+    interested=None, exclude_statuses=() alongside it.
     Adds computed `is_stale` / `days_since_seen` (relative to the latest fetch run)."""
-    q = """
+    sql = """
         SELECT j.*, a.status, a.notes, a.submitted_url, a.cover_letter_path, a.updated_at,
                (SELECT pdf_path FROM cv_artifacts c WHERE c.job_id = j.id
                 ORDER BY c.generated_at DESC LIMIT 1) AS cv_pdf,
@@ -537,25 +540,29 @@ def list_jobs(conn: sqlite3.Connection, status: str | None = None, min_score: in
     """
     params: list = [staleness_days, min_score]
     if filtered is not None:
-        q += " AND COALESCE(j.filtered, 0) = ?"
+        sql += " AND COALESCE(j.filtered, 0) = ?"
         params.append(filtered)
     if dismissed is True:
-        q += " AND COALESCE(j.user_label, '') = 'dismissed'"
+        sql += " AND COALESCE(j.user_label, '') = 'dismissed'"
     elif dismissed is False:
-        q += " AND COALESCE(j.user_label, '') != 'dismissed'"
+        sql += " AND COALESCE(j.user_label, '') != 'dismissed'"
     if interested is True:
-        q += " AND COALESCE(j.user_label, '') = 'interested'"
+        sql += " AND COALESCE(j.user_label, '') = 'interested'"
     elif interested is False:
-        q += " AND COALESCE(j.user_label, '') != 'interested'"
+        sql += " AND COALESCE(j.user_label, '') != 'interested'"
     if status:
-        q += " AND a.status = ?"
+        sql += " AND a.status = ?"
         params.append(status)
     elif exclude_statuses:
         marks = ",".join("?" for _ in exclude_statuses)
-        q += f" AND a.status NOT IN ({marks})"
+        sql += f" AND a.status NOT IN ({marks})"
         params.extend(exclude_statuses)
-    q += " ORDER BY " + SORT_ORDERS.get(sort, SORT_ORDERS["score"])
-    return conn.execute(q, params).fetchall()
+    if q:
+        sql += " AND (LOWER(j.company) LIKE ? OR LOWER(j.title) LIKE ? OR LOWER(j.location) LIKE ?)"
+        like = f"%{q.lower()}%"
+        params.extend([like, like, like])
+    sql += " ORDER BY " + SORT_ORDERS.get(sort, SORT_ORDERS["score"])
+    return conn.execute(sql, params).fetchall()
 
 
 def jobs_by_id_needing_enrichment(conn: sqlite3.Connection, job_ids: list[int]) -> list[sqlite3.Row]:
