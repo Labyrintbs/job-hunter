@@ -130,6 +130,40 @@ def test_run_fetch_precreates_cv_folder_for_kept_not_filtered_jobs(tmp_db, confi
     assert not filtered_dir.exists()
 
 
+def test_import_manual_job_screens_and_upserts_like_a_normal_fetch(tmp_db, config):
+    result = pipeline.import_manual_job(
+        title="Machine Learning Engineer", company="BigCorp",
+        url="https://bigcorp.example/careers/123", location="Paris, France")
+    assert result["kept"] is True
+    assert result["is_new"] is True
+    with db.connect() as conn:
+        row = db.get_job(conn, result["job_id"])
+    assert row["source"] == "manual"
+    assert row["company"] == "BigCorp"
+    assert row["role_category"] == "ML/DL"
+    cv_dir = cv_engine.CV_OUT_DIR / f"{row['id']}-{cv_engine._slug('BigCorp')}"
+    assert cv_dir.is_dir()
+
+
+def test_import_manual_job_not_relevant_is_not_stored(tmp_db, config):
+    result = pipeline.import_manual_job(
+        title="Accountant", company="BigCorp", url="https://bigcorp.example/careers/456")
+    assert result["kept"] is False
+    with db.connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 0
+
+
+def test_import_manual_job_merges_with_existing_cross_source_posting(tmp_db, config):
+    with db.connect() as conn:
+        existing_id = _insert(conn, config, source="linkedin", title="Machine Learning Engineer",
+                              company="BigCorp", location="Paris")
+    result = pipeline.import_manual_job(
+        title="Machine Learning Engineer", company="BigCorp",
+        url="https://bigcorp.example/careers/789", location="Paris, Île-de-France, France")
+    assert result["is_new"] is False
+    assert result["job_id"] == existing_id
+
+
 def test_enrich_one_drops_jd_copy_into_the_cv_folder(tmp_db, config, monkeypatch):
     with db.connect() as conn:
         jid = _insert(conn, config, source="linkedin", external_id="7", company="Acme")

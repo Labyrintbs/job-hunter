@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="filters">
+  <span class="pill">{{ companies|length }} tracked</span>
+  <span class="pill">{{ unchecked }} unchecked</span>
+  <span class="muted" style="max-width:520px">
+    Large/traditional French employers with no public ATS API, so the automated
+    fetchers can't reach them — check each career page by hand, then log what you found.
+  </span>
+</div>
+
+<table>
+  <thead>
+    <tr><th>Company</th><th>Sector</th><th>Career page</th><th>Last checked</th><th>Result</th><th>Jobs in DB</th></tr>
+  </thead>
+  <tbody>
+  {% for c in companies %}
+    <tr id="company-{{ c['id'] }}">
+      <td>{{ c["name"] }}</td>
+      <td class="muted">{{ c["sector"] }}</td>
+      <td>
+        {% if c["career_url"] %}<a href="{{ c['career_url'] }}" target="_blank" rel="noopener">careers ↗</a>{% endif %}
+        {% if c["homepage"] %}<a href="{{ c['homepage'] }}" target="_blank" rel="noopener" class="muted" style="font-size:11px">site ↗</a>{% endif %}
+      </td>
+      <td class="muted" style="white-space:nowrap">{{ c["last_checked_at"][:10] if c["last_checked_at"] else "never" }}</td>
+      <td class="reasons">{{ c["last_result"] }}</td>
+      <td>{% if c["jobs_found"] %}<a href="/?q={{ c['name'] | urlencode }}">{{ c["jobs_found"] }} found →</a>{% else %}<span class="muted">0</span>{% endif %}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="6" class="muted">No companies on the checklist yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

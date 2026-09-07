@@ -141,6 +141,40 @@ def run_fetch(config: dict | None = None, jobs: list | None = None) -> dict:
     return stats
 
 
+def import_manual_job(title: str, company: str, url: str, location: str = "",
+                      description: str = "", contract_type: str = "",
+                      posted_at: str = "", config: dict | None = None) -> dict:
+    """Hand-add one posting found by manually browsing a company's career site
+    (source='manual') through the exact same screen -> upsert path as an
+    automated fetch, so it gets scored/geo-tagged/role-categorized identically
+    and participates in the normal cross-source dedup (a manually-found LVMH
+    posting that's also on LinkedIn merges into that same row, it doesn't
+    duplicate it). external_id is the posting URL -- the one thing guaranteed
+    unique per real posting for a source with no native id scheme."""
+    from .models import Job
+    config = config or load_search_config()
+    job = Job(source="manual", external_id=url or f"{company}:{title}", title=title,
+              company=company, location=location, language="fr", url=url,
+              description=description, contract_type=contract_type, posted_at=posted_at)
+    with db.connect() as conn:
+        config = {**config, "_active_rules": [dict(r) for r in db.active_rules(conn)]}
+        s = match.screen(job, config)
+        if not s.keep:
+            return {"kept": False, "reason": s.filter_reason}
+        tier = match.geo_tier(job.location, config)
+        jid, is_new = db.upsert_job(
+            conn, job, s.score, s.reasons,
+            filtered=s.filtered, filter_reason=s.filter_reason,
+            seniority=s.seniority, min_years=s.min_years, geo_tier=tier,
+            role_category=s.role_category,
+        )
+        if is_new and not s.filtered:
+            out_dir = cv_engine.CV_OUT_DIR / f"{jid}-{cv_engine._slug(job.company)}"
+            out_dir.mkdir(parents=True, exist_ok=True)
+    return {"kept": True, "job_id": jid, "is_new": is_new, "score": s.score,
+            "filtered": s.filtered, "filter_reason": s.filter_reason}
+
+
 def _auto_tailor_jobs(job_ids: list[int], limit: int) -> int:
     """Tailor a CV + draft a cover letter for up to `limit` of the given job ids,
     skipping any that already have an artifact (idempotency guard). Shared by

@@ -75,6 +75,20 @@ CREATE TABLE IF NOT EXISTS job_events (
 CREATE INDEX IF NOT EXISTS idx_job_events_job_id ON job_events(job_id);
 CREATE INDEX IF NOT EXISTS idx_job_events_type_time ON job_events(event_type, occurred_at);
 
+-- Large/traditional French employers with no public ATS API (so the automated
+-- fetchers in sources/ can't reach them) -- a manual research checklist, filled in
+-- by hand-checking each company's own career site.
+CREATE TABLE IF NOT EXISTS target_companies (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    name            TEXT NOT NULL UNIQUE,
+    sector          TEXT DEFAULT '',
+    homepage        TEXT DEFAULT '',
+    career_url      TEXT DEFAULT '',
+    last_checked_at TEXT DEFAULT '',
+    last_result     TEXT DEFAULT '',
+    added_at        TEXT DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS filter_rules (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     kind       TEXT NOT NULL,          -- negative_kw | company_block
@@ -986,3 +1000,49 @@ def events_by_day(conn: sqlite3.Connection, event_type: str) -> list[sqlite3.Row
         "WHERE event_type = ? GROUP BY day, to_value ORDER BY day",
         (event_type,),
     ).fetchall()
+
+
+def add_target_company(conn: sqlite3.Connection, name: str, sector: str = "",
+                       homepage: str = "", career_url: str = "") -> bool:
+    """Insert a company onto the manual-research checklist. Returns True if newly
+    added, False if a company with that name was already on it."""
+    cur = conn.execute(
+        "INSERT OR IGNORE INTO target_companies (name, sector, homepage, career_url) "
+        "VALUES (?,?,?,?)",
+        (name, sector, homepage, career_url),
+    )
+    return cur.rowcount > 0
+
+
+def list_target_companies(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """All companies on the manual-research checklist, unchecked ones first (so
+    there's always a clear next company to look at), then longest-since-checked.
+    Joins in how many jobs already exist in `jobs` for that company name, so a
+    company that turned out to have a match already visible on the main dashboard."""
+    return conn.execute(
+        """SELECT t.*,
+               (SELECT COUNT(*) FROM jobs j WHERE LOWER(j.company) = LOWER(t.name))
+               AS jobs_found
+           FROM target_companies t
+           ORDER BY (t.last_checked_at = '') DESC, t.last_checked_at ASC, t.name ASC"""
+    ).fetchall()
+
+
+def mark_company_checked(conn: sqlite3.Connection, company_id: int, result: str) -> None:
+    conn.execute(
+        "UPDATE target_companies SET last_checked_at = datetime('now'), last_result = ? "
+        "WHERE id = ?",
+        (result, company_id),
+    )
+
+
+def set_company_career_url(conn: sqlite3.Connection, company_id: int, career_url: str) -> None:
+    conn.execute("UPDATE target_companies SET career_url = ? WHERE id = ?", (career_url, company_id))
+
+
+def remove_target_company(conn: sqlite3.Connection, name: str) -> bool:
+    """Drop a company from the manual-research checklist -- e.g. once it turns out
+    to run on a supported ATS and gets added to config/companies.yaml instead, so
+    it no longer needs hand-checking."""
+    cur = conn.execute("DELETE FROM target_companies WHERE LOWER(name) = LOWER(?)", (name,))
+    return cur.rowcount > 0

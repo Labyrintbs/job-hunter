@@ -65,3 +65,5 @@ companies:
   - { name: Lifen, ats: ashby, token: lifen }
   - { name: Klaxoon, ats: greenhouse, token: klaxoon }
   - { name: Yubo, ats: ashby, token: yubo }
+  - { name: Veolia, ats: smartrecruiters, token: VeoliaEnvironnementSA }
+  - { name: Sopra Steria, ats: smartrecruiters, token: SopraSteria1 }

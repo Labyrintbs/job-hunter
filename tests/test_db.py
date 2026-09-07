@@ -590,3 +590,57 @@ def test_search_bypasses_filtered_dismissed_and_score_when_buckets_neutralized(t
         results = db.list_jobs(conn, min_score=0, filtered=None, dismissed=None,
                                interested=None, q="shift")
         assert [r["id"] for r in results] == [hidden]
+
+
+def test_target_companies_add_list_and_mark_checked(tmp_db):
+    with db.connect() as conn:
+        added1 = db.add_target_company(conn, "BigCorp", sector="Banking",
+                                        homepage="https://bigcorp.example",
+                                        career_url="https://bigcorp.example/careers")
+        added2 = db.add_target_company(conn, "BigCorp")   # duplicate name, ignored
+        assert added1 is True
+        assert added2 is False
+        assert len(db.list_target_companies(conn)) == 1
+
+        row = db.list_target_companies(conn)[0]
+        assert row["sector"] == "Banking"
+        assert row["last_checked_at"] == ""
+        assert row["jobs_found"] == 0
+
+        db.mark_company_checked(conn, row["id"], "no relevant openings")
+        checked = db.list_target_companies(conn)[0]
+        assert checked["last_checked_at"] != ""
+        assert checked["last_result"] == "no relevant openings"
+
+
+def test_target_companies_lists_unchecked_before_checked(tmp_db):
+    with db.connect() as conn:
+        db.add_target_company(conn, "Checked Co")
+        db.add_target_company(conn, "Unchecked Co")
+        checked_id = [r["id"] for r in db.list_target_companies(conn) if r["name"] == "Checked Co"][0]
+        db.mark_company_checked(conn, checked_id, "nothing found")
+
+        names = [r["name"] for r in db.list_target_companies(conn)]
+        assert names == ["Unchecked Co", "Checked Co"]
+
+
+def test_target_companies_counts_matching_jobs_by_company_name(tmp_db):
+    with db.connect() as conn:
+        db.add_target_company(conn, "BigCorp")
+        db.upsert_job(conn, J("1", title="ML Engineer", company="BigCorp",
+                              loc="Paris", url="http://x/1"), 60, "r")
+        row = db.list_target_companies(conn)[0]
+        assert row["jobs_found"] == 1
+
+
+def test_target_companies_set_career_url_and_remove(tmp_db):
+    with db.connect() as conn:
+        db.add_target_company(conn, "BigCorp")
+        row = db.list_target_companies(conn)[0]
+        db.set_company_career_url(conn, row["id"], "https://bigcorp.example/careers")
+        assert db.list_target_companies(conn)[0]["career_url"] == "https://bigcorp.example/careers"
+
+        removed = db.remove_target_company(conn, "bigcorp")   # case-insensitive
+        assert removed is True
+        assert db.list_target_companies(conn) == []
+        assert db.remove_target_company(conn, "bigcorp") is False

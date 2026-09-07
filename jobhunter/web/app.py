@@ -178,6 +178,16 @@ async def cv_upload_route(job_id: int, pdf: UploadFile = File(...)):
     return JSONResponse(result, status_code=status)
 
 
+@app.get("/companies", response_class=HTMLResponse)
+def companies_page(request: Request):
+    with db.connect() as conn:
+        companies = db.list_target_companies(conn)
+        unchecked = sum(1 for c in companies if not c["last_checked_at"])
+    return TEMPLATES.TemplateResponse(
+        request, "companies.html", {"companies": companies, "unchecked": unchecked},
+    )
+
+
 @app.get("/rules", response_class=HTMLResponse)
 def rules_page(request: Request):
     with db.connect() as conn:
