@@ -303,9 +303,12 @@ def _norm_city(location: str) -> str:
     sources. The city (first comma-separated segment) is the one part they share.
     HelloWork has no comma at all -- it appends a trailing department code instead
     ("Paris - 75"), which without stripping would normalize to "paris 75" and never
-    match another source's bare "paris" for the same city."""
+    match another source's bare "paris" for the same city. It also sometimes folds
+    the arrondissement into the city name itself ("Paris 12e - 75", "Paris 1er - 75"),
+    which needs stripping too or it normalizes to "paris 12e" and still never matches."""
     city = (location or "").split(",")[0]
     city = re.sub(r"\s*-\s*\d+\s*$", "", city)
+    city = re.sub(r"\s+\d+(?:er|e)\s*$", "", city, flags=re.IGNORECASE)
     return _normalize(city)
 
 
@@ -334,15 +337,25 @@ def _companies_related(a: str, b: str) -> bool:
 
 
 def find_possible_duplicates(conn: sqlite3.Connection, title_ratio: float = 0.80) -> list[dict]:
-    """Non-destructive 'maybe the same posting' detector: same city + related company
-    names + near-identical title (after stripping boilerplate). Deliberately NOT used
-    to auto-merge -- company-name relatedness alone is too risky to silently collapse
-    (a conglomerate like VINCI has genuinely separate subsidiaries hiring
-    independently), so this only surfaces candidates for a human to judge. Title
-    similarity alone is also not a safe signal on its own (many genuinely different
-    employers share a generic title like "AI Engineer"), which is why both gates are
-    required together. Uses only the stdlib (difflib) -- no embeddings needed at this
-    scale (a few hundred rows)."""
+    """Non-destructive 'maybe the same posting' detector: same city + near-identical
+    title (after stripping boilerplate), gated by a company check that depends on
+    whether the two companies are identical or merely related:
+    - Related-but-not-identical (e.g. HelloWork's "Ubisoft" vs LinkedIn's "Ubisoft
+      Paris Studio" for the same posting): a fuzzy title ratio >= title_ratio is
+      required, since a parent/subsidiary pair alone isn't strong enough evidence.
+    - Exactly identical company: a fuzzy ratio is NOT safe here -- a near-identical
+      title is far more often two genuinely different open roles at the same employer
+      (different squad, seniority level, specialization) than a stray duplicate,
+      confirmed by measuring real false positives at ratios 0.80-0.955 (Doctrine's
+      "Squad Scribe" vs "Squad Distribute", Datadog's "Research Engineer" vs
+      "Research Scientist", etc). An EXACT match on the de-junked title is required
+      instead -- two genuinely different roles essentially never normalize to the
+      byte-for-byte same string after only removing gender/contract boilerplate,
+      but the same posting cross-listed on HelloWork/LinkedIn/WTTJ with only
+      punctuation differences does.
+    Deliberately NOT used to auto-merge -- surfaces candidates for a human to judge.
+    Uses only the stdlib (difflib) -- no embeddings needed at this scale (a few
+    hundred rows)."""
     rows = conn.execute("SELECT id, company, title, location FROM jobs").fetchall()
     by_city: dict[str, list[tuple[int, str, str]]] = defaultdict(list)
     for r in rows:
@@ -357,6 +370,10 @@ def find_possible_duplicates(conn: sqlite3.Connection, title_ratio: float = 0.80
             id_a, co_a, ta = bucket[i]
             for k in range(i + 1, n):
                 id_b, co_b, tb = bucket[k]
+                if _normalize(co_a) == _normalize(co_b):
+                    if ta == tb:
+                        pairs.append({"a": id_a, "b": id_b})
+                    continue
                 if not _companies_related(co_a, co_b):
                     continue
                 if SequenceMatcher(None, ta, tb).ratio() >= title_ratio:

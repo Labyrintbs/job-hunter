@@ -60,6 +60,40 @@ def test_cross_source_content_dedup_hellowork_department_code_location(tmp_db):
         assert jid1 == jid2
 
 
+def test_cross_source_content_dedup_hellowork_arrondissement_location(tmp_db):
+    # HelloWork sometimes folds the arrondissement into the city name itself
+    # ("Paris 12e - 75", "Paris 1er - 75") rather than just appending a department
+    # code -- this used to normalize to "paris 12e" and never match another
+    # source's bare "Paris" for the same city.
+    wttj = Job(source="wttj", external_id="w1", title="Senior AI Engineer",
+               company="Converteo", location="Paris, Île-de-France, France",
+               url="https://wttj.example/w1")
+    hellowork = Job(source="hellowork", external_id="h1", title="Senior AI Engineer",
+                    company="Converteo", location="Paris 12e - 75",
+                    url="https://hellowork.example/h1")
+    with db.connect() as conn:
+        jid1, new1 = db.upsert_job(conn, wttj, 60, "r")
+        jid2, new2 = db.upsert_job(conn, hellowork, 65, "r2")
+        assert new1 is True and new2 is False
+        assert jid1 == jid2
+
+
+def test_find_possible_duplicates_flags_exact_title_at_same_company(tmp_db):
+    # The same posting cross-listed at the exact same employer (e.g. HelloWork vs
+    # LinkedIn), differing only by punctuation/boilerplate -- an EXACT match on the
+    # de-junked title is required (not just a high ratio) so this stays safe: see
+    # test_find_possible_duplicates_excludes_exact_same_company for the case (a
+    # genuinely different role at the same company) this must NOT flag.
+    with db.connect() as conn:
+        a, _ = db.upsert_job(conn, J("1", title="Senior AI Engineer H/F - CDI",
+                                     company="Converteo", loc="Paris, Île-de-France, France"), 60, "r")
+        b, _ = db.upsert_job(conn, J("2", title="Senior ai Engineer - CDI H/F",
+                                     company="Converteo", loc="Paris 12e - 75"), 60, "r2")
+        pairs = db.find_possible_duplicates(conn)
+        assert len(pairs) == 1
+        assert {pairs[0]["a"], pairs[0]["b"]} == {a, b}
+
+
 def test_cross_source_no_dedup_for_different_title(tmp_db):
     # Same company/location but a genuinely different role must stay separate.
     a = Job(source="wttj", external_id="1", title="Machine Learning Engineer",
