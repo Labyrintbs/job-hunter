@@ -5,6 +5,67 @@ internships), score them against your profile, auto-tailor a LaTeX CV and draft 
 cover letter per job, and track every application from a local web dashboard.
 **Draft-and-review by design: it never auto-submits applications.**
 
+## Pipeline
+The whole flow, in order. `jobhunter run` executes it end to end (the cron
+target); individual stages are also their own CLI commands / dashboard buttons.
+
+```
+ sources/           fetch every enabled source — WTTJ, company ATS boards,
+   │                LinkedIn, France Travail, HelloWork. Each source is
+   │                isolated: a bad token / rate-limit / network error only
+   │                drops that source's jobs, never the whole run.
+   ▼
+ match.screen       rule-based score (0–100) + triage:
+   │                  not stored   — not ML-relevant by title, excluded term,
+   │                                 or blocklisted company
+   │                  Filtered     — stored but auto-hidden: senior title,
+   │                                 requires > seniority.max_years, citizenship
+   │                                 requirement, below min_score, or matched an
+   │                                 approved learned rule. Never deleted.
+   │                  main list    — everything else
+   ▼
+ db.upsert_job      SQLite (data/jobhunter.db). 3-tier cross-source dedup:
+   │                (source, external_id) → exact URL → normalized
+   │                (company, title, city). One posting seen on WTTJ + an ATS
+   │                board + LinkedIn lands on one row. Records a fetch_runs
+   │                snapshot + stamps last_seen (market trends / staleness).
+   ▼
+ enrich             fetch the full JD text (LinkedIn guest detail endpoint,
+   │                others via the job page), re-score with the real content,
+   │                feed it to the judge, save it to data/jd/<source>__<id>.txt.
+   │                Can move a job into or out of the Filtered bucket (e.g. a
+   │                "5+ years" line only visible in the body).
+   ▼
+ llm/judge          Claude fit-judge: 0–100 score + verdict
+   │                (strong | good | stretch | weak) + seniority read, calibrated
+   │                for a junior. Injects the learned preference profile. A
+   │                weak verdict auto-hides the job into the Filtered bucket.
+   │                Skipped (not guessed) when there's no real JD text yet.
+   ▼
+ verdict != weak ──► tailor/engine        reorder the LaTeX CV by relevance,
+   │                                       rewrite the tagline, compile to PDF
+   │                                       (latexmk); auto path enforces exactly
+   │                                       2 pages and retries once.
+   │                  apply/cover_letter   draft a cover letter (Claude), grounded
+   │                                       in the real CV, matches the posting's
+   │                                       language.
+   │                  → data/cv/<job_id>-<company>/   Nothing is ever submitted
+   │                                                  for you.
+   ▼
+ notify/dispatch    digest of new jobs at/above notifications.min_score →
+   │                File (always), Telegram, Email. Stale jobs are dropped.
+   ▼
+ web/               dashboard: table + kanban + rules + companies pages,
+ history_app/       plus a standalone Streamlit funnel / Sankey / timeline
+                    (`jobhunter history`).
+```
+
+**The feedback you give closes the loop.** 👍 interested / 👎 dismiss (with
+reason chips) is explicit-only ground truth: `jobhunter rules mine` turns it into
+candidate keyword/company filter rules (approval-gated — nothing filters your
+jobs until you approve it), and `jobhunter profile update` distills a Prefer/Avoid
+block that feeds back into the judge. See *The feedback loop* near the bottom.
+
 ## Features
 - **Fetch** from Welcome to the Jungle (public Algolia backend), company ATS
   boards (Greenhouse, Lever, Ashby, SmartRecruiters, Recruitee, Workable — most
