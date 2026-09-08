@@ -30,6 +30,12 @@ boost_keywords:
   - mlops
   - pytorch
   - data scientist
+  - llm
+  - genai
+  - generative ai
+  - rag
+  - applied ai
+  - agentic
 
 # Buckets shown as the dashboard's Category column. Checked title-first, then
 # title+description, in this priority order (domain-specific before the ML/DL
