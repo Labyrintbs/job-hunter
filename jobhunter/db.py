@@ -25,6 +25,14 @@ STATUSES = [
 
 EVENT_TYPES = ("created", "status", "filtered", "label")
 
+# A job whose description can't be fetched (delisted, source blocking us, etc.)
+# would otherwise be retried by process_backlog forever, since the pending-
+# enrichment queries always pull the *oldest* unfetched jobs first -- a handful of
+# permanently-broken postings would then wedge the whole backlog, starving every
+# newer job of a turn. Giving up after this many failed attempts lets the queue
+# move on.
+MAX_ENRICH_ATTEMPTS = 3
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS jobs (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -186,6 +194,7 @@ MIGRATIONS = {
         "geo_tier": "TEXT DEFAULT ''",
         "last_seen": "TEXT DEFAULT ''",
         "role_category": "TEXT DEFAULT ''",
+        "enrich_attempts": "INTEGER DEFAULT 0",
     },
     "applications": {
         "cover_letter_path": "TEXT DEFAULT ''",
@@ -597,16 +606,26 @@ def jobs_pending_enrichment_any(conn: sqlite3.Connection, limit: int = 10) -> li
     """Any job (regardless of engagement) still lacking a real description --
     a backlog-wide retry for enrichment that failed at fetch time, unlike
     jobs_needing_enrichment (gated to engaged jobs only). Skips filtered/
-    dismissed jobs since there's no point enriching those. Oldest first."""
+    dismissed jobs, and jobs that have already failed MAX_ENRICH_ATTEMPTS times
+    (see its docstring), since there's no point enriching those. Oldest first."""
     return conn.execute(
         """SELECT id, source, external_id, url FROM jobs
            WHERE COALESCE(description_full, 0) = 0
              AND COALESCE(filtered, 0) = 0
              AND COALESCE(user_label, '') != 'dismissed'
+             AND COALESCE(enrich_attempts, 0) < ?
            ORDER BY fetched_at ASC
            LIMIT ?""",
-        (limit,),
+        (MAX_ENRICH_ATTEMPTS, limit),
     ).fetchall()
+
+
+def bump_enrich_attempts(conn: sqlite3.Connection, job_id: int) -> None:
+    """Record one failed enrichment attempt -- see MAX_ENRICH_ATTEMPTS."""
+    conn.execute(
+        "UPDATE jobs SET enrich_attempts = COALESCE(enrich_attempts, 0) + 1 WHERE id = ?",
+        (job_id,),
+    )
 
 
 def jobs_with_full_description(conn: sqlite3.Connection) -> list[sqlite3.Row]:
@@ -746,16 +765,18 @@ def set_description(conn: sqlite3.Connection, job_id: int, text: str) -> None:
 
 
 def jobs_needing_enrichment(conn: sqlite3.Connection, limit: int = 20) -> list[sqlite3.Row]:
-    """Engaged jobs (interested, or moved past 'new') whose description is not yet full."""
+    """Engaged jobs (interested, or moved past 'new') whose description is not yet
+    full, excluding ones that already failed MAX_ENRICH_ATTEMPTS times."""
     marks = ",".join("?" for _ in _ENGAGED_STATUSES)
     return conn.execute(
         f"""SELECT j.id, j.source, j.external_id, j.url FROM jobs j
             JOIN applications a ON a.job_id = j.id
             WHERE COALESCE(j.description_full, 0) = 0
+              AND COALESCE(j.enrich_attempts, 0) < ?
               AND (COALESCE(j.user_label, '') = 'interested' OR a.status IN ({marks}))
             ORDER BY j.labeled_at DESC, j.fetched_at DESC
             LIMIT ?""",
-        (*_ENGAGED_STATUSES, limit),
+        (MAX_ENRICH_ATTEMPTS, *_ENGAGED_STATUSES, limit),
     ).fetchall()
 
 

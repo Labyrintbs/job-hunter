@@ -424,6 +424,48 @@ def test_process_backlog_retries_enrichment_for_stuck_jobs(tmp_db, config, monke
     assert row["description_full"] == 1
 
 
+def test_enrich_one_bumps_attempts_on_failure_and_leaves_them_on_success(tmp_db, config, monkeypatch):
+    with db.connect() as conn:
+        broken = _insert(conn, config, external_id="21", company="BrokenCo", description="")
+        fine = _insert(conn, config, external_id="22", company="FineCo", description="")
+
+    monkeypatch.setattr(pipeline.enrich, "fetch_full_text", lambda *a, **k: None)
+    result = pipeline.enrich_one(broken)
+    assert result == {"job_id": broken, "enriched": False}
+    with db.connect() as conn:
+        assert db.get_job(conn, broken)["enrich_attempts"] == 1
+
+    monkeypatch.setattr(pipeline.enrich, "fetch_full_text", lambda *a, **k: _LONG_REAL_JD)
+    pipeline.enrich_one(fine)
+    with db.connect() as conn:
+        assert db.get_job(conn, fine)["enrich_attempts"] == 0   # success: counter untouched
+
+
+def test_process_backlog_gives_up_on_a_permanently_broken_job(tmp_db, config, monkeypatch):
+    # Regression test for the real incident: process_backlog always pulls the
+    # *oldest* unenriched jobs first, so a job whose source can never be
+    # enriched (delisted, blocked, etc.) would otherwise occupy every retry
+    # slot forever and starve every newer job of a turn.
+    monkeypatch.setattr(pipeline.provider, "available", lambda: True)
+    with db.connect() as conn:
+        broken = _insert(conn, config, external_id="30", company="BrokenCo", description="")  # oldest
+        for _ in range(db.MAX_ENRICH_ATTEMPTS):
+            db.bump_enrich_attempts(conn, broken)
+        newer = _insert(conn, config, external_id="31", company="NewerCo", description="")    # would be starved
+
+    monkeypatch.setattr(pipeline.enrich, "fetch_full_text", lambda *a, **k: _LONG_REAL_JD)
+    monkeypatch.setattr(pipeline.llm_judge, "judge", lambda job, preferences="":
+                        {"score": 80, "verdict": "weak", "seniority": "junior",
+                         "min_years": 0, "reasons": "r"})
+
+    summary = pipeline.process_backlog(judge_min_score=0, judge_limit=1)
+
+    assert summary["enriched"] == 1
+    with db.connect() as conn:
+        assert db.get_job(conn, newer)["description_full"] == 1     # got its turn
+        assert db.get_job(conn, broken)["description_full"] == 0    # correctly left alone
+
+
 def test_process_backlog_noop_when_provider_unavailable(tmp_db, config, monkeypatch):
     monkeypatch.setattr(pipeline.provider, "available", lambda: False)
     called = []

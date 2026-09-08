@@ -22,6 +22,49 @@ def test_strip_html():
     assert enrich._strip_html("<script>x=1</script><p>keep</p>") == "keep"
 
 
+def test_strip_html_does_not_leak_stimulus_action_attribute_values():
+    # Regression test for the actual bug behind job 220/221/... getting stuck
+    # unenriched forever (see process_backlog): Stimulus's `data-action` syntax
+    # embeds a literal "->" inside the attribute value (e.g.
+    # "click->toggle#add"), which contains a ">" character. A naive
+    # `<[^>]+>` tag-strip regex ends the "tag" at that embedded ">" and leaks
+    # everything after it -- including the real closing ">" -- into the
+    # extracted text. html.parser.HTMLParser tokenizes attributes correctly
+    # and must not have this problem.
+    html_fragment = (
+        '<div data-controller="atc" data-action="click->toggle#add '
+        'analytics#push">'
+        "<p>Ingenieur Machine Learning, 3 ans d'experience en Python.</p>"
+        "</div>"
+    )
+    text = enrich._strip_html(html_fragment)
+    assert text == "Ingenieur Machine Learning, 3 ans d'experience en Python."
+    assert "toggle#add" not in text
+    assert "analytics#push" not in text
+    assert "data-action" not in text
+
+
+def test_generic_enrichment_extracts_real_content_despite_stimulus_attributes():
+    # End-to-end version of the regression above: a page with several
+    # Stimulus-controlled widgets (enough data-action attributes to have
+    # tripped the old leak bug well past _LEAK_MARKER_THRESHOLD) around a real
+    # job description must still enrich successfully.
+    widget = (
+        '<div data-controller="toggle" data-action="click->toggle#add mouseover->toggle#expand">x</div>'
+        '<div data-controller="toggle" data-action="click->toggle#remove mouseover->toggle#collapse">x</div>'
+        '<span data-action="click->analytics#push">Menu</span>'
+    )
+    real_job = (
+        "<p>We are looking for a Machine Learning Engineer with 3+ years of "
+        "experience in Python, PyTorch, and production deployment on AWS.</p>"
+    )
+    c = Client({"http://job": Resp(200, widget * 2 + real_job)})
+    text = enrich.fetch_full_text("hellowork", "abc", "http://job", client=c)
+    assert text is not None
+    assert "Machine Learning Engineer" in text
+    assert "toggle#add" not in text
+
+
 def test_linkedin_enrichment_hits_detail_endpoint_and_extracts_markup():
     jid = "4123456789"
     url = enrich._LI_DETAIL_URL.format(id=jid)
@@ -65,13 +108,41 @@ def test_looks_like_scraped_chrome_does_not_flag_real_job_text():
     assert not enrich._looks_like_scraped_chrome(real)
 
 
+def test_looks_delisted_flags_takedown_notice():
+    assert enrich._looks_delisted("Machine Learning Engineer Team.is n'est plus disponible")
+    assert enrich._looks_delisted("This position is no longer available")
+    assert not enrich._looks_delisted("We are hiring a Machine Learning Engineer with 3 years experience")
+
+
+def test_generic_enrichment_returns_none_for_delisted_posting():
+    # A delisted HelloWork posting still returns 200 with real page chrome and a
+    # correct <title> (from the URL slug), but the body is a takedown notice plus
+    # an unrelated "similar postings" carousel -- job 220 in the real incident.
+    # That carousel text is clean enough to pass every other check, so it must be
+    # caught explicitly rather than stored as this job's description.
+    delisted_html = (
+        "<html><body><h1>Machine Learning Engineer H/F</h1>"
+        "<p>Team.is n'est plus disponible</p>"
+        "<p>Ces offres similaires pourraient vous interesser</p>"
+        "<p>Data Analyst H/F Gutenberg Agency Boulogne-Billancourt</p>"
+        "</body></html>"
+    )
+    c = Client({"http://job": Resp(200, delisted_html)})
+    assert enrich.fetch_full_text("hellowork", "abc", "http://job", client=c) is None
+
+
 def test_generic_enrichment_returns_none_when_page_is_mostly_scraped_chrome():
-    garbage_html = ("<div data-controller=\"atc\" data-action=\"click->toggle#add\">x</div>"
-                     "<div data-controller=\"y\" data-action=\"click->toggle#remove\">x</div>"
-                     "<span data-controller=\"z\">analytics#push</span>"
-                     "<span>input-checker#uncheck</span><span>toggle#expand</span>"
-                     "<span>toggle#collapse</span><span>toggle#add</span>"
-                     "<span>analytics#push</span><span>data-action=\"foo\"</span>"
-                     "<p>Ingénieur IA H/F, un vrai poste avec un peu de texte réel</p>")
+    # _strip_html no longer leaks attribute values (see the regression tests
+    # above), so this exercises _looks_like_scraped_chrome's remaining
+    # defense-in-depth role: if leak-marker tokens genuinely appear as visible
+    # text (whatever the cause), the page is still rejected rather than stored
+    # as if it were a real posting.
+    garbage_html = (
+        "<span>analytics#push</span><span>input-checker#uncheck</span>"
+        "<span>toggle#expand</span><span>toggle#collapse</span>"
+        "<span>toggle#add</span><span>analytics#push</span>"
+        "<span>data-action=\"foo\"</span><span>toggle#remove</span>"
+        "<p>Ingénieur IA H/F, un vrai poste avec un peu de texte réel</p>"
+    )
     c = Client({"http://job": Resp(200, garbage_html)})
     assert enrich.fetch_full_text("hellowork", "abc", "http://job", client=c) is None

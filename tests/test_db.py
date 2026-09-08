@@ -304,6 +304,34 @@ def test_jobs_pending_enrichment_any_ignores_engagement_but_not_filtered_or_dism
     assert pending == [plain]   # not the filtered, dismissed, or already-full one
 
 
+def test_jobs_pending_enrichment_any_gives_up_after_max_attempts(tmp_db):
+    # A job whose source permanently fails to enrich (delisted, blocked, etc.)
+    # must not keep occupying every retry slot forever -- see MAX_ENRICH_ATTEMPTS.
+    with db.connect() as conn:
+        broken, _ = db.upsert_job(conn, J("1", title="ML Engineer A", url="http://x/1"), 60, "r")
+        fine, _ = db.upsert_job(conn, J("2", title="ML Engineer B", url="http://x/2"), 60, "r")
+
+        for _ in range(db.MAX_ENRICH_ATTEMPTS - 1):
+            db.bump_enrich_attempts(conn, broken)
+            pending = [r["id"] for r in db.jobs_pending_enrichment_any(conn, limit=10)]
+            assert broken in pending   # still under the cap, still retried
+
+        db.bump_enrich_attempts(conn, broken)   # this attempt reaches the cap
+        pending = [r["id"] for r in db.jobs_pending_enrichment_any(conn, limit=10)]
+        assert pending == [fine]   # broken dropped out, fine is unaffected
+
+
+def test_jobs_needing_enrichment_gives_up_after_max_attempts(tmp_db):
+    with db.connect() as conn:
+        broken, _ = db.upsert_job(conn, J("1", title="ML Engineer A", url="http://x/1"), 60, "r")
+        db.update_status(conn, broken, "shortlisted")   # engaged, so normally a candidate
+        for _ in range(db.MAX_ENRICH_ATTEMPTS):
+            db.bump_enrich_attempts(conn, broken)
+
+        pending = [r["id"] for r in db.jobs_needing_enrichment(conn, limit=10)]
+    assert pending == []
+
+
 def test_jobs_ready_for_auto_tailor_needs_qualifying_verdict_and_no_cv(tmp_db):
     with db.connect() as conn:
         strong, _ = db.upsert_job(conn, J("1", title="A", url="http://x/1"), 60, "r")
