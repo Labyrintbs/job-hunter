@@ -837,10 +837,16 @@ def jobs_ready_for_auto_tailor(conn: sqlite3.Connection, limit: int = 10) -> lis
     have a CV artifact yet. Unlike daily_run's inline auto-tailor gate (scoped
     to that run's freshly-judged jobs only), this sweeps every qualifying job
     ever judged, so one that missed a prior cutoff isn't stuck forever.
+    Excludes filtered (e.g. manually flagged as a cross-board duplicate) and
+    dismissed jobs -- absence of a cv_artifacts row isn't enough on its own,
+    since deleting one (e.g. cleaning up a duplicate's wasted CV) would
+    otherwise make the job look untailored again and resurrect it.
     Strongest fit first, in case the backlog exceeds the batch size."""
     return conn.execute(
         """SELECT id FROM jobs j
            WHERE llm_verdict IN ('strong', 'good', 'stretch')
+             AND COALESCE(j.filtered, 0) = 0
+             AND COALESCE(j.user_label, '') != 'dismissed'
              AND NOT EXISTS (SELECT 1 FROM cv_artifacts c WHERE c.job_id = j.id)
            ORDER BY llm_score DESC
            LIMIT ?""",
