@@ -167,19 +167,23 @@ $P -m jobhunter.cli list  --min-score 40
 $P -m jobhunter.cli web              # dashboard at http://127.0.0.1:8000
 ```
 
-## Daily automation (cron)
+## Daily automation (launchd, not cron)
 `jobhunter run` is the scheduled entrypoint: fetch everywhere, then LLM-judge the
-new promising jobs (capped per run). Manage the crontab entry with:
+new promising jobs (capped per run). Despite the command name (`cron`, kept for
+familiarity), this is scheduled via a per-user **launchd LaunchAgent**, not the
+`cron` daemon — see "Why not plain cron?" below for why that matters. Manage it
+with:
 ```bash
-$P -m jobhunter.cli run                 # run once now (what cron calls)
-$P -m jobhunter.cli cron show           # preview the crontab line (no changes)
+$P -m jobhunter.cli run                 # run once now (what the schedule calls)
+$P -m jobhunter.cli cron show           # preview what would be scheduled (no changes)
 $P -m jobhunter.cli cron install --time 08:00   # add a once-daily entry at 08:00
-$P -m jobhunter.cli cron install --interval-hours 12   # or run every N hours instead (e.g. 00:00 + 12:00)
+$P -m jobhunter.cli cron install --interval-hours 12   # or run every N hours instead (anchored at --time)
 $P -m jobhunter.cli cron uninstall      # remove it
 ```
 Installing is opt-in because the daily run makes LLM calls (more frequent runs
-mean more judge calls — factor that into `--interval-hours`). Only the tagged
-`# jobhunter-daily` line is ever touched; your other cron jobs are preserved.
+mean more judge calls — factor that into `--interval-hours`). Only jobhunter's
+own LaunchAgents (`~/Library/LaunchAgents/com.jobhunter.*.plist`) are ever
+touched; nothing else on the system is affected.
 
 A companion watchdog (`cron install --job watchdog`, hourly by default) self-heals
 missed runs — if the last fetch is older than `--max-gap-hours` (default 15h, kept
@@ -187,10 +191,27 @@ above half the main interval so it doesn't duplicate every cycle's normal gap) i
 triggers a catch-up fetch and logs to `data/watchdog.log`.
 Output is appended to `data/cron.log`.
 
-The interpreter in the cron line is resolved by `schedule._python()`: first the
-`JOBHUNTER_PYTHON` env var, then the active conda env (`CONDA_PREFIX`), then the
-project `.venv`, then `sys.executable`. Install cron from the activated env to get
-the conda python.
+The interpreter baked into the LaunchAgent is resolved by `schedule._python()`:
+first the `JOBHUNTER_PYTHON` env var, then the active conda env (`CONDA_PREFIX`),
+then the project `.venv`, then `sys.executable`. Run `cron install` from the
+activated env (or with `JOBHUNTER_PYTHON` set explicitly) to get the right
+interpreter — it's resolved once at install time and written into the plist as a
+literal path, not re-resolved on every run.
+
+### Why not plain cron?
+Every judge/tailor call goes through `claude` CLI, which stores its login
+credential in the macOS **login Keychain**. A `cron`-invoked process runs as a
+LaunchDaemon in the non-interactive "Background" security session, which macOS
+denies access to Keychain items gated to the interactive user session — so
+`claude` fails with "Not logged in" even though the exact same command works
+fine when run from a Terminal, and every cron-scheduled judge/tailor call was
+silently failing (confirmed directly: `launchctl managername` reports
+"Background" under cron vs "Aqua" under a LaunchAgent or a Terminal session,
+and a LaunchAgent-invoked `claude -p` succeeds where an identical cron-invoked
+call fails with the same PATH and environment). A per-user LaunchAgent runs
+inside the same Aqua session as an interactive login and has the same Keychain
+access, so it doesn't hit this. If you ever switch the LLM backend to
+`ANTHROPIC_API_KEY` (env var, no Keychain involved), this stops mattering.
 
 ### Decoupling fetch from judge + auto-tailor cadence
 `jobhunter run`'s judge/auto-tailor steps only ever look at jobs fetched *in that

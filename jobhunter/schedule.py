@@ -1,24 +1,37 @@
-"""Manage a daily crontab entry that runs the pipeline.
+"""Manage jobhunter's scheduled jobs via launchd LaunchAgents.
 
-The entry is tagged with a marker comment so we can find/replace/remove exactly
-our line and never touch the user's other cron jobs.
+Not cron: a cron-invoked process runs as a macOS LaunchDaemon in the
+non-interactive "Background" security session, which cannot access Keychain
+items gated to the user's interactive session. The `claude` CLI stores its
+login credential in exactly such a Keychain item, so every cron-invoked LLM
+call failed with "Not logged in" even though the CLI works fine when run
+interactively -- confirmed directly on this machine (`launchctl managername`
+prints "Background" under cron, "Aqua" under a LaunchAgent or a Terminal
+session; a LaunchAgent-invoked `claude -p` succeeds where the identical
+cron-invoked call fails). Since `jobhunter run`'s daily_run() and watchdog's
+triggered catch-up both call judge_one/tailor_one, all three scheduled jobs
+need that Aqua-session access, not just `process` -- hence all three are
+LaunchAgents here, none are cron entries.
 """
 from __future__ import annotations
 
 import os
+import plistlib
 import subprocess
 import sys
 from pathlib import Path
 
 from .config import REPO_ROOT
 
-MARKER = "# jobhunter-daily"
-WATCHDOG_MARKER = "# jobhunter-watchdog"
-PROCESS_MARKER = "# jobhunter-process"
+LAUNCH_AGENTS_DIR = Path.home() / "Library" / "LaunchAgents"
+
+MARKER = "com.jobhunter.daily"
+WATCHDOG_MARKER = "com.jobhunter.watchdog"
+PROCESS_MARKER = "com.jobhunter.process"
 
 
 def _python() -> str:
-    """The interpreter to run under cron. Resolution order: the JOBHUNTER_PYTHON
+    """The interpreter to run under launchd. Resolution order: the JOBHUNTER_PYTHON
     env var, the activated conda env's python (CONDA_PREFIX), the project .venv,
     then the interpreter running this code. Preferring conda keeps the env out of
     the iCloud-managed repo tree (macOS storage optimization evicts venv binaries)."""
@@ -36,111 +49,121 @@ def _python() -> str:
     return sys.executable
 
 
-def cron_line(hour: int = 8, minute: int = 0, interval_hours: int | None = None) -> str:
-    """interval_hours, if given, overrides hour/minute with a `*/N` hour pattern
-    (e.g. 12 -> runs at 00:00 and 12:00) instead of a single fixed time/day."""
+def _plist_path(label: str) -> Path:
+    return LAUNCH_AGENTS_DIR / f"{label}.plist"
+
+
+def _command(subcommand: str, log_name: str) -> str:
     py = _python()
-    cmd = f"cd {REPO_ROOT} && {py} -m jobhunter.cli run >> {REPO_ROOT}/data/cron.log 2>&1"
+    return f"cd {REPO_ROOT} && {py} -m jobhunter.cli {subcommand} >> {REPO_ROOT}/data/{log_name} 2>&1"
+
+
+def _calendar_intervals(hour: int, minute: int, interval_hours: int | None) -> list[dict]:
+    """A fixed daily time, or (if interval_hours is given) a fire time every N
+    hours anchored at `hour` -- e.g. hour=2, interval_hours=12 fires at 02:00
+    and 14:00."""
     if interval_hours:
-        return f"{minute} */{interval_hours} * * * {cmd} {MARKER}"
-    return f"{minute} {hour} * * * {cmd} {MARKER}"
+        return [{"Hour": (hour + h) % 24, "Minute": minute} for h in range(0, 24, interval_hours)]
+    return [{"Hour": hour, "Minute": minute}]
 
 
-def _read_crontab() -> str:
-    proc = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
-    return proc.stdout if proc.returncode == 0 else ""
+def _describe(label: str, command: str, intervals: list[dict]) -> str:
+    times = ", ".join(f"{d['Hour']:02d}:{d['Minute']:02d}" for d in intervals)
+    return f"{label} @ {times} -> {command}"
 
 
-def _write_crontab(content: str) -> None:
-    subprocess.run(["crontab", "-"], input=content, text=True, check=True)
+def _write_plist(label: str, command: str, intervals: list[dict]) -> Path:
+    LAUNCH_AGENTS_DIR.mkdir(parents=True, exist_ok=True)
+    path = _plist_path(label)
+    with open(path, "wb") as f:
+        plistlib.dump({
+            "Label": label,
+            "ProgramArguments": ["/bin/bash", "-c", command],
+            "StartCalendarInterval": intervals,
+            "RunAtLoad": False,
+        }, f)
+    return path
 
 
-def without_marker(existing: str, marker: str = MARKER) -> str:
-    return "\n".join(l for l in existing.splitlines() if marker not in l)
+def _load(path: Path) -> None:
+    subprocess.run(["launchctl", "unload", str(path)], capture_output=True)
+    subprocess.run(["launchctl", "load", "-w", str(path)], check=True, capture_output=True)
 
 
-def with_entry(existing: str, line: str, marker: str = MARKER) -> str:
-    base = without_marker(existing, marker).rstrip("\n")
-    return (base + "\n" if base else "") + line + "\n"
+def _install(label: str, subcommand: str, log_name: str,
+            hour: int, minute: int, interval_hours: int | None) -> str:
+    command = _command(subcommand, log_name)
+    intervals = _calendar_intervals(hour, minute, interval_hours)
+    path = _write_plist(label, command, intervals)
+    _load(path)
+    return _describe(label, command, intervals)
+
+
+def _uninstall(label: str) -> bool:
+    path = _plist_path(label)
+    if not path.exists():
+        return False
+    subprocess.run(["launchctl", "unload", str(path)], capture_output=True)
+    path.unlink()
+    return True
+
+
+def _current(label: str) -> str | None:
+    path = _plist_path(label)
+    if not path.exists():
+        return None
+    with open(path, "rb") as f:
+        data = plistlib.load(f)
+    return _describe(label, " ".join(data["ProgramArguments"][2:]), data["StartCalendarInterval"])
+
+
+def cron_line(hour: int = 8, minute: int = 0, interval_hours: int | None = None) -> str:
+    """Preview string for `jobhunter cron` (no --install): what would be scheduled."""
+    return _describe(MARKER, _command("run", "cron.log"),
+                     _calendar_intervals(hour, minute, interval_hours))
 
 
 def install(hour: int = 8, minute: int = 0, interval_hours: int | None = None) -> str:
-    line = cron_line(hour, minute, interval_hours)
-    _write_crontab(with_entry(_read_crontab(), line, MARKER))
-    return line
+    return _install(MARKER, "run", "cron.log", hour, minute, interval_hours)
 
 
 def uninstall() -> bool:
-    existing = _read_crontab()
-    if MARKER not in existing:
-        return False
-    remaining = without_marker(existing, MARKER).strip()
-    _write_crontab(remaining + "\n" if remaining else "")
-    return True
+    return _uninstall(MARKER)
 
 
 def current() -> str | None:
-    for l in _read_crontab().splitlines():
-        if MARKER in l:
-            return l
-    return None
+    return _current(MARKER)
 
 
 def watchdog_cron_line(interval_hours: int = 1) -> str:
-    """Runs `jobhunter watchdog` every interval_hours; it self-checks staleness
-    and only refetches if the gap exceeds its own --max-gap-hours threshold."""
-    py = _python()
-    cmd = f"cd {REPO_ROOT} && {py} -m jobhunter.cli watchdog >> {REPO_ROOT}/data/watchdog_cron.log 2>&1"
-    return f"0 */{interval_hours} * * * {cmd} {WATCHDOG_MARKER}"
+    return _describe(WATCHDOG_MARKER, _command("watchdog", "watchdog_cron.log"),
+                     _calendar_intervals(0, 0, interval_hours))
 
 
 def install_watchdog(interval_hours: int = 1) -> str:
-    line = watchdog_cron_line(interval_hours)
-    _write_crontab(with_entry(_read_crontab(), line, WATCHDOG_MARKER))
-    return line
+    return _install(WATCHDOG_MARKER, "watchdog", "watchdog_cron.log", 0, 0, interval_hours)
 
 
 def uninstall_watchdog() -> bool:
-    existing = _read_crontab()
-    if WATCHDOG_MARKER not in existing:
-        return False
-    remaining = without_marker(existing, WATCHDOG_MARKER).strip()
-    _write_crontab(remaining + "\n" if remaining else "")
-    return True
+    return _uninstall(WATCHDOG_MARKER)
 
 
 def current_watchdog() -> str | None:
-    for l in _read_crontab().splitlines():
-        if WATCHDOG_MARKER in l:
-            return l
-    return None
+    return _current(WATCHDOG_MARKER)
 
 
 def process_cron_line(interval_hours: int = 1) -> str:
-    """Runs `jobhunter process` every interval_hours -- judges + auto-tailors
-    the whole backlog, decoupled from the fetch cron's own (slower) cadence."""
-    py = _python()
-    cmd = f"cd {REPO_ROOT} && {py} -m jobhunter.cli process >> {REPO_ROOT}/data/process_cron.log 2>&1"
-    return f"0 */{interval_hours} * * * {cmd} {PROCESS_MARKER}"
+    return _describe(PROCESS_MARKER, _command("process", "process_cron.log"),
+                     _calendar_intervals(0, 0, interval_hours))
 
 
 def install_process(interval_hours: int = 1) -> str:
-    line = process_cron_line(interval_hours)
-    _write_crontab(with_entry(_read_crontab(), line, PROCESS_MARKER))
-    return line
+    return _install(PROCESS_MARKER, "process", "process_cron.log", 0, 0, interval_hours)
 
 
 def uninstall_process() -> bool:
-    existing = _read_crontab()
-    if PROCESS_MARKER not in existing:
-        return False
-    remaining = without_marker(existing, PROCESS_MARKER).strip()
-    _write_crontab(remaining + "\n" if remaining else "")
-    return True
+    return _uninstall(PROCESS_MARKER)
 
 
 def current_process() -> str | None:
-    for l in _read_crontab().splitlines():
-        if PROCESS_MARKER in l:
-            return l
-    return None
+    return _current(PROCESS_MARKER)
