@@ -74,6 +74,23 @@ def test_cli_env_prepends_paths_node_lives_under(monkeypatch):
     assert "/usr/bin:/bin" in env["PATH"]   # existing PATH preserved, not replaced
 
 
+def test_cli_env_includes_nvm_node_bin_dir(monkeypatch, tmp_path):
+    # This machine manages node via nvm, not Homebrew -- its bin dir is versioned
+    # (~/.nvm/versions/node/v20.20.2/bin) and not covered by _CLI_EXTRA_PATHS.
+    fake_home = tmp_path
+    nvm_bin = fake_home / ".nvm" / "versions" / "node" / "v20.20.2" / "bin"
+    nvm_bin.mkdir(parents=True)
+    monkeypatch.setattr(provider.Path, "home", lambda: fake_home)
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    env = provider._cli_env()
+    assert str(nvm_bin) in env["PATH"]
+
+
+def test_nvm_bin_dirs_empty_when_nvm_not_installed(monkeypatch, tmp_path):
+    monkeypatch.setattr(provider.Path, "home", lambda: tmp_path)   # no .nvm dir under here
+    assert provider._nvm_bin_dirs() == []
+
+
 def test_cli_env_does_not_duplicate_already_present_paths(monkeypatch):
     already = provider._CLI_EXTRA_PATHS[0]
     monkeypatch.setenv("PATH", f"{already}:/usr/bin")

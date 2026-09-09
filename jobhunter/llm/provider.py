@@ -26,16 +26,28 @@ _CLI_FALLBACKS = [
     Path("/usr/local/bin/claude"),
 ]
 
-# macOS cron's default PATH is just /usr/bin:/bin -- it never sees /usr/local/bin or
-# /opt/homebrew/bin, so `claude`'s own SessionEnd hook (which shells out to `node`)
-# fails with "node: command not found" and takes the whole CLI call down with it,
-# even though `claude` itself was found via _CLI_FALLBACKS above.
+# macOS cron/launchd's default PATH is just /usr/bin:/bin -- it never sees
+# /usr/local/bin or /opt/homebrew/bin, so `claude`'s own SessionEnd hook (which
+# shells out to `node`) fails with "node: command not found" and takes the whole
+# CLI call down with it, even though `claude` itself was found via _CLI_FALLBACKS
+# above.
 _CLI_EXTRA_PATHS = ["/usr/local/bin", "/opt/homebrew/bin"]
+
+
+def _nvm_bin_dirs() -> list[str]:
+    """Node managed via nvm (rather than Homebrew) doesn't live at a fixed path --
+    it's versioned under ~/.nvm/versions/node/<version>/bin. Glob for whatever's
+    installed rather than hardcoding a version that will drift on the next nvm
+    upgrade."""
+    nvm_versions = Path.home() / ".nvm" / "versions" / "node"
+    if not nvm_versions.exists():
+        return []
+    return [str(p / "bin") for p in nvm_versions.iterdir() if (p / "bin").is_dir()]
 
 
 def _cli_env() -> dict:
     env = os.environ.copy()
-    extra = [p for p in _CLI_EXTRA_PATHS if p not in env.get("PATH", "")]
+    extra = [p for p in _CLI_EXTRA_PATHS + _nvm_bin_dirs() if p not in env.get("PATH", "")]
     if extra:
         env["PATH"] = ":".join(extra + [env.get("PATH", "")])
     return env
