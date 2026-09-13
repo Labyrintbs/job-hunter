@@ -26,7 +26,7 @@ def dashboard(request: Request, status: str | None = None, min_score: int = 0,
               filtered: int = 0, dismissed: int = 0, stale: int = 0,
               interested: int = 0, sort: str = "score", q: str = ""):
     days = load_search_config().get("staleness_days", 14)
-    exclude = ("unavailable", "rejected") if not (status or dismissed or interested or filtered) else ()
+    exclude = ("unavailable", "rejected") if not (status or dismissed or interested or filtered or stale) else ()
     sort = sort if sort in db.SORT_ORDERS else "score"
     q = q.strip()
     with db.connect() as conn:
@@ -44,13 +44,15 @@ def dashboard(request: Request, status: str | None = None, min_score: int = 0,
                                 filtered=None, dismissed=None, interested=True,
                                 staleness_days=days, exclude_statuses=exclude, sort=sort)
         else:
-            # explicitly picking a status (e.g. the "unavailable" pill) should show every
-            # job in that status, regardless of filtered/dismissed/interested labels --
-            # otherwise the count badge (status_counts, unfiltered) doesn't match what's shown.
+            # explicitly picking a status (e.g. the "unavailable" pill) or the stale pill
+            # should show every matching job regardless of filtered/dismissed/interested
+            # labels -- otherwise the count badge (status_counts / n_stale, both computed
+            # without those restrictions) doesn't match what's shown.
+            bypass = bool(status) or bool(stale)
             jobs = db.list_jobs(conn, status=status or None, min_score=min_score,
-                                filtered=None if status else filtered,
-                                dismissed=None if status else False,
-                                interested=None if status else False,
+                                filtered=None if bypass else filtered,
+                                dismissed=None if bypass else False,
+                                interested=None if bypass else False,
                                 staleness_days=days, exclude_statuses=exclude, sort=sort)
         if stale:
             jobs = [j for j in jobs if j["is_stale"]]
