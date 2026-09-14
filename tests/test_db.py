@@ -661,6 +661,23 @@ def test_target_companies_counts_matching_jobs_by_company_name(tmp_db):
         assert row["jobs_found"] == 1
 
 
+def test_jobs_for_target_company_matches_case_insensitively_and_ranks_by_llm_score(tmp_db):
+    with db.connect() as conn:
+        weak_id, _ = db.upsert_job(conn, J("1", title="Data Analyst", company="BigCorp",
+                                          loc="Paris", url="http://x/1"), 40, "r")
+        strong_id, _ = db.upsert_job(conn, J("2", title="ML Engineer", company="bigcorp",
+                                            loc="Paris", url="http://x/2"), 60, "r")
+        other_id, _ = db.upsert_job(conn, J("3", title="ML Engineer", company="OtherCo",
+                                           loc="Paris", url="http://x/3"), 60, "r")
+        db.set_llm_judgment(conn, strong_id, 90, "strong", "great fit")
+        db.set_llm_judgment(conn, weak_id, 20, "weak", "poor fit")
+
+        rows = db.jobs_for_target_company(conn, "BigCorp")
+
+        assert [r["id"] for r in rows] == [strong_id, weak_id]   # llm-judged first, highest first
+        assert other_id not in [r["id"] for r in rows]
+
+
 def test_target_companies_set_career_url_and_remove(tmp_db):
     with db.connect() as conn:
         db.add_target_company(conn, "BigCorp")

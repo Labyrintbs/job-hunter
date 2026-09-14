@@ -1055,6 +1055,22 @@ def list_target_companies(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     ).fetchall()
 
 
+def jobs_for_target_company(conn: sqlite3.Connection, name: str) -> list[sqlite3.Row]:
+    """Every job row matching a target company by name (case-insensitive) -- backs the
+    inline apply-from-here list on the companies page, so a company you researched by
+    hand shows its actual found postings without a click-through to the main dashboard."""
+    return conn.execute(
+        """SELECT j.id, j.title, j.url, j.location, j.score, j.llm_score, j.llm_verdict,
+                  a.status,
+                  (SELECT pdf_path FROM cv_artifacts c WHERE c.job_id = j.id
+                   ORDER BY c.generated_at DESC LIMIT 1) AS cv_pdf
+           FROM jobs j JOIN applications a ON a.job_id = j.id
+           WHERE LOWER(j.company) = LOWER(?)
+           ORDER BY (j.llm_score IS NULL), j.llm_score DESC, j.score DESC""",
+        (name,),
+    ).fetchall()
+
+
 def mark_company_checked(conn: sqlite3.Connection, company_id: int, result: str) -> None:
     conn.execute(
         "UPDATE target_companies SET last_checked_at = datetime('now'), last_result = ? "

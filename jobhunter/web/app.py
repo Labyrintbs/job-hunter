@@ -185,8 +185,12 @@ def companies_page(request: Request):
     with db.connect() as conn:
         companies = db.list_target_companies(conn)
         unchecked = sum(1 for c in companies if not c["last_checked_at"])
+        company_jobs = {c["name"]: db.jobs_for_target_company(conn, c["name"])
+                        for c in companies if c["jobs_found"]}
     return TEMPLATES.TemplateResponse(
-        request, "companies.html", {"companies": companies, "unchecked": unchecked},
+        request, "companies.html",
+        {"companies": companies, "unchecked": unchecked, "company_jobs": company_jobs,
+         "statuses": db.STATUSES},
     )
 
 

@@ -26,6 +26,42 @@
       <td class="reasons">{{ c["last_result"] }}</td>
       <td>{% if c["jobs_found"] %}<a href="/?q={{ c['name'] | urlencode }}">{{ c["jobs_found"] }} found →</a>{% else %}<span class="muted">0</span>{% endif %}</td>
     </tr>
+    {% if company_jobs.get(c["name"]) %}
+    <tr>
+      <td></td>
+      <td colspan="5" style="padding:0 0 10px 0">
+        <table style="margin:0; width:100%">
+          <tbody>
+          {% for j in company_jobs[c["name"]] %}
+            <tr>
+              <td style="width:36%">
+                {% if j["url"] %}<a href="{{ j['url'] }}" target="_blank" rel="noopener">{{ j["title"] }}</a>{% else %}{{ j["title"] }}{% endif %}
+                <span class="muted" style="font-size:11px"> · {{ j["location"] }}</span>
+              </td>
+              <td style="width:14%">
+                {% if j["llm_score"] is not none %}
+                  <span class="score" title="LLM score">{{ j["llm_score"] }}</span>
+                  <span class="muted" style="font-size:11px">{{ j["llm_verdict"] }}</span>
+                {% else %}<span class="muted" style="font-size:11px">rule score {{ j["score"] }}</span>{% endif %}
+              </td>
+              <td style="width:16%">
+                {% if j["cv_pdf"] %}<a href="file://{{ j['cv_pdf'] }}" target="_blank">CV ready ✅</a>{% else %}<span class="muted" style="font-size:11px">no CV yet</span>{% endif %}
+              </td>
+              <td style="width:20%">
+                <select onchange="setStatus(this, {{ j['id'] }})">
+                  {% for s in statuses %}
+                    <option value="{{ s }}" {% if s == j["status"] %}selected{% endif %}>{{ s }}</option>
+                  {% endfor %}
+                </select>
+              </td>
+              <td style="width:14%"><a href="/?q={{ c['name'] | urlencode }}" style="font-size:11px">details →</a></td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </td>
+    </tr>
+    {% endif %}
   {% else %}
     <tr><td colspan="6" class="muted">No companies on the checklist yet.</td></tr>
   {% endfor %}
