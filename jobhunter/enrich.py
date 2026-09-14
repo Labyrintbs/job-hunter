@@ -53,8 +53,19 @@ def _looks_delisted(text: str) -> bool:
     return bool(_DELISTED_RE.search(text))
 
 
+# Cookie-consent banners (common on large French corporate career sites) render as
+# real page text ahead of the job body in the HTML, so their bulk can consume the
+# entire _MAX_CHARS budget before any actual content is reached -- confirmed on
+# groupecreditagricole.jobs, whose scraped "description" was 100% cookie-policy
+# boilerplate (GDPR notice, per-cookie purpose/expiry table), truncated at exactly
+# _MAX_CHARS with the real posting never appearing. Job descriptions essentially
+# never mention cookies, so dropping any text node containing the word is a cheap,
+# low-risk filter -- applied at collection time so it doesn't eat the char budget.
+_COOKIE_BANNER_RE = re.compile(r"\bcookies?\b", re.IGNORECASE)
+
+
 class _TextExtractor(HTMLParser):
-    """Collects visible text, skipping <script>/<style> content."""
+    """Collects visible text, skipping <script>/<style> content and cookie-banner text."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -70,7 +81,7 @@ class _TextExtractor(HTMLParser):
             self._skip_depth -= 1
 
     def handle_data(self, data: str) -> None:
-        if not self._skip_depth and data.strip():
+        if not self._skip_depth and data.strip() and not _COOKIE_BANNER_RE.search(data):
             self.chunks.append(data)
 
 

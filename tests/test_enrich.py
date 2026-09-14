@@ -44,6 +44,24 @@ def test_strip_html_does_not_leak_stimulus_action_attribute_values():
     assert "data-action" not in text
 
 
+def test_strip_html_drops_cookie_banner_text():
+    # Regression: large French corporate career sites (e.g. groupecreditagricole.jobs)
+    # render a GDPR cookie-consent banner as real page text ahead of the job body. A
+    # verbose banner can consume the entire _MAX_CHARS budget before the real posting
+    # is ever reached, leaving the "description" as 100% cookie-policy boilerplate
+    # (confirmed on job 512 -- an actual 6-10yr-experience posting that got scored as
+    # junior-friendly because the years requirement never made it into the text).
+    html_fragment = (
+        "<div>GESTION DES COOKIES Le site utilise des cookies sur ce site : certains "
+        "cookies sont indispensables au bon fonctionnement. Nous vous invitons à faire "
+        "vos choix concernant le dépôt de ces cookies facultatifs.</div>"
+        "<p>Data Scientist IA - 6 à 10 ans d'expérience requis.</p>"
+    )
+    text = enrich._strip_html(html_fragment)
+    assert "cookie" not in text.lower()
+    assert "Data Scientist IA - 6 à 10 ans d'expérience requis." in text
+
+
 def test_generic_enrichment_extracts_real_content_despite_stimulus_attributes():
     # End-to-end version of the regression above: a page with several
     # Stimulus-controlled widgets (enough data-action attributes to have
