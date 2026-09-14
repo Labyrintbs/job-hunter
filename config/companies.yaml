@@ -77,3 +77,6 @@ companies:
   - { name: Renault Group, ats: workday, tenant: alliancewd, wd_host: wd3, site: renault-group-careers, locale: fr-FR }
   - { name: Valeo, ats: workday, tenant: valeo, wd_host: wd3, site: valeo_jobs }
   - { name: Sanofi, ats: workday, tenant: sanofi, wd_host: wd3, site: SanofiCareers }
+  - { name: Eiffage, ats: workday, tenant: eiffage, wd_host: wd3, site: Eiffage_Careers, locale: fr-FR }
+  - { name: Pernod Ricard, ats: workday, tenant: pernodricard, wd_host: wd3, site: pernod-ricard }
+  - { name: Decathlon, ats: greenhouse, token: decathlontechnologyen }
