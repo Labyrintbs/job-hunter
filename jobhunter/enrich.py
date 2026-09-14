@@ -15,6 +15,13 @@ import httpx
 
 _LI_DETAIL_URL = "https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/{id}"
 _LI_MARKUP_RE = re.compile(r'show-more-less-html__markup[^>]*>(.*?)</div>', re.S)
+# Header/nav/cookie-banner chrome sits before the real content on most pages, and
+# together can be large enough to eat the whole _MAX_CHARS budget -- confirmed on
+# groupecreditagricole.jobs, where "Description du poste" only started appearing
+# past character 7000 and got truncated before the years-of-experience line. Modern
+# semantic HTML often wraps the actual page content in <main>; scope extraction to
+# it when present so header/nav/cookie-banner chrome never counts against the budget.
+_MAIN_TAG_RE = re.compile(r"<main\b[^>]*>(.*?)</main\s*>", re.S | re.I)
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
                   "(KHTML, like Gecko) Chrome/120 Safari/537.36",
@@ -126,7 +133,9 @@ def fetch_full_text(source: str, external_id: str, url: str,
         if url:
             resp = client.get(url)
             if resp.status_code == 200 and resp.text.strip():
-                text = _strip_html(resp.text)[:_MAX_CHARS]
+                m = _MAIN_TAG_RE.search(resp.text)
+                text = _strip_html(m.group(1)) if m else _strip_html(resp.text)
+                text = text[:_MAX_CHARS]
                 if not text or _looks_like_scraped_chrome(text) or _looks_delisted(text):
                     return None
                 return text

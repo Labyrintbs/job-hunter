@@ -62,6 +62,36 @@ def test_strip_html_drops_cookie_banner_text():
     assert "Data Scientist IA - 6 à 10 ans d'expérience requis." in text
 
 
+def test_generic_enrichment_scopes_to_main_tag_skipping_nav_and_cookie_chrome(monkeypatch):
+    # Regression: header/nav/cookie-banner chrome ahead of <main> can be large enough
+    # (confirmed on groupecreditagricole.jobs: ~7000 chars of nav menu alone) to push
+    # the real "Description du poste" -- including the years-of-experience line --
+    # past _MAX_CHARS before it's ever reached, even after the cookie-word filter.
+    page = (
+        "<html><body>"
+        "<div>GESTION DES COOKIES nous utilisons des cookies essentiels et facultatifs...</div>"
+        "<nav>" + ("Découvrez notre groupe " * 400) + "</nav>"
+        '<main id="main" class="single-offer">'
+        "<h1>Data Scientist IA</h1>"
+        "<p>Niveau d'expérience minimum : 6 - 10 ans</p>"
+        "</main>"
+        "</body></html>"
+    )
+    client = Client({"http://x/1": Resp(200, page)})
+    text = enrich.fetch_full_text("wttj", "1", "http://x/1", client=client)
+    assert text is not None
+    assert "6 - 10 ans" in text
+    assert "cookie" not in text.lower()
+    assert "Découvrez notre groupe" not in text   # nav chrome outside <main> excluded
+
+
+def test_generic_enrichment_falls_back_to_full_page_without_main_tag():
+    page = "<html><body><p>Data Scientist IA - 6 à 10 ans requis.</p></body></html>"
+    client = Client({"http://x/1": Resp(200, page)})
+    text = enrich.fetch_full_text("wttj", "1", "http://x/1", client=client)
+    assert text == "Data Scientist IA - 6 à 10 ans requis."
+
+
 def test_generic_enrichment_extracts_real_content_despite_stimulus_attributes():
     # End-to-end version of the regression above: a page with several
     # Stimulus-controlled widgets (enough data-action attributes to have
