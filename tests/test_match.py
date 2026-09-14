@@ -43,6 +43,14 @@ def test_ml_title_relevant(config):
     assert is_relevant(J(title="AI Engineer"), config) is True
 
 
+def test_algorithm_engineer_title_relevant(config):
+    # Regression: a real posting (Beacon Biosignals, deep-learning/PyTorch work on
+    # biosignal time series) was silently dropped pre-scoring because "algorithm
+    # engineer" wasn't in role_keywords -- a legitimate alternate title for ML/DL
+    # roles, common in health-tech/biotech.
+    assert is_relevant(J(title="Algorithm Engineer"), config) is True
+
+
 def test_paris_ranks_above_other_france(config):
     paris = screen(J(loc="Paris, Ile-de-France, France"), config).score
     other = screen(J(loc="Bordeaux, Nouvelle-Aquitaine, France"), config).score

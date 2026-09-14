@@ -19,6 +19,7 @@ role_keywords:
   - genai
   - generative ai
   - llm
+  - algorithm engineer
 
 # Extra keywords that boost a job's score if present in title/description.
 boost_keywords:
@@ -144,6 +145,7 @@ linkedin:
     - "ai engineer"
     - "llm engineer"
     - "data scientist"
+    - "algorithm engineer"
   locations:
     - "Paris, France"
     - "Île-de-France, France"
