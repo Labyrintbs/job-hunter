@@ -45,6 +45,29 @@ def test_cross_source_content_dedup(tmp_db):
         assert db.get_job(conn, jid1)["score"] == 65   # refreshed by the second sighting
 
 
+def test_cross_source_dedup_backfills_missing_url_but_never_overwrites(tmp_db):
+    # Regression: a manually-imported job (pipeline.import_manual_job) can be added
+    # with no url. When an automated fetch later matches it to a real posting, the
+    # url should get backfilled -- previously it stayed empty forever.
+    manual = Job(source="manual", external_id="Acme:ML Engineer", title="ML Engineer",
+                company="Acme", location="Paris", url="")
+    with db.connect() as conn:
+        jid, _ = db.upsert_job(conn, manual, 50, "r")
+        assert db.get_job(conn, jid)["url"] == ""
+
+        automated = Job(source="greenhouse", external_id="g1", title="ML Engineer",
+                        company="Acme", location="Paris", url="https://acme.example/g1")
+        jid2, is_new = db.upsert_job(conn, automated, 60, "r2")
+        assert is_new is False and jid2 == jid
+        assert db.get_job(conn, jid)["url"] == "https://acme.example/g1"
+
+        # a later sighting with yet another url must not clobber the one already set
+        another = Job(source="lever", external_id="l1", title="ML Engineer",
+                      company="Acme", location="Paris", url="https://acme.example/l1")
+        db.upsert_job(conn, another, 55, "r3")
+        assert db.get_job(conn, jid)["url"] == "https://acme.example/g1"
+
+
 def test_cross_source_content_dedup_hellowork_department_code_location(tmp_db):
     # HelloWork has no comma in its location field at all -- it appends a trailing
     # department code instead ("Paris - 75"), which used to normalize to "paris 75"

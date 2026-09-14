@@ -454,7 +454,9 @@ def upsert_job(conn: sqlite3.Connection, job: Job, score: int, reasons: str, *,
     last_seen is stamped every time the job is seen (for staleness / market signals).
     Dedups on (source, external_id), then on exact URL, then cross-source on normalized
     (company, title, location) — the same posting fetched from WTTJ, a company's own ATS
-    board, and LinkedIn all land on one row instead of three."""
+    board, and LinkedIn all land on one row instead of three. If the existing row has no
+    url (e.g. a manually-imported job added without one), a later match backfills it —
+    but never overwrites a url that's already there."""
     row = conn.execute(
         "SELECT id FROM jobs WHERE source = ? AND external_id = ?",
         (job.source, job.external_id),
@@ -471,9 +473,10 @@ def upsert_job(conn: sqlite3.Connection, job: Job, score: int, reasons: str, *,
             """UPDATE jobs SET score = ?, match_reasons = ?, filtered = ?,
                filter_reason = ?, seniority = ?, min_years = ?, geo_tier = ?,
                role_category = ?, last_seen = datetime('now'),
+               url = CASE WHEN COALESCE(url, '') = '' THEN ? ELSE url END,
                was_filtered = CASE WHEN ? THEN 1 ELSE was_filtered END WHERE id = ?""",
             (score, reasons, int(filtered), filter_reason, seniority, min_years, geo_tier,
-             role_category, int(filtered), row["id"]),
+             role_category, job.url, int(filtered), row["id"]),
         )
         _log_event(conn, row["id"], "filtered", old["filtered"] if old else 0, int(filtered),
                    detail=filter_reason)
