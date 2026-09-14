@@ -28,7 +28,7 @@ _HEADERS = {
     "Accept": "text/html,application/xhtml+xml",
     "Accept-Language": "en-US,en;q=0.9,fr;q=0.8",
 }
-_MAX_CHARS = 8000
+_MAX_CHARS = 16000
 
 # Kept as a defense-in-depth safety net against future extraction regressions on
 # sites with Stimulus/Turbo-style widget markup (data-controller/data-action,

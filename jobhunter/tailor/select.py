@@ -111,8 +111,8 @@ def select(job: Job, experiences: list[tuple[str, list[str]]], projects: list[tu
     prompt = PROMPT.format(
         title=job.title,
         company=job.company,
-        # 8000 matches judge.py/enrich.py's cap -- the full stored JD, not half of it.
-        description=(job.description or "")[:8000],
+        # 16000 matches judge.py/enrich.py's cap -- the full stored JD, not half of it.
+        description=(job.description or "")[:16000],
         judge_block=judge_block,
         feedback_block=feedback_block,
         experiences=_menu(experiences),
