@@ -2,6 +2,11 @@
 # ats: greenhouse | lever | ashby | smartrecruiters | recruitee | workable
 # token = the board slug in the ATS URL. Run `jobhunter discover` to auto-detect
 # the ATS for companies already in your DB and propose additions here.
+#
+# ats: workday is a different shape -- no single token, instead {tenant, wd_host, site,
+# locale?}, read off the company's own career page URL (or its HTML source), e.g.
+# "valeo.wd3.myworkdayjobs.com/en-EN/valeo_jobs" -> tenant: valeo, wd_host: wd3,
+# site: valeo_jobs. See jobhunter/sources/workday.py.
 companies:
   - { name: Dataiku, ats: greenhouse, token: dataiku }
   - { name: Shift Technology, ats: greenhouse, token: shifttechnology }
@@ -68,3 +73,7 @@ companies:
   - { name: Veolia, ats: smartrecruiters, token: VeoliaEnvironnementSA }
   - { name: Sopra Steria, ats: smartrecruiters, token: SopraSteria1 }
   - { name: Beacon Biosignals, ats: greenhouse, token: beaconbiosignals }
+  - { name: Airbus, ats: workday, tenant: ag, wd_host: wd3, site: Airbus }
+  - { name: Renault Group, ats: workday, tenant: alliancewd, wd_host: wd3, site: renault-group-careers, locale: fr-FR }
+  - { name: Valeo, ats: workday, tenant: valeo, wd_host: wd3, site: valeo_jobs }
+  - { name: Sanofi, ats: workday, tenant: sanofi, wd_host: wd3, site: SanofiCareers }

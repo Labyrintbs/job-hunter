@@ -4,7 +4,10 @@ Most "company career pages" are really a hosted ATS underneath, and several expo
 a public board API. Pulling those directly is how we reach postings that only live
 on a company's own site (not on WTTJ/LinkedIn). Supported: Greenhouse, Lever, Ashby,
 SmartRecruiters, Recruitee, Workable. All global, so we filter to France at source.
-(Teamtailor/Workday are intentionally omitted — their APIs require a per-tenant token.)
+(Teamtailor is intentionally omitted — its API requires a per-tenant token with no
+public discovery path. Workday *is* supported, but via sources/workday.py and a
+different companies.yaml shape, since it needs a (tenant, wd_host, site) triple
+rather than one token -- see fetch_all below.)
 """
 from __future__ import annotations
 
@@ -19,7 +22,17 @@ from ..models import Job
 THROTTLE_SECONDS = 0.3
 _UA = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"}
 
-FRANCE_HINTS = ("france", "paris", "île-de-france", "ile-de-france", "lyon", "remote - europe")
+FRANCE_HINTS = (
+    "france", "paris", "île-de-france", "ile-de-france", "lyon", "remote - europe",
+    # Large-corporate ATS boards (esp. Workday) often report a city alone with no
+    # country suffix -- these are the French sites that come up often enough in our
+    # own tracked companies (Renault, Airbus, Valeo, ...) to be worth hardcoding.
+    "toulouse", "bordeaux", "nantes", "lille", "marseille", "grenoble", "strasbourg",
+    "rennes", "montpellier", "sophia antipolis", "guyancourt", "vélizy", "velizy",
+    "boulogne-billancourt", "issy-les-moulineaux", "rueil-malmaison", "nanterre",
+    "la défense", "la defense", "saint-ouen", "levallois-perret", "courbevoie",
+    "massy", "saclay", "évry", "evry", "aubevoye", "lardy",
+)
 
 
 def _is_france(location: str, country: str = "") -> bool:
@@ -192,18 +205,26 @@ SUPPORTED_ATS = tuple(FETCHERS)
 
 
 def fetch_all(companies: list[dict]) -> list[Job]:
-    """companies: list of {name, ats, token} where ats is one of SUPPORTED_ATS."""
+    """companies: list of {name, ats, token} where ats is one of SUPPORTED_ATS, or for
+    ats='workday' a {name, ats, tenant, wd_host, site, locale?} entry instead (Workday
+    has no single global token -- see sources/workday.py)."""
+    from . import workday  # local import: workday.py imports helpers from this module
+
     out: list[Job] = []
     for co in companies:
         ats = (co.get("ats") or "").lower()
         token = co.get("token", "")
         name = co.get("name", token)
-        fetcher = FETCHERS.get(ats)
-        if not fetcher:
-            print(f"  ats warn: {name}: unknown ats '{ats}'")
-            continue
         try:
-            out.extend(fetcher(token, name))
+            if ats == "workday":
+                out.extend(workday.fetch(co["tenant"], co["wd_host"], co["site"], name,
+                                         locale=co.get("locale", "en-US")))
+            else:
+                fetcher = FETCHERS.get(ats)
+                if not fetcher:
+                    print(f"  ats warn: {name}: unknown ats '{ats}'")
+                    continue
+                out.extend(fetcher(token, name))
         except Exception as exc:  # one bad board must not sink the run
             print(f"  ats warn: {name} ({ats}) failed: {exc}")
         time.sleep(THROTTLE_SECONDS)

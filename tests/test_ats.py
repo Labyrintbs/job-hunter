@@ -1,6 +1,15 @@
 from jobhunter.sources import ats
 
 
+def test_is_france_recognizes_city_only_locations():
+    # Regression: large-corporate ATS boards (esp. Workday) often report a bare city
+    # name with no "France" suffix -- these were silently dropped before the fix.
+    assert ats._is_france("Guyancourt") is True
+    assert ats._is_france("Lardy") is True
+    assert ats._is_france("Toulouse") is True
+    assert ats._is_france("Bangalore Area") is False
+
+
 class Resp:
     def __init__(self, payload):
         self._p = payload
@@ -83,7 +92,28 @@ def test_fetch_all_dispatches_and_tolerates_unknown(monkeypatch):
     ]})
     out = ats.fetch_all([
         {"name": "Acme", "ats": "ashby", "token": "acme"},
-        {"name": "Bad", "ats": "workday", "token": "bad"},   # unknown -> skipped, no crash
+        {"name": "Bad", "ats": "not-a-real-ats", "token": "bad"},   # unknown -> skipped, no crash
     ])
     assert len(out) == 1 and out[0].source == "ashby"
     assert "greenhouse" in ats.SUPPORTED_ATS and "workable" in ats.SUPPORTED_ATS
+
+
+def test_fetch_all_dispatches_workday_with_its_own_shape(monkeypatch):
+    # Workday has no single token -- fetch_all routes it to workday.fetch with the
+    # (tenant, wd_host, site) triple instead, bypassing the token-based FETCHERS map.
+    from jobhunter.sources import workday
+    calls = []
+    monkeypatch.setattr(workday, "fetch", lambda tenant, wd_host, site, name, **kw:
+                        calls.append((tenant, wd_host, site, name, kw)) or [])
+    monkeypatch.setattr(ats.time, "sleep", lambda *_: None)
+    ats.fetch_all([
+        {"name": "Renault", "ats": "workday", "tenant": "alliancewd", "wd_host": "wd3",
+         "site": "renault-group-careers", "locale": "fr-FR"},
+    ])
+    assert calls == [("alliancewd", "wd3", "renault-group-careers", "Renault", {"locale": "fr-FR"})]
+
+
+def test_fetch_all_tolerates_malformed_workday_entry(monkeypatch):
+    monkeypatch.setattr(ats.time, "sleep", lambda *_: None)
+    out = ats.fetch_all([{"name": "Missing Fields", "ats": "workday"}])   # no tenant/wd_host/site
+    assert out == []
