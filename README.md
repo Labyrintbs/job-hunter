@@ -178,7 +178,7 @@ $P -m jobhunter.cli run                 # run once now (what the schedule calls)
 $P -m jobhunter.cli cron show           # preview what would be scheduled (no changes)
 $P -m jobhunter.cli cron install --time 08:00   # add a once-daily entry at 08:00
 $P -m jobhunter.cli cron install --interval-hours 12   # or run every N hours instead (anchored at --time)
-$P -m jobhunter.cli cron install --interval-hours 1 --no-judge --no-tailor  # hourly, fetch-only
+$P -m jobhunter.cli cron install --time 02:20 --interval-hours 1 --no-judge --no-tailor  # hourly, fetch-only
 $P -m jobhunter.cli cron uninstall      # remove it
 ```
 Installing is opt-in because the daily run makes LLM calls (more frequent runs
@@ -187,6 +187,14 @@ mean more judge calls — factor that into `--interval-hours`, or pass
 see "Decoupling fetch from judge cadence" below). Only jobhunter's own
 LaunchAgents (`~/Library/LaunchAgents/com.jobhunter.*.plist`) are ever touched;
 nothing else on the system is affected.
+
+If running this alongside hourly `watchdog`/`process` crons (both anchor at
+minute `:00`), pick a different `--time` minute for `daily` (e.g. `02:20`) so
+the three don't all fire in the same instant — confirmed directly that they
+otherwise collide (`sqlite3.OperationalError: database is locked` on whichever
+job loses the race). `db.get_connection()` also sets a 30s busy timeout and
+WAL mode as a second line of defense, but staggering avoids the contention
+in the first place.
 
 **Per-source fetch cadence**: raising the outer trigger to hourly doesn't mean
 every source fetches every hour. Each source in `config/search.yaml` has its

@@ -181,9 +181,16 @@ VIEW_NAMES = ["v_new_jobs_by_day", "v_market_by_run", "v_top_companies", "v_scor
 def get_connection(db_path: Path | None = None) -> sqlite3.Connection:
     db_path = db_path or DB_PATH
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(db_path)
+    # timeout=30: with 3 launchd jobs now all hourly (daily/watchdog/process, see
+    # the per-source cadence work), plus the always-on dashboard, overlapping writers
+    # are no longer rare -- the sqlite3 default 5s busy-wait was observed to produce
+    # real "database is locked" failures on the very first hourly tick after all
+    # three jobs started firing at the same minute. WAL mode additionally lets readers
+    # (the dashboard) proceed without waiting on a writer at all.
+    conn = sqlite3.connect(db_path, timeout=30.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA journal_mode = WAL")
     return conn
 
 
