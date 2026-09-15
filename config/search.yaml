@@ -188,12 +188,16 @@ linkedin:
     - "deep learning engineer"
     - "nlp engineer"
     - "computer vision engineer"
+    - "ai engineer"
     - "llm engineer"
     - "data scientist"
     - "algorithm engineer"
-    - "mlops engineer"   # replaced "ai engineer": measured 93% overlap with the other
-                          # 7 queries (near-zero unique contribution); "mlops engineer"
-                          # matches a title pattern (9 hits in the same sample) no query covered
+    - "mlops engineer"   # "ai engineer" measured 93% overlap with the other queries
+                          # (near-zero unique contribution) but kept anyway -- cross-
+                          # query duplicates are free (dedup via external_id) and we're
+                          # nowhere near a rate limit, so there's no reason to trade
+                          # away its small remaining unique yield. "mlops engineer"
+                          # added new: matches a title pattern no other query covered.
   locations:
     - "France"
   recent_hours: 168   # last 7 days -- verified the 24h pool is only ~23% of the 7-day
