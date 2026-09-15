@@ -127,6 +127,7 @@ CREATE TABLE IF NOT EXISTS fetch_runs (
     filtered_new INTEGER DEFAULT 0,
     by_source   TEXT DEFAULT '',        -- JSON {source: new_count}
     new_idf     INTEGER DEFAULT 0,
+    new_major_city INTEGER DEFAULT 0,
     new_france  INTEGER DEFAULT 0,
     new_remote  INTEGER DEFAULT 0,
     new_outside INTEGER DEFAULT 0
@@ -144,7 +145,8 @@ DROP VIEW IF EXISTS v_market_by_run;
 CREATE VIEW v_market_by_run AS
     SELECT date(ran_at) AS day, COUNT(*) AS runs,
            SUM(new) AS new, SUM(filtered_new) AS filtered_new,
-           SUM(new_idf) AS new_idf, SUM(new_france) AS new_france,
+           SUM(new_idf) AS new_idf, SUM(new_major_city) AS new_major_city,
+           SUM(new_france) AS new_france,
            SUM(new_remote) AS new_remote, SUM(new_outside) AS new_outside
     FROM fetch_runs GROUP BY day;
 
@@ -201,6 +203,9 @@ MIGRATIONS = {
     },
     "cv_artifacts": {
         "origin": "TEXT DEFAULT 'ai'",
+    },
+    "fetch_runs": {
+        "new_major_city": "INTEGER DEFAULT 0",
     },
 }
 
@@ -509,12 +514,12 @@ def add_fetch_run(conn: sqlite3.Connection, stats: dict) -> int:
     cur = conn.execute(
         """INSERT INTO fetch_runs
            (fetched, kept, new, filtered_new, by_source,
-            new_idf, new_france, new_remote, new_outside)
-           VALUES (?,?,?,?,?,?,?,?,?)""",
+            new_idf, new_major_city, new_france, new_remote, new_outside)
+           VALUES (?,?,?,?,?,?,?,?,?,?)""",
         (
             stats.get("fetched", 0), stats.get("kept", 0), stats.get("new", 0),
             stats.get("filtered_new", 0), json.dumps(stats.get("new_by_source", {})),
-            stats.get("new_idf", 0), stats.get("new_france", 0),
+            stats.get("new_idf", 0), stats.get("new_major_city", 0), stats.get("new_france", 0),
             stats.get("new_remote", 0), stats.get("new_outside", 0),
         ),
     )

@@ -86,7 +86,44 @@ locations:
   - paris
   - ile-de-france
   - "île-de-france"
+  # Paris-region suburbs that show up bare (no "Paris"/"France" in the string) on
+  # large-corporate ATS boards, esp. Workday -- see ats.py's FRANCE_HINTS.
+  - guyancourt
+  - "vélizy"
+  - velizy
+  - boulogne-billancourt
+  - issy-les-moulineaux
+  - rueil-malmaison
+  - nanterre
+  - "la défense"
+  - la defense
+  - saint-ouen
+  - levallois-perret
+  - courbevoie
+  - massy
+  - saclay
+  - "évry"
+  - evry
+  - aubevoye
+  - lardy
 allow_remote_france: true
+
+# Major French tech hubs outside Paris/IDF -- candidate is open to relocating.
+# Scored below Paris/IDF but above a vague "somewhere in France" hit, see
+# major_city_bonus and jobhunter/match.py's geo_tier().
+major_cities:
+  - lyon
+  - toulouse
+  - grenoble
+  - "sophia antipolis"
+  - nice
+  - lille
+  - nantes
+  - bordeaux
+  - rennes
+  - montpellier
+  - strasbourg
+major_city_bonus: 14
 
 # Languages to keep (matched loosely against posting language / content).
 languages: ["fr", "en"]
@@ -134,7 +171,9 @@ wttj:
     - "ai engineer"
 
 # LinkedIn public guest search (read-only, no login). Each query is searched in
-# each location (a cross product), so 7 queries x 2 locations = 14 searches/run.
+# each location (a cross product); "France" (not city-specific) returns genuine
+# nationwide results -- verified directly -- covering major hubs (Lyon, Lille,
+# Strasbourg, Montpellier, ...) in one request instead of one per city.
 linkedin:
   enabled: true
   queries:
@@ -147,8 +186,7 @@ linkedin:
     - "data scientist"
     - "algorithm engineer"
   locations:
-    - "Paris, France"
-    - "Île-de-France, France"
+    - "France"
   recent_hours: 168   # last 7 days
   max_pages: 5
   max_retries: 3       # retries on 429 before giving up on a page
@@ -159,7 +197,10 @@ linkedin:
 # Silently contributes nothing until those are set.
 francetravail:
   enabled: true
-  departements: "75,92,93,94,77,78,91,95"   # Île-de-France
+  # Île-de-France (75,92,93,94,77,78,91,95) plus major hubs: 69 Lyon, 31 Toulouse,
+  # 38 Grenoble, 06 Nice/Sophia Antipolis, 59 Lille, 44 Nantes, 33 Bordeaux,
+  # 35 Rennes, 34 Montpellier, 67 Strasbourg.
+  departements: "75,92,93,94,77,78,91,95,69,31,38,06,59,44,33,35,34,67"
   queries:
     - "machine learning engineer"
     - "deep learning engineer"
@@ -168,7 +209,8 @@ francetravail:
     - "ai engineer"
 
 # HelloWork — page-1 only (~30 results/query), see jobhunter/sources/hellowork.py
-# docstring for why pagination isn't attempted.
+# docstring for why pagination isn't attempted. "France" (verified directly)
+# returns genuine nationwide results, not just Paris.
 hellowork:
   enabled: true
   queries:
@@ -178,7 +220,7 @@ hellowork:
     - "computer vision engineer"
     - "ai engineer"
   locations:
-    - "Paris"
+    - "France"
 
 # Notify about new jobs after each scheduled run.
 # 'file' always works (writes data/notifications/); telegram/email need env creds.

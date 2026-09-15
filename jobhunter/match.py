@@ -121,13 +121,17 @@ _REMOTE_TERMS = ("remote", "télétravail", "teletravail", "full remote", "100% 
 
 
 def geo_tier(location: str, config: dict) -> str:
-    """Coarse geography bucket for analytics: idf | remote | france | outside | unknown.
-    IDF wins first (it's the application focus); remote is checked before generic France."""
+    """Coarse geography bucket for analytics: idf | major_city | remote | france |
+    outside | unknown. IDF wins first (it's the application focus), then the named
+    major-city list (a bare city name like "Lyon" has no "France" in it, so it needs
+    its own check ahead of the generic literal-"france" fallback), then remote."""
     loc = (location or "").lower()
     if not loc:
         return "unknown"
     if any(l.lower() in loc for l in config.get("locations", [])):
         return "idf"
+    if any(c.lower() in loc for c in config.get("major_cities", [])):
+        return "major_city"
     if any(t in loc for t in _REMOTE_TERMS):
         return "remote"
     if "france" in loc:
@@ -136,10 +140,13 @@ def geo_tier(location: str, config: dict) -> str:
 
 
 def _geo_tier(job: Job, config: dict) -> tuple[int, str]:
-    """Returns (bonus_points, reason). Paris/IDF ranks above other-France (mobility)."""
+    """Returns (bonus_points, reason). Paris/IDF ranks above a named major city,
+    which ranks above generic other-France mobility."""
     tier = geo_tier(job.location, config)
     if tier == "idf":
         return 20, f"geo: Paris/IDF ({job.location})"
+    if tier == "major_city":
+        return config.get("major_city_bonus", 14), f"geo: major French city ({job.location})"
     if tier == "unknown":
         return 5, "geo: unspecified"
     if tier in ("france", "remote"):

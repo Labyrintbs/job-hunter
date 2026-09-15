@@ -12,7 +12,9 @@ def J(ext, title="ML Engineer", company="Acme", loc="Paris, Ile-de-France, Franc
 def test_geo_tier_classification(config):
     g = lambda loc: match.geo_tier(loc, config)
     assert g("Paris, Ile-de-France, France") == "idf"
-    assert g("Bordeaux, Nouvelle-Aquitaine, France") == "france"
+    assert g("Lyon, Auvergne-Rhône-Alpes, France") == "major_city"
+    assert g("Nantes") == "major_city"   # named city alone, no literal "France" in string
+    assert g("Amiens, Hauts-de-France, France") == "france"   # French but not a named major city
     assert g("Remote") == "remote"
     assert g("Full remote") == "remote"
     assert g("Télétravail, France") == "remote"   # remote wins over generic 'france'
@@ -43,17 +45,17 @@ def test_run_fetch_records_a_fetch_run(tmp_db, config):
     ]
     stats = __import__("jobhunter.pipeline", fromlist=["run_fetch"]).run_fetch(config, jobs=injected)
     assert stats["fetched"] == 3 and stats["kept"] == 2
-    assert stats["new_idf"] == 1 and stats["new_france"] == 1
+    assert stats["new_idf"] == 1 and stats["new_major_city"] == 1
     with db.connect() as conn:
         runs = conn.execute("SELECT * FROM fetch_runs").fetchall()
         assert len(runs) == 1
-        assert runs[0]["new_idf"] == 1 and runs[0]["new_france"] == 1
+        assert runs[0]["new_idf"] == 1 and runs[0]["new_major_city"] == 1
         assert runs[0]["fetched"] == 3
 
 
 def test_views_return_rows(tmp_db, config):
     injected = [J("1", loc="Paris, Ile-de-France, France"),
-                J("2", company="BigCo", loc="Nantes, France")]
+                J("2", company="BigCo", loc="Amiens, France")]
     __import__("jobhunter.pipeline", fromlist=["run_fetch"]).run_fetch(config, jobs=injected)
     with db.connect() as conn:
         by_day = conn.execute("SELECT * FROM v_new_jobs_by_day").fetchall()

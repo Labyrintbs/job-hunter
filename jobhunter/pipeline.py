@@ -134,7 +134,8 @@ def run_fetch(config: dict | None = None, jobs: list | None = None) -> dict:
         stats = {
             "fetched": seen, "kept": kept, "new": len(new_ids),
             "filtered_new": filtered_new, "new_ids": new_ids, "new_by_source": per_source,
-            "new_idf": tier_new["idf"], "new_france": tier_new["france"],
+            "new_idf": tier_new["idf"], "new_major_city": tier_new.get("major_city", 0),
+            "new_france": tier_new["france"],
             "new_remote": tier_new["remote"], "new_outside": tier_new["outside"],
         }
         db.add_fetch_run(conn, stats)
