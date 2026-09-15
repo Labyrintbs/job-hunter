@@ -159,8 +159,12 @@ min_score: 20
 # flagged stale/ghost — the posting has likely been taken down.
 staleness_days: 14
 
-# Max hits to request from WTTJ per run (applied per query below).
-max_hits: 100
+# Max hits to request from WTTJ per run (applied per query below). WTTJ paginates
+# through real Algolia matches (not a frozen relevance ranking like LinkedIn/HelloWork),
+# so depth here is genuine coverage, not guesswork -- verified nbHits directly per query
+# (ai engineer: 3408 total, capped by Algolia's own 1000-hit engine ceiling; data
+# scientist: 264; llm engineer: 263), all far past the old 100 cap.
+max_hits: 300
 
 wttj:
   queries:
@@ -169,6 +173,9 @@ wttj:
     - "nlp engineer"
     - "computer vision engineer"
     - "ai engineer"
+    - "llm engineer"
+    - "data scientist"
+    - "algorithm engineer"
 
 # LinkedIn public guest search (read-only, no login). Each query is searched in
 # each location (a cross product); "France" (not city-specific) returns genuine
@@ -181,14 +188,18 @@ linkedin:
     - "deep learning engineer"
     - "nlp engineer"
     - "computer vision engineer"
-    - "ai engineer"
     - "llm engineer"
     - "data scientist"
     - "algorithm engineer"
+    - "mlops engineer"   # replaced "ai engineer": measured 93% overlap with the other
+                          # 7 queries (near-zero unique contribution); "mlops engineer"
+                          # matches a title pattern (9 hits in the same sample) no query covered
   locations:
     - "France"
-  recent_hours: 168   # last 7 days
-  max_pages: 5
+  recent_hours: 168   # last 7 days -- verified the 24h pool is only ~23% of the 7-day
+                       # one, flat across depth (not front-loaded), so don't shrink this
+  max_pages: 10        # up from 5 -- verified no decay cliff through page 20, still
+                        # finding new/relevant results; zero 429s at this depth
   max_retries: 3       # retries on 429 before giving up on a page
   backoff_seconds: 2.0
 
@@ -213,12 +224,19 @@ francetravail:
 # returns genuine nationwide results, not just Paris.
 hellowork:
   enabled: true
+  # Verified: HelloWork's top-30 is a stable, relevance-ranked (not recency-ranked)
+  # slice -- zero new jobs found across 10 straight runs. More queries = more
+  # independent rankings = the only real lever within the robots.txt-imposed no-
+  # pagination constraint (see hellowork.py's docstring).
   queries:
     - "machine learning engineer"
     - "deep learning engineer"
     - "nlp engineer"
     - "computer vision engineer"
     - "ai engineer"
+    - "llm engineer"
+    - "data scientist"
+    - "algorithm engineer"
   locations:
     - "France"
 
