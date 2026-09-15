@@ -5,7 +5,7 @@ from jobhunter.models import Job
 from jobhunter.tailor import engine as cv_engine
 
 
-def test_gather_survives_a_source_exception(config, monkeypatch):
+def test_gather_survives_a_source_exception(tmp_db, config, monkeypatch):
     """A WTTJ (or any source) failure must not crash the whole run -- previously
     only ats/linkedin were wrapped in try/except; wttj wasn't."""
     monkeypatch.setattr(pipeline.wttj, "fetch", lambda **k: (_ for _ in ()).throw(RuntimeError("boom")))
@@ -19,7 +19,7 @@ def test_gather_survives_a_source_exception(config, monkeypatch):
     assert jobs == []
 
 
-def test_gather_collects_every_source(config, monkeypatch):
+def test_gather_collects_every_source(tmp_db, config, monkeypatch):
     make = lambda src, i: Job(source=src, external_id=str(i), title="ML Engineer", company="Acme")
     monkeypatch.setattr(pipeline.wttj, "fetch", lambda **k: [make("wttj", 1)])
     monkeypatch.setattr(pipeline.ats, "fetch_all", lambda companies: [make("ats", 2)])
@@ -30,6 +30,53 @@ def test_gather_collects_every_source(config, monkeypatch):
 
     jobs = pipeline._gather(config)
     assert {j.source for j in jobs} == {"wttj", "ats", "linkedin", "francetravail", "hellowork"}
+
+
+def _stub_all_sources_except_hellowork(monkeypatch, called):
+    monkeypatch.setattr(pipeline.wttj, "fetch", lambda **k: [])
+    monkeypatch.setattr(pipeline.ats, "fetch_all", lambda companies: [])
+    monkeypatch.setattr(pipeline, "load_companies", lambda: [])
+    monkeypatch.setattr(pipeline, "_fetch_linkedin", lambda cfg: [])
+    monkeypatch.setattr(pipeline, "_fetch_francetravail", lambda cfg: [])
+    monkeypatch.setattr(pipeline, "_fetch_hellowork", lambda cfg: called.append(1) or [])
+
+
+def test_gather_skips_a_source_whose_interval_has_not_elapsed(tmp_db, config, monkeypatch):
+    called: list = []
+    _stub_all_sources_except_hellowork(monkeypatch, called)
+    with db.connect() as conn:
+        db.record_source_fetch(conn, "hellowork", 3)   # just fetched -- hellowork's interval is 24h
+
+    pipeline._gather(config)
+
+    assert called == []   # not due yet, skipped
+
+
+def test_gather_fetches_a_source_once_its_interval_has_elapsed(tmp_db, config, monkeypatch):
+    called: list = []
+    _stub_all_sources_except_hellowork(monkeypatch, called)
+    with db.connect() as conn:
+        conn.execute(
+            "INSERT INTO source_fetch_state (source, last_attempted_at, last_count) VALUES (?,?,?)",
+            ("hellowork", "2000-01-01 00:00:00", 0),
+        )
+
+    pipeline._gather(config)
+
+    assert called == [1]
+    with db.connect() as conn:
+        assert db.get_source_fetch_state(conn, "hellowork")["last_count"] == 0
+
+
+def test_gather_force_bypasses_interval_gating(tmp_db, config, monkeypatch):
+    called: list = []
+    _stub_all_sources_except_hellowork(monkeypatch, called)
+    with db.connect() as conn:
+        db.record_source_fetch(conn, "hellowork", 3)   # just fetched
+
+    pipeline._gather(config, force=True)
+
+    assert called == [1]   # force bypasses the not-due gate
 
 
 def test_fetch_wttj_loops_over_configured_queries(monkeypatch):
@@ -102,7 +149,7 @@ def test_enrich_one_rescopes_with_real_content(tmp_db, config, monkeypatch, tmp_
 def test_run_fetch_persists_role_category(tmp_db, config, monkeypatch):
     cv_job = Job(source="wttj", external_id="42", title="Computer Vision Engineer",
                 company="Acme", location="Paris, Ile-de-France, France")
-    monkeypatch.setattr(pipeline, "_gather", lambda cfg: [cv_job])
+    monkeypatch.setattr(pipeline, "_gather", lambda cfg, force=False: [cv_job])
     stats = pipeline.run_fetch(config)
     with db.connect() as conn:
         row = db.get_job(conn, stats["new_ids"][0])
@@ -115,7 +162,7 @@ def test_run_fetch_precreates_cv_folder_for_kept_not_filtered_jobs(tmp_db, confi
     filtered = Job(source="wttj", external_id="2", title="ML Engineer",
                     company="OtherCo", location="Paris, Ile-de-France, France",
                     description="French citizenship is required for this role.")
-    monkeypatch.setattr(pipeline, "_gather", lambda cfg: [kept, filtered])
+    monkeypatch.setattr(pipeline, "_gather", lambda cfg, force=False: [kept, filtered])
     stats = pipeline.run_fetch(config)
 
     with db.connect() as conn:
@@ -232,7 +279,7 @@ def test_daily_run_enriches_before_judging(tmp_db, config, monkeypatch):
     # One fresh LinkedIn job (no description at fetch time, like real guest cards).
     fresh_job = Job(source="linkedin", external_id="99", title="Machine Learning Engineer",
                     company="Acme", location="Paris, Ile-de-France, France", url="http://x/99")
-    monkeypatch.setattr(pipeline, "_gather", lambda cfg: [fresh_job])
+    monkeypatch.setattr(pipeline, "_gather", lambda cfg, force=False: [fresh_job])
 
     marker = "SPECIAL_MARKER_ONLY_PRESENT_AFTER_ENRICHMENT " * 3   # clears the judge's min-length gate
     monkeypatch.setattr(pipeline.enrich, "fetch_full_text", lambda *a, **k: marker)
@@ -300,7 +347,7 @@ def _make_judgeable_jobs(n):
 
 def test_daily_run_auto_tailors_everything_but_weak_verdicts(tmp_db, config, monkeypatch):
     jobs = _make_judgeable_jobs(4)
-    monkeypatch.setattr(pipeline, "_gather", lambda cfg: jobs)
+    monkeypatch.setattr(pipeline, "_gather", lambda cfg, force=False: jobs)
     monkeypatch.setattr(pipeline.provider, "available", lambda: True)
     monkeypatch.setattr(pipeline.enrich, "fetch_full_text", lambda *a, **k: None)
     monkeypatch.setattr(pipeline.notify_dispatch, "send", lambda rows, cfg: {"selected": 0, "results": {}})
@@ -327,7 +374,7 @@ def test_daily_run_auto_tailors_everything_but_weak_verdicts(tmp_db, config, mon
 
 def test_daily_run_respects_auto_tailor_limit(tmp_db, config, monkeypatch):
     jobs = _make_judgeable_jobs(3)
-    monkeypatch.setattr(pipeline, "_gather", lambda cfg: jobs)
+    monkeypatch.setattr(pipeline, "_gather", lambda cfg, force=False: jobs)
     monkeypatch.setattr(pipeline.provider, "available", lambda: True)
     monkeypatch.setattr(pipeline.enrich, "fetch_full_text", lambda *a, **k: None)
     monkeypatch.setattr(pipeline.notify_dispatch, "send", lambda rows, cfg: {"selected": 0, "results": {}})
@@ -348,7 +395,7 @@ def test_daily_run_respects_auto_tailor_limit(tmp_db, config, monkeypatch):
 
 def test_daily_run_auto_tailor_false_skips_entirely(tmp_db, config, monkeypatch):
     jobs = _make_judgeable_jobs(1)
-    monkeypatch.setattr(pipeline, "_gather", lambda cfg: jobs)
+    monkeypatch.setattr(pipeline, "_gather", lambda cfg, force=False: jobs)
     monkeypatch.setattr(pipeline.provider, "available", lambda: True)
     monkeypatch.setattr(pipeline.enrich, "fetch_full_text", lambda *a, **k: None)
     monkeypatch.setattr(pipeline.notify_dispatch, "send", lambda rows, cfg: {"selected": 0, "results": {}})

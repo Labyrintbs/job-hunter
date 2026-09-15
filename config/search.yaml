@@ -167,6 +167,10 @@ staleness_days: 14
 max_hits: 300
 
 wttj:
+  # Real server-side pagination (not a frozen relevance ranking) and proven large
+  # unused volume (up to 3408 hits/query) -- worth checking more often than a
+  # source like HelloWork whose visible results barely change hour to hour.
+  fetch_interval_hours: 3
   queries:
     - "machine learning engineer"
     - "deep learning engineer"
@@ -183,6 +187,9 @@ wttj:
 # Strasbourg, Montpellier, ...) in one request instead of one per city.
 linkedin:
   enabled: true
+  # No decay cliff through page 20, zero 429s at 83 requests/experiment -- real
+  # headroom worth checking more often than a source that's already saturated.
+  fetch_interval_hours: 3
   queries:
     - "machine learning engineer"
     - "deep learning engineer"
@@ -212,6 +219,9 @@ linkedin:
 # Silently contributes nothing until those are set.
 francetravail:
   enabled: true
+  # Moot while FRANCE_TRAVAIL_CLIENT_ID/SECRET stay unset (fetch() returns []
+  # immediately either way) -- set for consistency and for whenever it's revived.
+  fetch_interval_hours: 12
   # Île-de-France (75,92,93,94,77,78,91,95) plus major hubs: 69 Lyon, 31 Toulouse,
   # 38 Grenoble, 06 Nice/Sophia Antipolis, 59 Lille, 44 Nantes, 33 Bordeaux,
   # 35 Rennes, 34 Montpellier, 67 Strasbourg.
@@ -231,7 +241,9 @@ hellowork:
   # Verified: HelloWork's top-30 is a stable, relevance-ranked (not recency-ranked)
   # slice -- zero new jobs found across 10 straight runs. More queries = more
   # independent rankings = the only real lever within the robots.txt-imposed no-
-  # pagination constraint (see hellowork.py's docstring).
+  # pagination constraint (see hellowork.py's docstring). Checking more often than
+  # once a day doesn't help -- the visible slice barely changes hour to hour.
+  fetch_interval_hours: 24
   queries:
     - "machine learning engineer"
     - "deep learning engineer"
@@ -243,6 +255,12 @@ hellowork:
     - "algorithm engineer"
   locations:
     - "France"
+
+# Company ATS boards (config/companies.yaml) -- no query/location block needed here,
+# just a fetch cadence. Career pages change slowly (a handful of new roles a week),
+# so checking hourly like LinkedIn/WTTJ would be pure waste.
+ats:
+  fetch_interval_hours: 12
 
 # Notify about new jobs after each scheduled run.
 # 'file' always works (writes data/notifications/); telegram/email need env creds.

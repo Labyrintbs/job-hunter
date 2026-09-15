@@ -712,3 +712,18 @@ def test_target_companies_set_career_url_and_remove(tmp_db):
         assert removed is True
         assert db.list_target_companies(conn) == []
         assert db.remove_target_company(conn, "bigcorp") is False
+
+
+def test_source_fetch_state_round_trips_and_defaults_to_none(tmp_db):
+    with db.connect() as conn:
+        assert db.get_source_fetch_state(conn, "linkedin") is None
+
+        db.record_source_fetch(conn, "linkedin", 12)
+        state = db.get_source_fetch_state(conn, "linkedin")
+        assert state["last_count"] == 12
+        assert state["last_attempted_at"]
+
+        db.record_source_fetch(conn, "linkedin", 5)   # a later call updates, not duplicates
+        state = db.get_source_fetch_state(conn, "linkedin")
+        assert state["last_count"] == 5
+        assert conn.execute("SELECT COUNT(*) FROM source_fetch_state").fetchone()[0] == 1

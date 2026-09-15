@@ -15,7 +15,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="jobhunter", description="Paris ML job hunter")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser("fetch", help="fetch + score + store new jobs")
+    p_fetch = sub.add_parser("fetch", help="fetch + score + store new jobs")
+    p_fetch.add_argument("--force", action="store_true",
+                         help="bypass each source's fetch_interval_hours and fetch everything now")
     sub.add_parser("init", help="create the database")
 
     p_list = sub.add_parser("list", help="list stored jobs")
@@ -59,6 +61,8 @@ def main(argv: list[str] | None = None) -> int:
                        help="skip auto-tailoring a CV + cover letter for non-weak-verdict jobs")
     p_run.add_argument("--tailor-limit", type=int, default=10,
                        help="max jobs auto-tailored per run (each cover letter is an LLM call)")
+    p_run.add_argument("--force", action="store_true",
+                       help="bypass each source's fetch_interval_hours and fetch everything now")
 
     p_cron = sub.add_parser("cron", help="manage the daily crontab entry")
     p_cron.add_argument("action", choices=["show", "install", "uninstall"], nargs="?", default="show")
@@ -68,6 +72,11 @@ def main(argv: list[str] | None = None) -> int:
     p_cron.add_argument("--interval-hours", type=int, default=None,
                         help="run every N hours instead of once at --time (e.g. 12 for twice a day); "
                              "for --job watchdog/process this is its interval, default 1")
+    p_cron.add_argument("--no-judge", action="store_true",
+                        help="--job daily only: skip this job's own inline judging (e.g. once a "
+                             "separate, more frequent --job process cron already covers it)")
+    p_cron.add_argument("--no-tailor", action="store_true",
+                        help="--job daily only: skip this job's own inline auto-tailoring")
 
     p_process = sub.add_parser("process", help="judge + auto-tailor the whole backlog "
                                "(decoupled from fetch cadence, cron target)")
@@ -120,7 +129,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "fetch":
-        stats = run_fetch()
+        stats = run_fetch(force=args.force)
         print(f"fetched={stats['fetched']} kept={stats['kept']} new={stats['new']} "
               f"filtered_new={stats.get('filtered_new', 0)}")
         if stats.get("new_by_source"):
@@ -211,7 +220,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "run":
         summary = daily_run(judge=not args.no_judge, auto_tailor=not args.no_tailor,
-                           auto_tailor_limit=args.tailor_limit)
+                           auto_tailor_limit=args.tailor_limit, force_fetch=args.force)
         print(f"fetched={summary['fetched']} kept={summary['kept']} new={summary['new']} "
               f"filtered_new={summary.get('filtered_new', 0)} judged={summary['judged']} "
               f"tailored={summary.get('tailored', 0)} enriched={summary.get('enriched', 0)}")
@@ -257,15 +266,17 @@ def main(argv: list[str] | None = None) -> int:
             hour, minute = (int(x) for x in args.time.split(":"))
         except ValueError:
             print("--time must be HH:MM"); return 1
+        extra_args = " ".join(f for f, on in
+                              [("--no-judge", args.no_judge), ("--no-tailor", args.no_tailor)] if on)
         if args.action == "install":
-            line = schedule.install(hour, minute, args.interval_hours)
+            line = schedule.install(hour, minute, args.interval_hours, extra_args=extra_args)
             print(f"installed:\n  {line}")
         elif args.action == "uninstall":
             print("removed" if schedule.uninstall() else "no jobhunter entry found")
         else:
             cur = schedule.current()
             print(f"current:\n  {cur}" if cur else "not installed")
-            print(f"\nwould install:\n  {schedule.cron_line(hour, minute, args.interval_hours)}")
+            print(f"\nwould install:\n  {schedule.cron_line(hour, minute, args.interval_hours, extra_args=extra_args)}")
         return 0
 
     if args.command == "watchdog":

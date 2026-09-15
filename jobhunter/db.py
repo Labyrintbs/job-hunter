@@ -97,6 +97,15 @@ CREATE TABLE IF NOT EXISTS target_companies (
     added_at        TEXT DEFAULT (datetime('now'))
 );
 
+-- Per-source fetch cadence bookkeeping -- keyed by the coarse source names
+-- pipeline._gather() uses internally (wttj/linkedin/hellowork/francetravail/ats),
+-- not the finer per-job job.source value (e.g. "workday", "greenhouse").
+CREATE TABLE IF NOT EXISTS source_fetch_state (
+    source            TEXT PRIMARY KEY,
+    last_attempted_at TEXT,
+    last_count        INTEGER DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS filter_rules (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     kind       TEXT NOT NULL,          -- negative_kw | company_block
@@ -1097,3 +1106,21 @@ def remove_target_company(conn: sqlite3.Connection, name: str) -> bool:
     it no longer needs hand-checking."""
     cur = conn.execute("DELETE FROM target_companies WHERE LOWER(name) = LOWER(?)", (name,))
     return cur.rowcount > 0
+
+
+def get_source_fetch_state(conn: sqlite3.Connection, source: str) -> sqlite3.Row | None:
+    return conn.execute(
+        "SELECT * FROM source_fetch_state WHERE source = ?", (source,)
+    ).fetchone()
+
+
+def record_source_fetch(conn: sqlite3.Connection, source: str, count: int) -> None:
+    """Mark a source as just-attempted (success or caught exception -- see
+    pipeline._gather) so its next attempt can be gated by fetch_interval_hours."""
+    conn.execute(
+        """INSERT INTO source_fetch_state (source, last_attempted_at, last_count)
+           VALUES (?, datetime('now'), ?)
+           ON CONFLICT(source) DO UPDATE SET
+             last_attempted_at = datetime('now'), last_count = excluded.last_count""",
+        (source, count),
+    )

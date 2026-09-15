@@ -117,14 +117,22 @@ def _current(label: str) -> str | None:
     return _describe(label, " ".join(data["ProgramArguments"][2:]), data["StartCalendarInterval"])
 
 
-def cron_line(hour: int = 8, minute: int = 0, interval_hours: int | None = None) -> str:
+def cron_line(hour: int = 8, minute: int = 0, interval_hours: int | None = None,
+             extra_args: str = "") -> str:
     """Preview string for `jobhunter cron` (no --install): what would be scheduled."""
-    return _describe(MARKER, _command("run", "cron.log"),
+    subcommand = f"run {extra_args}".strip()
+    return _describe(MARKER, _command(subcommand, "cron.log"),
                      _calendar_intervals(hour, minute, interval_hours))
 
 
-def install(hour: int = 8, minute: int = 0, interval_hours: int | None = None) -> str:
-    return _install(MARKER, "run", "cron.log", hour, minute, interval_hours)
+def install(hour: int = 8, minute: int = 0, interval_hours: int | None = None,
+           extra_args: str = "") -> str:
+    """`extra_args` (e.g. "--no-judge --no-tailor") is appended to the underlying
+    `run` invocation -- useful when raising this job's frequency to the point where
+    its own inline judge/tailor would duplicate a separate, more frequent `process`
+    cron's backlog sweep (see README's "Decoupling fetch from judge cadence")."""
+    subcommand = f"run {extra_args}".strip()
+    return _install(MARKER, subcommand, "cron.log", hour, minute, interval_hours)
 
 
 def uninstall() -> bool:

@@ -27,6 +27,22 @@ def test_cron_line_shape():
     assert "08:30" in line
 
 
+def test_cron_line_appends_extra_args():
+    line = schedule.cron_line(8, 30, extra_args="--no-judge --no-tailor")
+    assert "jobhunter.cli run --no-judge --no-tailor" in line
+
+
+def test_install_appends_extra_args_to_plist_command(tmp_path, monkeypatch):
+    monkeypatch.setattr(schedule, "LAUNCH_AGENTS_DIR", tmp_path)
+    monkeypatch.setattr(schedule.subprocess, "run", lambda *a, **k: _FakeProc())
+
+    schedule.install(2, 0, interval_hours=1, extra_args="--no-judge --no-tailor")
+
+    with open(tmp_path / f"{schedule.MARKER}.plist", "rb") as f:
+        data = plistlib.load(f)
+    assert "jobhunter.cli run --no-judge --no-tailor" in data["ProgramArguments"][2]
+
+
 def test_process_cron_line_shape():
     line = schedule.process_cron_line(2)
     assert schedule.PROCESS_MARKER in line

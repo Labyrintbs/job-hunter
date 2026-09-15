@@ -62,10 +62,33 @@ def _fetch_hellowork(config: dict) -> list:
     return jobs
 
 
-def _gather(config: dict) -> list:
+def _hours_since(timestamp: str) -> float:
+    from datetime import datetime, timezone
+    then = datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - then).total_seconds() / 3600
+
+
+def _is_due(conn, name: str, config: dict) -> bool:
+    """Each source's own fetch_interval_hours (config/search.yaml, e.g. hellowork's
+    24h vs. linkedin's 3h) gates how often it actually fetches, independent of how
+    often the outer launchd trigger fires -- see the per-source cadence plan. Unset/0
+    = always due (today's behavior for any source that doesn't opt in); no prior
+    state (first run, or a brand-new source) is always due."""
+    interval = (config.get(name) or {}).get("fetch_interval_hours", 0)
+    if not interval:
+        return True
+    state = db.get_source_fetch_state(conn, name)
+    if not state or not state["last_attempted_at"]:
+        return True
+    return _hours_since(state["last_attempted_at"]) >= interval
+
+
+def _gather(config: dict, force: bool = False) -> list:
     """Pull every enabled source. Each is isolated: one source's failure (a bad
     token, a network hiccup, a rate-limit) only drops that source's jobs, never
-    the whole run."""
+    the whole run. A source not yet due per its own fetch_interval_hours is
+    skipped (contributing no jobs this tick) unless force=True -- used for an
+    explicit on-demand "check now" that should bypass all cadence gating."""
     sources = [
         ("wttj", lambda: _fetch_wttj(config)),
         ("ats", lambda: ats.fetch_all(load_companies())),
@@ -74,25 +97,33 @@ def _gather(config: dict) -> list:
         ("hellowork", lambda: _fetch_hellowork(config)),
     ]
     jobs: list = []
-    counts: dict[str, int] = {}
-    for name, fn in sources:
-        try:
-            got = fn()
-        except Exception as exc:
-            print(f"  {name} warn: {exc}")
-            got = []
-        counts[name] = len(got)
-        jobs += got
+    counts: dict[str, object] = {}
+    with db.connect() as conn:
+        for name, fn in sources:
+            if not force and not _is_due(conn, name, config):
+                interval = config[name]["fetch_interval_hours"]
+                state = db.get_source_fetch_state(conn, name)
+                remaining = max(0.0, interval - _hours_since(state["last_attempted_at"]))
+                counts[name] = f"skipped (next due in ~{remaining:.1f}h)"
+                continue
+            try:
+                got = fn()
+            except Exception as exc:
+                print(f"  {name} warn: {exc}")
+                got = []
+            counts[name] = len(got)
+            jobs += got
+            db.record_source_fetch(conn, name, len(got))
     print(f"  fetched by source: {counts}")
     return jobs
 
 
-def run_fetch(config: dict | None = None, jobs: list | None = None) -> dict:
+def run_fetch(config: dict | None = None, jobs: list | None = None, force: bool = False) -> dict:
     config = config or load_search_config()
     db.init_db()
 
     if jobs is None:
-        jobs = _gather(config)
+        jobs = _gather(config, force=force)
 
     seen = 0
     kept = 0
@@ -202,7 +233,8 @@ def _auto_tailor_jobs(job_ids: list[int], limit: int) -> int:
 
 
 def daily_run(judge: bool = True, judge_min_score: int = 30, judge_limit: int = 15,
-              auto_tailor: bool = True, auto_tailor_limit: int = 10) -> dict:
+              auto_tailor: bool = True, auto_tailor_limit: int = 10,
+              force_fetch: bool = False) -> dict:
     """One scheduled run: fetch everywhere, enrich every new job with real JD content
     (LinkedIn/SmartRecruiters cards carry none up front), re-score with that content,
     THEN LLM-judge the new promising jobs (highest rule-score first, capped to bound
@@ -213,7 +245,7 @@ def daily_run(judge: bool = True, judge_min_score: int = 30, judge_limit: int = 
     never auto-submitted. Returns a summary including the new job rows (for
     notification)."""
     config = load_search_config()
-    stats = run_fetch(config)
+    stats = run_fetch(config, force=force_fetch)
 
     new_enriched = enrich_new(stats["new_ids"])["enriched"]
     engaged_enriched = enrich_pending(limit=10)["enriched"]

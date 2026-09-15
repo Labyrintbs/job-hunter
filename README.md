@@ -178,12 +178,26 @@ $P -m jobhunter.cli run                 # run once now (what the schedule calls)
 $P -m jobhunter.cli cron show           # preview what would be scheduled (no changes)
 $P -m jobhunter.cli cron install --time 08:00   # add a once-daily entry at 08:00
 $P -m jobhunter.cli cron install --interval-hours 12   # or run every N hours instead (anchored at --time)
+$P -m jobhunter.cli cron install --interval-hours 1 --no-judge --no-tailor  # hourly, fetch-only
 $P -m jobhunter.cli cron uninstall      # remove it
 ```
 Installing is opt-in because the daily run makes LLM calls (more frequent runs
-mean more judge calls — factor that into `--interval-hours`). Only jobhunter's
-own LaunchAgents (`~/Library/LaunchAgents/com.jobhunter.*.plist`) are ever
-touched; nothing else on the system is affected.
+mean more judge calls — factor that into `--interval-hours`, or pass
+`--no-judge --no-tailor` once a separate `process` cron already covers judging,
+see "Decoupling fetch from judge cadence" below). Only jobhunter's own
+LaunchAgents (`~/Library/LaunchAgents/com.jobhunter.*.plist`) are ever touched;
+nothing else on the system is affected.
+
+**Per-source fetch cadence**: raising the outer trigger to hourly doesn't mean
+every source fetches every hour. Each source in `config/search.yaml` has its
+own `fetch_interval_hours` (e.g. LinkedIn/WTTJ every 3h, HelloWork every 24h,
+company ATS boards every 12h) — a source not yet due is skipped that tick
+(logged as `"skipped (next due in ~Xh)"` in the per-source breakdown), tracked
+in the `source_fetch_state` table. `jobhunter fetch --force` / `run --force`
+bypasses all of that for an on-demand check-now. Tune these per source based
+on how often its results actually change — a source whose visible results are
+relevance- not recency-ranked (see HelloWork below) gains nothing from
+frequent checks.
 
 A companion watchdog (`cron install --job watchdog`, hourly by default) self-heals
 missed runs — if the last fetch is older than `--max-gap-hours` (default 15h, kept
