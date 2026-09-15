@@ -9,7 +9,7 @@ from .config import load_companies, load_search_config
 from .llm import judge as llm_judge
 from .llm import provider
 from .notify import dispatch as notify_dispatch
-from .sources import ats, francetravail, hellowork, linkedin, wttj
+from .sources import ats, ats_discovery, francetravail, hellowork, linkedin, wttj
 from .tailor import engine as cv_engine
 
 
@@ -367,6 +367,30 @@ def enrich_new(job_ids: list[int]) -> dict:
 _MIN_DESCRIPTION_CHARS = 100
 
 
+def _maybe_discover_ats(conn, company: str) -> None:
+    """Once a company has a good/strong verdict, see if it already runs a public
+    ATS board we could fetch from directly instead of relying on LinkedIn/HelloWork
+    scraping. Only probes a company once (skips if already in companies.yaml or
+    already on the target_companies checklist) -- a hit is staged as an unconfirmed
+    target_companies result, never written straight to companies.yaml, since a
+    guessed slug can coincidentally collide with an unrelated company's real
+    board (see ats_discovery.probe's docstring)."""
+    known = {c["name"].strip().lower() for c in load_companies()}
+    if company.strip().lower() in known:
+        return
+    if not db.add_target_company(conn, company):
+        return  # already on the checklist -- don't re-probe every good verdict
+    row = conn.execute(
+        "SELECT id FROM target_companies WHERE LOWER(name) = LOWER(?)", (company,)
+    ).fetchone()
+    try:
+        hit = ats_discovery.probe(company)
+    except Exception as exc:
+        hit = None
+        print(f"  ats_discovery warn: {company}: {exc}")
+    db.mark_company_checked(conn, row["id"], hit or "no ATS match found (auto-probed)")
+
+
 def judge_one(job_id: int) -> dict:
     """LLM fit-judge one job; store score/verdict/reasons on the job."""
     db.init_db()
@@ -387,6 +411,8 @@ def judge_one(job_id: int) -> dict:
             # A weak verdict is a more informed signal than the rule score that got it
             # onto the board in the first place -- auto-hide it like any other filter.
             db.set_llm_filter(conn, job_id, "llm judge: weak fit")
+        elif result["verdict"] in ("good", "strong"):
+            _maybe_discover_ats(conn, job.company)
     return {"job_id": job_id, **result}
 
 

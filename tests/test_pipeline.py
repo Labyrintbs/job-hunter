@@ -247,6 +247,7 @@ def test_daily_run_enriches_before_judging(tmp_db, config, monkeypatch):
 
     monkeypatch.setattr(pipeline.llm_judge, "judge", fake_judge)
     monkeypatch.setattr(pipeline.notify_dispatch, "send", lambda rows, cfg: {"selected": 0, "results": {}})
+    monkeypatch.setattr(pipeline.ats_discovery, "probe", lambda company, **kw: None)
 
     summary = pipeline.daily_run(judge=True)
 
@@ -303,6 +304,7 @@ def test_daily_run_auto_tailors_everything_but_weak_verdicts(tmp_db, config, mon
     monkeypatch.setattr(pipeline.provider, "available", lambda: True)
     monkeypatch.setattr(pipeline.enrich, "fetch_full_text", lambda *a, **k: None)
     monkeypatch.setattr(pipeline.notify_dispatch, "send", lambda rows, cfg: {"selected": 0, "results": {}})
+    monkeypatch.setattr(pipeline.ats_discovery, "probe", lambda company, **kw: None)
 
     verdicts = {"1": "strong", "2": "weak", "3": "good", "4": "stretch"}
 
@@ -329,6 +331,7 @@ def test_daily_run_respects_auto_tailor_limit(tmp_db, config, monkeypatch):
     monkeypatch.setattr(pipeline.provider, "available", lambda: True)
     monkeypatch.setattr(pipeline.enrich, "fetch_full_text", lambda *a, **k: None)
     monkeypatch.setattr(pipeline.notify_dispatch, "send", lambda rows, cfg: {"selected": 0, "results": {}})
+    monkeypatch.setattr(pipeline.ats_discovery, "probe", lambda company, **kw: None)
     monkeypatch.setattr(pipeline.llm_judge, "judge", lambda job, preferences="":
                         {"score": 80, "verdict": "strong", "seniority": "junior",
                          "min_years": 0, "reasons": "r"})
@@ -349,6 +352,7 @@ def test_daily_run_auto_tailor_false_skips_entirely(tmp_db, config, monkeypatch)
     monkeypatch.setattr(pipeline.provider, "available", lambda: True)
     monkeypatch.setattr(pipeline.enrich, "fetch_full_text", lambda *a, **k: None)
     monkeypatch.setattr(pipeline.notify_dispatch, "send", lambda rows, cfg: {"selected": 0, "results": {}})
+    monkeypatch.setattr(pipeline.ats_discovery, "probe", lambda company, **kw: None)
     monkeypatch.setattr(pipeline.llm_judge, "judge", lambda job, preferences="":
                         {"score": 80, "verdict": "strong", "seniority": "junior",
                          "min_years": 0, "reasons": "r"})
@@ -377,6 +381,79 @@ def test_judge_one_does_not_hide_good_or_stretch_verdicts(tmp_db, config, monkey
     assert row["filtered"] == 0
 
 
+def _fake_verdict(verdict, score=80):
+    return lambda job, preferences="": {"score": score, "verdict": verdict,
+                                         "seniority": "junior", "min_years": 0, "reasons": "r"}
+
+
+def test_judge_one_probes_ats_for_new_company_on_good_verdict(tmp_db, config, monkeypatch):
+    with db.connect() as conn:
+        jid = _insert(conn, config, company="Brand New Startup", description=_REAL_JD)
+    monkeypatch.setattr(pipeline.llm_judge, "judge", _fake_verdict("good"))
+    monkeypatch.setattr(pipeline, "load_companies", lambda: [])   # not in companies.yaml
+    probed = []
+    monkeypatch.setattr(pipeline.ats_discovery, "probe", lambda company, **kw:
+                        probed.append(company) or "possible greenhouse board: token=x, 3 postings")
+
+    pipeline.judge_one(jid)
+
+    assert probed == ["Brand New Startup"]
+    with db.connect() as conn:
+        companies = {c["name"]: c["last_result"] for c in db.list_target_companies(conn)}
+    assert companies["Brand New Startup"] == "possible greenhouse board: token=x, 3 postings"
+
+
+def test_judge_one_does_not_probe_ats_on_weak_or_stretch_verdict(tmp_db, config, monkeypatch):
+    with db.connect() as conn:
+        jid_weak = _insert(conn, config, company="Weak Co", external_id="w1", description=_REAL_JD)
+    monkeypatch.setattr(pipeline.llm_judge, "judge", _fake_verdict("weak", score=10))
+    monkeypatch.setattr(pipeline, "load_companies", lambda: [])
+    probed = []
+    monkeypatch.setattr(pipeline.ats_discovery, "probe", lambda company, **kw: probed.append(company))
+    pipeline.judge_one(jid_weak)
+
+    with db.connect() as conn:
+        jid_stretch = _insert(conn, config, company="Stretch Co", external_id="s1", description=_REAL_JD)
+    monkeypatch.setattr(pipeline.llm_judge, "judge", _fake_verdict("stretch", score=50))
+    pipeline.judge_one(jid_stretch)
+
+    assert probed == []
+    with db.connect() as conn:
+        assert db.list_target_companies(conn) == []
+
+
+def test_judge_one_skips_probe_for_company_already_in_companies_yaml(tmp_db, config, monkeypatch):
+    with db.connect() as conn:
+        jid = _insert(conn, config, company="Already Automated Co", description=_REAL_JD)
+    monkeypatch.setattr(pipeline.llm_judge, "judge", _fake_verdict("strong"))
+    monkeypatch.setattr(pipeline, "load_companies", lambda: [{"name": "Already Automated Co", "ats": "lever"}])
+    probed = []
+    monkeypatch.setattr(pipeline.ats_discovery, "probe", lambda company, **kw: probed.append(company))
+
+    pipeline.judge_one(jid)
+
+    assert probed == []
+    with db.connect() as conn:
+        assert db.list_target_companies(conn) == []
+
+
+def test_judge_one_only_probes_a_company_once(tmp_db, config, monkeypatch):
+    monkeypatch.setattr(pipeline, "load_companies", lambda: [])
+    monkeypatch.setattr(pipeline.llm_judge, "judge", _fake_verdict("good"))
+    probed = []
+    monkeypatch.setattr(pipeline.ats_discovery, "probe", lambda company, **kw: probed.append(company) or None)
+
+    with db.connect() as conn:
+        jid1 = _insert(conn, config, company="Repeat Co", external_id="r1", description=_REAL_JD)
+    pipeline.judge_one(jid1)
+
+    with db.connect() as conn:
+        jid2 = _insert(conn, config, company="Repeat Co", external_id="r2", description=_REAL_JD)
+    pipeline.judge_one(jid2)
+
+    assert probed == ["Repeat Co"]   # second good verdict for the same company: no re-probe
+
+
 def test_process_backlog_judges_and_tailors_the_whole_backlog(tmp_db, config, monkeypatch):
     """Unlike daily_run, process_backlog isn't scoped to "new this run" -- these
     jobs are pre-existing DB rows, inserted directly (bypassing _gather/run_fetch
@@ -395,6 +472,7 @@ def test_process_backlog_judges_and_tailors_the_whole_backlog(tmp_db, config, mo
                 "seniority": "junior", "min_years": 0, "reasons": "r"}
 
     monkeypatch.setattr(pipeline.llm_judge, "judge", fake_judge)
+    monkeypatch.setattr(pipeline.ats_discovery, "probe", lambda company, **kw: None)
     tailored_ids = []
     monkeypatch.setattr(pipeline, "tailor_one",
                         lambda jid, auto=False: tailored_ids.append(jid) or {"job_id": jid, "compiled": True})
