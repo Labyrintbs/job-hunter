@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import fcntl
 import re
 import sqlite3
 import unicodedata
@@ -314,12 +315,25 @@ def _backfill_job_events(conn: sqlite3.Connection) -> None:
 
 
 def init_db(db_path: Path | None = None) -> None:
-    with get_connection(db_path) as conn:
-        conn.executescript(SCHEMA)
-        _migrate(conn)
-        _backfill_geo_tier(conn)
-        _backfill_role_category(conn)
-        _backfill_job_events(conn)
+    # executescript() auto-commits before each statement rather than running the
+    # whole SCHEMA as one transaction, so two processes calling init_db() at the
+    # same moment can interleave their DROP VIEW/CREATE VIEW pairs and crash with
+    # "view already exists". Every CLI invocation (fetch/process/watchdog) calls
+    # this on startup, and now that all three run hourly they genuinely overlap --
+    # a cross-process lock serializes schema init so that can't happen.
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    lock_path = DATA_DIR / ".init_db.lock"
+    with open(lock_path, "w") as lock_file:
+        fcntl.flock(lock_file, fcntl.LOCK_EX)
+        try:
+            with get_connection(db_path) as conn:
+                conn.executescript(SCHEMA)
+                _migrate(conn)
+                _backfill_geo_tier(conn)
+                _backfill_role_category(conn)
+                _backfill_job_events(conn)
+        finally:
+            fcntl.flock(lock_file, fcntl.LOCK_UN)
 
 
 @contextmanager
