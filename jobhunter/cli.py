@@ -80,7 +80,7 @@ def main(argv: list[str] | None = None) -> int:
 
     p_process = sub.add_parser("process", help="judge + auto-tailor the whole backlog "
                                "(decoupled from fetch cadence, cron target)")
-    p_process.add_argument("--judge-min-score", type=int, default=30)
+    p_process.add_argument("--judge-min-score", type=int, default=15)
     p_process.add_argument("--judge-limit", type=int, default=10)
     p_process.add_argument("--tailor-limit", type=int, default=10)
     p_process.add_argument("--dedup-limit", type=int, default=10)

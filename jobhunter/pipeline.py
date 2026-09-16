@@ -233,7 +233,7 @@ def _auto_tailor_jobs(job_ids: list[int], limit: int) -> int:
     return tailored
 
 
-def daily_run(judge: bool = True, judge_min_score: int = 30, judge_limit: int = 15,
+def daily_run(judge: bool = True, judge_min_score: int = 15, judge_limit: int = 15,
               auto_tailor: bool = True, auto_tailor_limit: int = 10,
               force_fetch: bool = False) -> dict:
     """One scheduled run: fetch everywhere, enrich every new job with real JD content
@@ -284,7 +284,7 @@ def daily_run(judge: bool = True, judge_min_score: int = 30, judge_limit: int = 
             "new_rows": new_rows, "notified": notified}
 
 
-def process_backlog(judge_min_score: int = 30, judge_limit: int = 10,
+def process_backlog(judge_min_score: int = 15, judge_limit: int = 10,
                      tailor_limit: int = 10, dedup_limit: int = 10) -> dict:
     """Judge + auto-tailor cycle, decoupled from fetch cadence: sweeps the whole
     backlog (every not-yet-judged job, every judged-but-not-yet-tailored job)
