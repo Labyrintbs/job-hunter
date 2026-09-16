@@ -51,6 +51,20 @@ def test_algorithm_engineer_title_relevant(config):
     assert is_relevant(J(title="Algorithm Engineer"), config) is True
 
 
+def test_ai_technical_pm_titles_relevant(config):
+    # AI/Technical PM is a second acceptable target role (see llm/judge.py) -- but
+    # only qualified titles, not a bare "Product Manager" (still covered by
+    # test_non_ml_title_dropped_even_with_ml_boilerplate above).
+    assert is_relevant(J(title="AI Product Manager"), config) is True
+    assert is_relevant(J(title="Technical Product Manager"), config) is True
+    assert is_relevant(J(title="Chef de Produit IA"), config) is True
+
+
+def test_classify_role_pm(config):
+    assert classify_role("AI Product Manager", "", config) == "PM"
+    assert classify_role("Technical Product Manager", "", config) == "PM"
+
+
 def test_paris_ranks_above_other_france(config):
     paris = screen(J(loc="Paris, Ile-de-France, France"), config).score
     other = screen(J(loc="Bordeaux, Nouvelle-Aquitaine, France"), config).score

@@ -563,7 +563,8 @@ def tailor_one(job_id: int, auto: bool = False) -> dict:
             return {"job_id": job_id, "error": "not found"}
         job = db.job_from_row(row)
 
-    tex_path, pdf_path = cv_engine.tailor_job(job, job_id, auto=auto, judge_context=_judge_context(row))
+    tex_path, pdf_path = cv_engine.tailor_job(job, job_id, auto=auto, judge_context=_judge_context(row),
+                                              role_category=row["role_category"] or "")
 
     with db.connect() as conn:
         db.add_cv_artifact(conn, job_id, str(tex_path), str(pdf_path or ""),

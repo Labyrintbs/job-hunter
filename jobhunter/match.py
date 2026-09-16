@@ -197,7 +197,7 @@ def score(job: Job, config: dict) -> tuple[int, list[str]]:
     return max(0, min(100, pts)), reasons
 
 
-_SPECIFIC_ROLE_CATEGORIES = ["NLP", "CV", "AI"]   # checked before the ML/DL catch-all
+_SPECIFIC_ROLE_CATEGORIES = ["NLP", "CV", "AI", "PM"]   # checked before the ML/DL catch-all
 
 
 def classify_role(title: str, description: str, config: dict) -> str:

@@ -691,7 +691,7 @@ def test_tailor_one_and_cover_one_pass_the_judge_context_through(tmp_db, config,
 
     captured = {}
     monkeypatch.setattr(pipeline.cv_engine, "tailor_job",
-                        lambda job, job_id, auto=False, judge_context=None:
+                        lambda job, job_id, auto=False, judge_context=None, role_category="":
                         captured.update(tailor_ctx=judge_context) or (Path("/tmp/cv.tex"), Path("/tmp/cv.pdf")))
     monkeypatch.setattr(pipeline.cover_letter, "draft_to_file",
                         lambda job, out_dir, judge_context=None:
@@ -711,7 +711,7 @@ def test_judge_context_is_none_when_job_not_yet_judged(tmp_db, config, monkeypat
 
     captured = {}
     monkeypatch.setattr(pipeline.cv_engine, "tailor_job",
-                        lambda job, job_id, auto=False, judge_context=None:
+                        lambda job, job_id, auto=False, judge_context=None, role_category="":
                         captured.update(tailor_ctx=judge_context) or (Path("/tmp/cv.tex"), Path("/tmp/cv.pdf")))
 
     pipeline.tailor_one(jid)

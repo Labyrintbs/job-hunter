@@ -21,6 +21,21 @@ role_keywords:
   - llm
   - algorithm engineer
 
+# AI/Technical Product Manager roles -- a second acceptable target alongside ML
+# engineering (see jobhunter/llm/judge.py's SYSTEM prompt for how these are judged).
+# Deliberately compound phrases, not bare "product manager", so a generic PM
+# posting unrelated to AI/ML doesn't pass this gate.
+  - ai product manager
+  - product manager ai
+  - technical product manager
+  - ml product manager
+  - genai product manager
+  - product manager llm
+  - ai product owner
+  - technical product owner
+  - chef de produit ia
+  - chef de produit - ia
+
 # Extra keywords that boost a job's score if present in title/description.
 boost_keywords:
   - machine learning
@@ -79,6 +94,17 @@ role_categories:
     - applied scientist
     - research engineer
     - research scientist
+  PM:
+    - ai product manager
+    - product manager ai
+    - technical product manager
+    - ml product manager
+    - genai product manager
+    - product manager llm
+    - ai product owner
+    - technical product owner
+    - chef de produit ia
+    - chef de produit - ia
 
 # Geography (WTTJ facet uses country; location text is matched against these).
 countries: ["France"]
@@ -180,6 +206,9 @@ wttj:
     - "llm engineer"
     - "data scientist"
     - "algorithm engineer"
+    - "AI product manager"
+    - "technical product manager"
+    - "chef de produit IA"
 
 # LinkedIn public guest search (read-only, no login). Each query is searched in
 # each location (a cross product); "France" (not city-specific) returns genuine
@@ -205,6 +234,9 @@ linkedin:
                           # nowhere near a rate limit, so there's no reason to trade
                           # away its small remaining unique yield. "mlops engineer"
                           # added new: matches a title pattern no other query covered.
+    - "AI product manager"
+    - "technical product manager"
+    - "chef de produit IA"
   locations:
     - "France"
   recent_hours: 168   # last 7 days -- verified the 24h pool is only ~23% of the 7-day
@@ -253,6 +285,9 @@ hellowork:
     - "llm engineer"
     - "data scientist"
     - "algorithm engineer"
+    - "AI product manager"
+    - "technical product manager"
+    - "chef de produit IA"
   locations:
     - "France"
 

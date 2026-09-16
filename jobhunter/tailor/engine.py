@@ -151,11 +151,18 @@ def _select_blocks(job: Job, parsed: ParsedCV, terms: set[str], feedback: str | 
 AVAILABILITY = "September 2026"
 
 
-def _tagline() -> str:
-    # Deliberately generic, same line as templates/cv_base.tex, no per-job
-    # "targeting <role> at <company>" clause. See templates/cv_tailoring_workflow.md.
+def _tagline(role_category: str = "") -> str:
+    # Deliberately generic, no per-job "targeting <role> at <company>" clause.
+    # Two fixed variants only (by role_category), not per-job customized -- see
+    # templates/cv_tailoring_workflow.md. The default variant is identical to
+    # templates/cv_base.tex's own heading line.
+    if role_category == "PM":
+        return (
+            f"{{Seeking a full-time AI/Technical Product Manager role (CDI/CDD) from "
+            f"{AVAILABILITY} — Île-de-France, open to mobility}}"
+        )
     return (
-        f"{{Seeking a full-time Machine Learning role (CDI) from {AVAILABILITY} — "
+        f"{{Seeking a full-time Machine Learning role (CDI/CDD) from {AVAILABILITY} — "
         f"Île-de-France, open to mobility}}"
     )
 
@@ -165,7 +172,7 @@ def _slug(text: str) -> str:
 
 
 def tailor_tex(job: Job, parsed: ParsedCV | None = None, feedback: str | None = None,
-               judge_context: str | None = None) -> str:
+               judge_context: str | None = None, role_category: str = "") -> str:
     parsed = parsed or snippet_bank.parse(BASE_CV)
     terms = _job_terms(job)
     doc = parsed.document
@@ -176,7 +183,7 @@ def tailor_tex(job: Job, parsed: ParsedCV | None = None, feedback: str | None = 
     doc = snippet_bank.reassemble(doc, r"PROFESSIONAL EXPERIENCE", experiences)
     doc = snippet_bank.reassemble_skills(doc, skills)
     if parsed.heading_line:
-        doc = doc.replace(parsed.heading_line, _tagline(), 1)
+        doc = doc.replace(parsed.heading_line, _tagline(role_category), 1)
     return doc
 
 
@@ -326,7 +333,7 @@ def _retry_feedback(pdf: Path | None, out_dir: Path) -> str | None:
 
 
 def tailor_job(job: Job, job_id: int, auto: bool = False,
-              judge_context: str | None = None) -> tuple[Path, Path | None]:
+              judge_context: str | None = None, role_category: str = "") -> tuple[Path, Path | None]:
     """Generate + compile a tailored CV for a job. Returns (tex_path, pdf_path).
 
     `auto=True` is the unsupervised daily_run path: it also enforces the exact
@@ -341,13 +348,14 @@ def tailor_job(job: Job, job_id: int, auto: bool = False,
     through to the block-selection call as background."""
     out_dir = CV_OUT_DIR / f"{job_id}-{_slug(job.company)}"
 
-    tex = tailor_tex(job, judge_context=judge_context)
+    tex = tailor_tex(job, judge_context=judge_context, role_category=role_category)
     pdf = compile_tex(tex, out_dir, name="cv", expected_pages=2 if auto else None)
 
     if auto:
         feedback = _retry_feedback(pdf, out_dir)
         if feedback:
-            tex = tailor_tex(job, feedback=feedback, judge_context=judge_context)
+            tex = tailor_tex(job, feedback=feedback, judge_context=judge_context,
+                             role_category=role_category)
             pdf = compile_tex(tex, out_dir, name="cv", expected_pages=2)
 
     return out_dir / "cv.tex", pdf

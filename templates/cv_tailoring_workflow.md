@@ -113,7 +113,10 @@ Work from the master version I attach. The master is deliberately over-long; tai
 - Lead with the result, then the method. STAR structure where it fits.
 - Say "production LLM" or "production baseline" rather than naming internal systems; specific open model names (Qwen3.5-4B) are fine and preferred.
 - Escape `%` as `\%` in LaTeX.
-- Header tagline is always the same generic line, identical to `templates/cv_base.tex`, on every tailored CV: "Seeking a full-time Machine Learning role (CDI) from September 2026 — Île-de-France, open to mobility." No "targeting `<role>` at `<company>`" clause, ever, no matter how well a title or company name would read there. Always include "from September 2026" (`jobhunter/tailor/engine.py`'s `AVAILABILITY` constant, update both if the date changes). Once a header is in a CV, it is locked: do not regenerate or reword it on a later pass over the same file, even while editing other sections.
+- Header tagline is always one of exactly two fixed generic lines, never a per-job "targeting `<role>` at `<company>`" clause, no matter how well a title or company name would read there. Which one applies is decided by the job's `role_category` (see `jobhunter/match.py:classify_role`), not by hand:
+  - Default (every category except PM), identical to `templates/cv_base.tex`: "Seeking a full-time Machine Learning role (CDI/CDD) from September 2026 — Île-de-France, open to mobility."
+  - `role_category == "PM"` (AI/Technical Product Manager postings): "Seeking a full-time AI/Technical Product Manager role (CDI/CDD) from September 2026 — Île-de-France, open to mobility."
+  Always include "from September 2026" (`jobhunter/tailor/engine.py`'s `AVAILABILITY` constant, update both variants if the date changes). Once a header is in a CV, it is locked: do not regenerate or reword it on a later pass over the same file, even while editing other sections.
 - Contact email: hongming.marius.fang@gmail.com
 - Education entry for Beihang: "CTI-accredited French engineering degree from a joint program between Beihang University and the Groupe des Écoles Centrales, also awarding Chinese Bachelor & Master of Science degrees." No "(titre d'ingénieur)" in parentheses.
 
