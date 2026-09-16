@@ -503,6 +503,66 @@ def judge_one(job_id: int) -> dict:
     return {"job_id": job_id, **result}
 
 
+_JUNIOR_MIN_SCORE_REASON = "score<"
+_LLM_WEAK_FILTER_REASON = "llm judge: weak fit"
+
+
+def rejudge_juniors(limit: int | None = None) -> dict:
+    """One-off catch-up for junior-titled postings screened/judged before the
+    junior exemptions landed (match.py's min_score exemption, judge.py's
+    'Junior/entry-level exception'). Two groups:
+      * rule-filtered by the old min_score gate, never reached the LLM -- rescreen
+        with match.screen() and unhide if the new (exempt) result says keep.
+      * already judged 'weak' under the old, stricter judge prompt -- rejudge with
+        judge_one() and unhide only if the new verdict isn't weak AND the job was
+        filtered solely for the old weak verdict (never touches a job also filtered
+        for an unrelated reason, e.g. a citizenship hard disqualifier).
+    Skips dismissed/interested jobs entirely -- never overrides a human label."""
+    db.init_db()
+    config = load_search_config()
+    label_filter = "AND COALESCE(user_label,'') NOT IN ('dismissed','interested')"
+
+    with db.connect() as conn:
+        pre_judge_rows = conn.execute(
+            f"""SELECT * FROM jobs WHERE llm_score IS NULL AND filtered = 1
+                AND seniority = 'junior' AND filter_reason LIKE ? {label_filter}""",
+            (f"%{_JUNIOR_MIN_SCORE_REASON}%",),
+        ).fetchall()
+
+    unfiltered = 0
+    for row in pre_judge_rows:
+        job = db.job_from_row(row)
+        s = match.screen(job, config)
+        if not s.filtered:
+            with db.connect() as conn:
+                db.update_screening(conn, row["id"], s.score, s.reasons, filtered=False,
+                                    filter_reason="", seniority=s.seniority,
+                                    min_years=s.min_years, role_category=s.role_category)
+            unfiltered += 1
+
+    with db.connect() as conn:
+        weak_rows = conn.execute(
+            f"""SELECT id, filter_reason FROM jobs WHERE llm_verdict = 'weak'
+                AND seniority = 'junior' {label_filter}"""
+        ).fetchall()
+    old_reason_by_id = {r["id"]: (r["filter_reason"] or "").strip() for r in weak_rows}
+    weak_ids = list(old_reason_by_id)
+    if limit:
+        weak_ids = weak_ids[:limit]
+
+    rejudged = 0
+    for jid in weak_ids:
+        result = judge_one(jid)
+        rejudged += 1
+        if (result.get("verdict") and result["verdict"] != "weak"
+                and old_reason_by_id[jid] == _LLM_WEAK_FILTER_REASON):
+            with db.connect() as conn:
+                db.set_filtered(conn, jid, False, "")
+            unfiltered += 1
+
+    return {"rescreened": len(pre_judge_rows), "rejudged": rejudged, "unfiltered": unfiltered}
+
+
 def judge_all(min_score: int = 40, limit: int | None = None) -> dict:
     """Judge every stored job at/above a rule-score threshold that isn't judged yet.
     Skips jobs with no real JD content rather than burning a call on a title-only guess --

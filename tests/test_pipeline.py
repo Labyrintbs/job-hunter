@@ -501,6 +501,105 @@ def test_judge_one_only_probes_a_company_once(tmp_db, config, monkeypatch):
     assert probed == ["Repeat Co"]   # second good verdict for the same company: no re-probe
 
 
+def test_rejudge_juniors_unfilters_junior_rule_filtered_job(tmp_db, config, monkeypatch):
+    with db.connect() as conn:
+        jid = _insert(conn, config, external_id="rj1", description=_LONG_REAL_JD)
+        conn.execute(
+            "UPDATE jobs SET filtered=1, filter_reason='score<20', seniority='junior' WHERE id=?",
+            (jid,))
+
+    summary = pipeline.rejudge_juniors()
+
+    assert summary["rescreened"] == 1
+    assert summary["unfiltered"] == 1
+    with db.connect() as conn:
+        row = db.get_job(conn, jid)
+    assert row["filtered"] == 0
+    assert row["filter_reason"] == ""
+
+
+def test_rejudge_juniors_leaves_non_junior_score_filtered_job_alone(tmp_db, config, monkeypatch):
+    with db.connect() as conn:
+        jid = _insert(conn, config, external_id="rj2", description=_LONG_REAL_JD)
+        conn.execute(
+            "UPDATE jobs SET filtered=1, filter_reason='score<20', seniority='unknown' WHERE id=?",
+            (jid,))
+
+    summary = pipeline.rejudge_juniors()
+
+    assert summary["rescreened"] == 0   # not selected -- not junior
+    with db.connect() as conn:
+        assert db.get_job(conn, jid)["filtered"] == 1
+
+
+def test_rejudge_juniors_rejudges_weak_junior_job_and_unfilters_on_improved_verdict(tmp_db, config, monkeypatch):
+    with db.connect() as conn:
+        jid = _insert(conn, config, external_id="rj3", description=_LONG_REAL_JD)
+        conn.execute(
+            "UPDATE jobs SET llm_verdict='weak', llm_score=10, seniority='junior', "
+            "filtered=1, filter_reason='llm judge: weak fit' WHERE id=?", (jid,))
+    monkeypatch.setattr(pipeline.llm_judge, "judge", _fake_verdict("stretch"))
+
+    summary = pipeline.rejudge_juniors()
+
+    assert summary["rejudged"] == 1
+    assert summary["unfiltered"] == 1
+    with db.connect() as conn:
+        row = db.get_job(conn, jid)
+    assert row["llm_verdict"] == "stretch"
+    assert row["filtered"] == 0
+
+
+def test_rejudge_juniors_does_not_unfilter_if_also_filtered_for_another_reason(tmp_db, config, monkeypatch):
+    with db.connect() as conn:
+        jid = _insert(conn, config, external_id="rj4", description=_LONG_REAL_JD)
+        conn.execute(
+            "UPDATE jobs SET llm_verdict='weak', llm_score=5, seniority='junior', filtered=1, "
+            "filter_reason='citizenship/eligibility requirement; llm judge: weak fit' WHERE id=?",
+            (jid,))
+    monkeypatch.setattr(pipeline.llm_judge, "judge", _fake_verdict("stretch"))
+
+    summary = pipeline.rejudge_juniors()
+
+    assert summary["rejudged"] == 1
+    assert summary["unfiltered"] == 0   # combined reason -- left filtered, not this function's call
+    with db.connect() as conn:
+        assert db.get_job(conn, jid)["filtered"] == 1
+
+
+def test_rejudge_juniors_skips_dismissed_and_interested_labels(tmp_db, config, monkeypatch):
+    with db.connect() as conn:
+        dismissed = _insert(conn, config, external_id="rj5", description=_LONG_REAL_JD)
+        conn.execute("UPDATE jobs SET llm_verdict='weak', seniority='junior', filtered=1, "
+                     "filter_reason='llm judge: weak fit', user_label='dismissed' WHERE id=?",
+                     (dismissed,))
+        interested = _insert(conn, config, external_id="rj6", description=_LONG_REAL_JD)
+        conn.execute("UPDATE jobs SET filtered=1, filter_reason='score<20', seniority='junior', "
+                     "user_label='interested' WHERE id=?", (interested,))
+    called = []
+    monkeypatch.setattr(pipeline.llm_judge, "judge",
+                        lambda job, preferences="": called.append(1) or _fake_verdict("stretch")(job))
+
+    summary = pipeline.rejudge_juniors()
+
+    assert summary == {"rescreened": 0, "rejudged": 0, "unfiltered": 0}
+    assert called == []
+
+
+def test_rejudge_juniors_respects_limit(tmp_db, config, monkeypatch):
+    with db.connect() as conn:
+        for i in range(3):
+            jid = _insert(conn, config, external_id=f"rj-limit-{i}", company=f"LimitCo{i}",
+                         description=_LONG_REAL_JD)
+            conn.execute("UPDATE jobs SET llm_verdict='weak', seniority='junior', filtered=1, "
+                         "filter_reason='llm judge: weak fit' WHERE id=?", (jid,))
+    monkeypatch.setattr(pipeline.llm_judge, "judge", _fake_verdict("stretch"))
+
+    summary = pipeline.rejudge_juniors(limit=2)
+
+    assert summary["rejudged"] == 2
+
+
 def test_process_backlog_judges_and_tailors_the_whole_backlog(tmp_db, config, monkeypatch):
     """Unlike daily_run, process_backlog isn't scoped to "new this run" -- these
     jobs are pre-existing DB rows, inserted directly (bypassing _gather/run_fetch
