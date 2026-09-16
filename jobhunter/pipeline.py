@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import shutil
 import time
 
@@ -505,6 +506,16 @@ def judge_one(job_id: int) -> dict:
 
 _JUNIOR_MIN_SCORE_REASON = "score<"
 _LLM_WEAK_FILTER_REASON = "llm judge: weak fit"
+_SCORE_REASON_RE = re.compile(r"^score<\d+$")
+
+
+def _only_junior_exempt_reasons(reason: str) -> bool:
+    """True if every '; '-joined flag in a filter_reason is one this function's junior
+    exemptions have made moot (the old weak verdict, or the old min_score gate) -- i.e.
+    safe to unhide on an improved verdict. A job also blocked by anything else (a
+    citizenship hard disqualifier, a learned rule, ...) must stay filtered."""
+    parts = [p.strip() for p in reason.split(";") if p.strip()]
+    return all(p == _LLM_WEAK_FILTER_REASON or _SCORE_REASON_RE.match(p) for p in parts)
 
 
 def rejudge_juniors(limit: int | None = None) -> dict:
@@ -555,7 +566,7 @@ def rejudge_juniors(limit: int | None = None) -> dict:
         result = judge_one(jid)
         rejudged += 1
         if (result.get("verdict") and result["verdict"] != "weak"
-                and old_reason_by_id[jid] == _LLM_WEAK_FILTER_REASON):
+                and _only_junior_exempt_reasons(old_reason_by_id[jid])):
             with db.connect() as conn:
                 db.set_filtered(conn, jid, False, "")
             unfiltered += 1

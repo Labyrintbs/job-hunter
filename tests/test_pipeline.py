@@ -550,6 +550,24 @@ def test_rejudge_juniors_rejudges_weak_junior_job_and_unfilters_on_improved_verd
     assert row["filtered"] == 0
 
 
+def test_rejudge_juniors_unfilters_when_old_reason_is_a_stale_score_gate(tmp_db, config, monkeypatch):
+    # Real-world case: a job judged 'weak' long ago, then later rescreened (e.g. by
+    # enrich_one) which overwrote filter_reason with just the rule-score flag,
+    # losing the "llm judge: weak fit" trace even though llm_verdict is still 'weak'.
+    with db.connect() as conn:
+        jid = _insert(conn, config, external_id="rj7", description=_LONG_REAL_JD)
+        conn.execute(
+            "UPDATE jobs SET llm_verdict='weak', llm_score=33, seniority='junior', "
+            "filtered=1, filter_reason='score<20' WHERE id=?", (jid,))
+    monkeypatch.setattr(pipeline.llm_judge, "judge", _fake_verdict("stretch"))
+
+    summary = pipeline.rejudge_juniors()
+
+    assert summary["unfiltered"] == 1
+    with db.connect() as conn:
+        assert db.get_job(conn, jid)["filtered"] == 0
+
+
 def test_rejudge_juniors_does_not_unfilter_if_also_filtered_for_another_reason(tmp_db, config, monkeypatch):
     with db.connect() as conn:
         jid = _insert(conn, config, external_id="rj4", description=_LONG_REAL_JD)
