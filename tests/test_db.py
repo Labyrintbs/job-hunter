@@ -727,3 +727,20 @@ def test_source_fetch_state_round_trips_and_defaults_to_none(tmp_db):
         state = db.get_source_fetch_state(conn, "linkedin")
         assert state["last_count"] == 5
         assert conn.execute("SELECT COUNT(*) FROM source_fetch_state").fetchone()[0] == 1
+
+
+def test_duplicate_check_round_trips_and_is_order_independent(tmp_db):
+    with db.connect() as conn:
+        assert db.get_duplicate_check(conn, 5, 9) is None
+
+        db.record_duplicate_check(conn, 5, 9, "same", "high", "identical JD")
+        row = db.get_duplicate_check(conn, 5, 9)
+        assert row["verdict"] == "same"
+        assert row["confidence"] == "high"
+        # looked up with the pair reversed -- must still find the same row
+        assert db.get_duplicate_check(conn, 9, 5)["reason"] == "identical JD"
+
+        db.record_duplicate_check(conn, 9, 5, "different", "low", "different team")
+        row = db.get_duplicate_check(conn, 5, 9)
+        assert row["verdict"] == "different"   # updated, not duplicated
+        assert conn.execute("SELECT COUNT(*) FROM duplicate_checks").fetchone()[0] == 1

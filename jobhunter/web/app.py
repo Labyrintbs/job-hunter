@@ -71,6 +71,16 @@ def dashboard(request: Request, status: str | None = None, min_score: int = 0,
                 f"JOIN applications a ON a.job_id = j.id WHERE j.id IN ({marks})",
                 tuple(dup_ids),
             ).fetchall()}
+        dup_checks = {}
+        for jid, others in dup_map.items():
+            for other_id in others:
+                a, b = sorted((jid, other_id))
+                key = f"{a}-{b}"
+                if key in dup_checks:
+                    continue
+                row = db.get_duplicate_check(conn, a, b)
+                if row:
+                    dup_checks[key] = dict(row)
     return TEMPLATES.TemplateResponse(
         request,
         "dashboard.html",
@@ -95,6 +105,7 @@ def dashboard(request: Request, status: str | None = None, min_score: int = 0,
             "llm_available": provider.available(),
             "dup_map": dup_map,
             "dup_jobs": dup_jobs,
+            "dup_checks": dup_checks,
         },
     )
 

@@ -83,6 +83,7 @@ def main(argv: list[str] | None = None) -> int:
     p_process.add_argument("--judge-min-score", type=int, default=30)
     p_process.add_argument("--judge-limit", type=int, default=10)
     p_process.add_argument("--tailor-limit", type=int, default=10)
+    p_process.add_argument("--dedup-limit", type=int, default=10)
 
     p_watchdog = sub.add_parser("watchdog", help="self-heal: refetch if the last run is "
                                 "older than --max-gap-hours (cron target)")
@@ -231,10 +232,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "process":
         summary = process_backlog(judge_min_score=args.judge_min_score,
                                   judge_limit=args.judge_limit,
-                                  tailor_limit=args.tailor_limit)
+                                  tailor_limit=args.tailor_limit,
+                                  dedup_limit=args.dedup_limit)
         print(f"enriched={summary['enriched']} judged={summary['judged']} "
               f"skipped_no_description={summary.get('skipped_no_description', 0)} "
-              f"tailored={summary['tailored']}")
+              f"tailored={summary['tailored']} "
+              f"dup_checked={summary.get('dup_checked', 0)} dup_filtered={summary.get('dup_filtered', 0)}")
         return 0
 
     if args.command == "cron":

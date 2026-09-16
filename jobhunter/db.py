@@ -107,6 +107,19 @@ CREATE TABLE IF NOT EXISTS source_fetch_state (
     last_count        INTEGER DEFAULT 0
 );
 
+-- Cache of LLM verdicts on heuristically-flagged possible-duplicate pairs (see
+-- find_possible_duplicates), keyed with job_id_a < job_id_b so a pair is only
+-- ever checked once regardless of which order the heuristic returns it in.
+CREATE TABLE IF NOT EXISTS duplicate_checks (
+    job_id_a   INTEGER NOT NULL,
+    job_id_b   INTEGER NOT NULL,
+    verdict    TEXT NOT NULL,
+    confidence TEXT NOT NULL DEFAULT '',
+    reason     TEXT DEFAULT '',
+    checked_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (job_id_a, job_id_b)
+);
+
 CREATE TABLE IF NOT EXISTS filter_rules (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     kind       TEXT NOT NULL,          -- negative_kw | company_block
@@ -1144,4 +1157,24 @@ def record_source_fetch(conn: sqlite3.Connection, source: str, count: int) -> No
            ON CONFLICT(source) DO UPDATE SET
              last_attempted_at = datetime('now'), last_count = excluded.last_count""",
         (source, count),
+    )
+
+
+def get_duplicate_check(conn: sqlite3.Connection, job_id_a: int, job_id_b: int) -> sqlite3.Row | None:
+    a, b = sorted((job_id_a, job_id_b))
+    return conn.execute(
+        "SELECT * FROM duplicate_checks WHERE job_id_a = ? AND job_id_b = ?", (a, b)
+    ).fetchone()
+
+
+def record_duplicate_check(conn: sqlite3.Connection, job_id_a: int, job_id_b: int,
+                           verdict: str, confidence: str, reason: str) -> None:
+    a, b = sorted((job_id_a, job_id_b))
+    conn.execute(
+        """INSERT INTO duplicate_checks (job_id_a, job_id_b, verdict, confidence, reason, checked_at)
+           VALUES (?, ?, ?, ?, ?, datetime('now'))
+           ON CONFLICT(job_id_a, job_id_b) DO UPDATE SET
+             verdict = excluded.verdict, confidence = excluded.confidence,
+             reason = excluded.reason, checked_at = excluded.checked_at""",
+        (a, b, verdict, confidence, reason),
     )

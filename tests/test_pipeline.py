@@ -598,8 +598,90 @@ def test_process_backlog_noop_when_provider_unavailable(tmp_db, config, monkeypa
 
     summary = pipeline.process_backlog()
 
-    assert summary == {"enriched": 0, "judged": 0, "skipped_no_description": 0, "tailored": 0}
+    assert summary == {"enriched": 0, "judged": 0, "skipped_no_description": 0, "tailored": 0,
+                       "dup_checked": 0, "dup_filtered": 0}
     assert called == []
+
+
+def _insert_dup_pair(conn, config, description_a=_LONG_REAL_JD, description_b=_LONG_REAL_JD):
+    """Two jobs the heuristic (find_possible_duplicates) will flag as a possible dup:
+    same company, same city, identical title once gender/contract boilerplate (H/F) is
+    stripped. The titles must NOT be byte-for-byte identical after plain normalization
+    (only after de-junking), or upsert_job's own cross-source dedup (_find_content_match,
+    which doesn't strip junk tokens) would silently merge them into a single row instead
+    of creating the two separate rows this test needs."""
+    a = _insert(conn, config, external_id="dup-a", company="DupCo", title="AI Engineer (H/F)",
+               location="Paris, Ile-de-France, France", description=description_a)
+    b = _insert(conn, config, external_id="dup-b", company="DupCo", title="AI Engineer",
+               location="Paris, Ile-de-France, France", description=description_b)
+    return a, b
+
+
+def test_check_duplicates_skips_pair_missing_jd_content(tmp_db, config, monkeypatch):
+    monkeypatch.setattr(pipeline.provider, "available", lambda: True)
+    with db.connect() as conn:
+        _insert_dup_pair(conn, config, description_b="too short")
+    called = []
+    monkeypatch.setattr(pipeline.llm_dedup, "compare", lambda a, b: called.append(1))
+
+    stats = pipeline.check_duplicates()
+
+    assert stats == {"checked": 0, "same": 0, "filtered": 0}
+    assert called == []
+
+
+def test_check_duplicates_caches_verdict_and_never_rechecks(tmp_db, config, monkeypatch):
+    monkeypatch.setattr(pipeline.provider, "available", lambda: True)
+    with db.connect() as conn:
+        a, b = _insert_dup_pair(conn, config)
+    calls = []
+
+    def fake_compare(job_a, job_b):
+        calls.append((job_a.external_id, job_b.external_id))
+        return {"verdict": "different", "confidence": "low", "reason": "distinct teams"}
+
+    monkeypatch.setattr(pipeline.llm_dedup, "compare", fake_compare)
+
+    stats = pipeline.check_duplicates()
+    assert stats == {"checked": 1, "same": 0, "filtered": 0}
+    assert len(calls) == 1
+    with db.connect() as conn:
+        assert db.get_duplicate_check(conn, a, b)["verdict"] == "different"
+
+    pipeline.check_duplicates()   # second call: pair already cached, no re-check
+    assert len(calls) == 1
+
+
+def test_check_duplicates_auto_filters_older_job_on_confident_same_verdict(tmp_db, config, monkeypatch):
+    monkeypatch.setattr(pipeline.provider, "available", lambda: True)
+    with db.connect() as conn:
+        older, newer = _insert_dup_pair(conn, config)
+        conn.execute("UPDATE jobs SET fetched_at = '2020-01-01 00:00:00' WHERE id = ?", (older,))
+        conn.execute("UPDATE jobs SET fetched_at = '2030-01-01 00:00:00' WHERE id = ?", (newer,))
+    monkeypatch.setattr(pipeline.llm_dedup, "compare", lambda a, b:
+                        {"verdict": "same", "confidence": "high", "reason": "identical JD"})
+
+    stats = pipeline.check_duplicates()
+
+    assert stats == {"checked": 1, "same": 1, "filtered": 1}
+    with db.connect() as conn:
+        assert db.get_job(conn, older)["filtered"] == 1
+        assert db.get_job(conn, newer)["filtered"] == 0   # the newer listing is kept
+
+
+def test_check_duplicates_does_not_filter_on_low_confidence_same_verdict(tmp_db, config, monkeypatch):
+    monkeypatch.setattr(pipeline.provider, "available", lambda: True)
+    with db.connect() as conn:
+        a, b = _insert_dup_pair(conn, config)
+    monkeypatch.setattr(pipeline.llm_dedup, "compare", lambda a, b:
+                        {"verdict": "same", "confidence": "medium", "reason": "looks similar"})
+
+    stats = pipeline.check_duplicates()
+
+    assert stats == {"checked": 1, "same": 0, "filtered": 0}
+    with db.connect() as conn:
+        assert db.get_job(conn, a)["filtered"] == 0
+        assert db.get_job(conn, b)["filtered"] == 0
 
 
 def test_tailor_one_and_cover_one_pass_the_judge_context_through(tmp_db, config, monkeypatch):

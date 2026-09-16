@@ -6,6 +6,7 @@ import time
 from . import db, enrich, jd_store, match
 from .apply import cover_letter
 from .config import load_companies, load_search_config
+from .llm import dedup as llm_dedup
 from .llm import judge as llm_judge
 from .llm import provider
 from .notify import dispatch as notify_dispatch
@@ -284,7 +285,7 @@ def daily_run(judge: bool = True, judge_min_score: int = 30, judge_limit: int = 
 
 
 def process_backlog(judge_min_score: int = 30, judge_limit: int = 10,
-                     tailor_limit: int = 10) -> dict:
+                     tailor_limit: int = 10, dedup_limit: int = 10) -> dict:
     """Judge + auto-tailor cycle, decoupled from fetch cadence: sweeps the whole
     backlog (every not-yet-judged job, every judged-but-not-yet-tailored job)
     rather than only the jobs a single run just fetched. Meant to run on its own,
@@ -294,7 +295,8 @@ def process_backlog(judge_min_score: int = 30, judge_limit: int = 10,
     means a quota problem only ever stalls this side, never fetching itself."""
     db.init_db()
     if not provider.available():
-        return {"enriched": 0, "judged": 0, "skipped_no_description": 0, "tailored": 0}
+        return {"enriched": 0, "judged": 0, "skipped_no_description": 0, "tailored": 0,
+                "dup_checked": 0, "dup_filtered": 0}
 
     with db.connect() as conn:
         pending = [dict(r) for r in db.jobs_pending_enrichment_any(conn, judge_limit)]
@@ -312,9 +314,62 @@ def process_backlog(judge_min_score: int = 30, judge_limit: int = 10,
         candidates = [r["id"] for r in db.jobs_ready_for_auto_tailor(conn, tailor_limit)]
     tailored = _auto_tailor_jobs(candidates, tailor_limit)
 
+    dup_stats = check_duplicates(limit=dedup_limit)
+
     return {"enriched": enriched, "judged": judge_stats["judged"],
             "skipped_no_description": judge_stats["skipped_no_description"],
-            "tailored": tailored}
+            "tailored": tailored,
+            "dup_checked": dup_stats["checked"], "dup_filtered": dup_stats["filtered"]}
+
+
+def check_duplicates(limit: int = 10) -> dict:
+    """LLM-compare heuristically-flagged possible-duplicate pairs (db.find_possible_duplicates)
+    using their JD text, cache the verdict so a pair is never re-checked, and auto-filter
+    the older side of a high-confidence 'same' verdict (the newer listing is more likely
+    still open). Skips any pair where either side still lacks real JD content -- a
+    title-only guess isn't reliable enough for a call this consequential."""
+    db.init_db()
+    if not provider.available():
+        return {"checked": 0, "same": 0, "filtered": 0}
+
+    with db.connect() as conn:
+        pairs = db.find_possible_duplicates(conn)
+        todo = []
+        seen = set()
+        for p in pairs:
+            a, b = sorted((p["a"], p["b"]))
+            if (a, b) in seen or db.get_duplicate_check(conn, a, b) is not None:
+                continue
+            seen.add((a, b))
+            row_a, row_b = db.get_job(conn, a), db.get_job(conn, b)
+            if not row_a or not row_b:
+                continue
+            if (len((row_a["description"] or "").strip()) < _MIN_DESCRIPTION_CHARS or
+                    len((row_b["description"] or "").strip()) < _MIN_DESCRIPTION_CHARS):
+                continue
+            todo.append((a, b))
+    todo = todo[:limit]
+
+    checked = same = filtered = 0
+    for a, b in todo:
+        with db.connect() as conn:
+            job_a = db.job_from_row(db.get_job(conn, a))
+            job_b = db.job_from_row(db.get_job(conn, b))
+        try:
+            result = llm_dedup.compare(job_a, job_b)
+        except Exception as exc:
+            print(f"  dedup warn: #{a} vs #{b} failed: {exc}")
+            continue
+        checked += 1
+        with db.connect() as conn:
+            db.record_duplicate_check(conn, a, b, result["verdict"], result["confidence"], result["reason"])
+            if result["verdict"] == "same" and result["confidence"] == "high":
+                same += 1
+                row_a, row_b = db.get_job(conn, a), db.get_job(conn, b)
+                older, newer = (a, b) if row_a["fetched_at"] <= row_b["fetched_at"] else (b, a)
+                db.set_llm_filter(conn, older, f"llm dedup: same posting as #{newer} -- {result['reason']}")
+                filtered += 1
+    return {"checked": checked, "same": same, "filtered": filtered}
 
 
 def enrich_one(job_id: int) -> dict:

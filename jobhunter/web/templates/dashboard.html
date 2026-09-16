@@ -71,7 +71,10 @@
           <div style="font-size:11px; color:var(--danger)">
             {% for other_id in dup_map[j["id"]] %}
               {% set o = dup_jobs.get(other_id) %}
-              ⚠ possible dup of #{{ other_id }}{% if o %} — {{ o["company"] }} ({{ o["status"] }}){% endif %}<br>
+              {% set key = ([j["id"], other_id]|sort)|map("string")|join("-") %}
+              {% set chk = dup_checks.get(key) %}
+              ⚠ possible dup of #{{ other_id }}{% if o %} — {{ o["company"] }} ({{ o["status"] }}){% endif %}
+              {% if chk %}<span title="{{ chk['reason'] }}"> · llm: {{ chk['verdict'] }} ({{ chk['confidence'] }})</span>{% endif %}<br>
             {% endfor %}
           </div>
           {% endif %}</td>
