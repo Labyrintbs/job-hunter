@@ -65,6 +65,22 @@ def test_classify_role_pm(config):
     assert classify_role("Technical Product Manager", "", config) == "PM"
 
 
+def test_classify_role_cv_synonyms(config):
+    # Regression: role_categories.CV originally only had "computer vision"/"opencv"/
+    # etc -- real CV postings often use these synonyms instead, and title alone
+    # ("Machine Learning Engineer") gives no signal, so the description must count.
+    assert classify_role("Machine Learning Engineer", "deep learning for medical imaging", config) == "CV"
+    assert classify_role("Robotics Engineer", "building a SLAM pipeline", config) == "CV"
+    assert classify_role("Research Engineer", "3D reconstruction from multi-view images", config) == "CV"
+
+
+def test_cv_synonym_keywords_boost_score(config):
+    with_signal = screen(J(title="Machine Learning Engineer",
+                           desc="We train segmentation models using point cloud and medical imaging data."), config)
+    without_signal = screen(J(title="Machine Learning Engineer", desc="We train models."), config)
+    assert with_signal.score > without_signal.score
+
+
 def test_paris_ranks_above_other_france(config):
     paris = screen(J(loc="Paris, Ile-de-France, France"), config).score
     other = screen(J(loc="Bordeaux, Nouvelle-Aquitaine, France"), config).score

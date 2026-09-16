@@ -618,6 +618,53 @@ def test_rejudge_juniors_respects_limit(tmp_db, config, monkeypatch):
     assert summary["rejudged"] == 2
 
 
+def test_rescreen_all_updates_pre_judgment_job_and_can_unfilter(tmp_db, config):
+    with db.connect() as conn:
+        jid = _insert(conn, config, external_id="rs1", title="Machine Learning Engineer",
+                     description="We build segmentation models using point cloud data.")
+        # Seed a stale score/filtered/category as if screened before the config changed.
+        conn.execute("UPDATE jobs SET score=10, filtered=1, filter_reason='score<20', "
+                     "role_category='ML/DL' WHERE id=?", (jid,))
+
+    summary = pipeline.rescreen_all()
+
+    assert summary["rescreened"] == 1
+    assert summary["unfiltered"] == 1
+    with db.connect() as conn:
+        row = db.get_job(conn, jid)
+    assert row["score"] > 10
+    assert row["filtered"] == 0
+    assert row["role_category"] == "CV"
+
+
+def test_rescreen_all_only_relabels_already_judged_jobs(tmp_db, config):
+    with db.connect() as conn:
+        jid = _insert(conn, config, external_id="rs2", title="Machine Learning Engineer",
+                     description="We build segmentation models using point cloud data.")
+        conn.execute("UPDATE jobs SET score=10, filtered=1, filter_reason='llm judge: weak fit', "
+                     "role_category='ML/DL', llm_score=15, llm_verdict='weak' WHERE id=?", (jid,))
+
+    summary = pipeline.rescreen_all()
+
+    assert summary["recategorized"] == 1
+    assert summary["rescreened"] == 0   # not touched -- only pre-judgment jobs get a full rescreen
+    with db.connect() as conn:
+        row = db.get_job(conn, jid)
+    assert row["score"] == 10           # untouched: LLM verdict is authoritative here
+    assert row["filtered"] == 1         # untouched
+    assert row["role_category"] == "CV"   # only the label refreshed
+
+
+def test_rescreen_all_is_noop_when_nothing_changed(tmp_db, config):
+    with db.connect() as conn:
+        _insert(conn, config, external_id="rs3", description=_LONG_REAL_JD)
+
+    summary = pipeline.rescreen_all()
+
+    assert summary["rescreened"] == 0
+    assert summary["recategorized"] == 0
+
+
 def test_process_backlog_judges_and_tailors_the_whole_backlog(tmp_db, config, monkeypatch):
     """Unlike daily_run, process_backlog isn't scoped to "new this run" -- these
     jobs are pre-existing DB rows, inserted directly (bypassing _gather/run_fetch

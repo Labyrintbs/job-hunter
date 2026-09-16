@@ -574,6 +574,54 @@ def rejudge_juniors(limit: int | None = None) -> dict:
     return {"rescreened": len(pre_judge_rows), "rejudged": rejudged, "unfiltered": unfiltered}
 
 
+def rescreen_all() -> dict:
+    """Re-run rule-based screening for every stored job against the *current*
+    config -- for catching up after a role_keywords/boost_keywords/role_categories
+    change (e.g. expanding Computer Vision's keyword coverage) that should have
+    applied retroactively. Jobs the LLM has already judged (llm_score set) keep
+    their score/filtered status untouched -- the LLM verdict is the authoritative
+    signal there (see judge_one/set_llm_filter), a rule-score refresh must never
+    override it -- only their role_category label is refreshed (cosmetic, changes
+    only the dashboard's Category column). Pre-judgment jobs get a full rescreen:
+    score, reasons, filtered, role_category."""
+    db.init_db()
+    config = load_search_config()
+
+    with db.connect() as conn:
+        rows = conn.execute("SELECT * FROM jobs").fetchall()
+
+    rescreened = unfiltered = newly_filtered = recategorized = 0
+    category_counts: dict[str, int] = {}
+    for row in rows:
+        job = db.job_from_row(row)
+        s = match.screen(job, config)
+        if row["llm_score"] is None:
+            if (row["score"], bool(row["filtered"]), row["role_category"]) == \
+                    (s.score, s.filtered, s.role_category):
+                continue
+            was_filtered = bool(row["filtered"])
+            with db.connect() as conn:
+                db.update_screening(conn, row["id"], s.score, s.reasons, filtered=s.filtered,
+                                    filter_reason=s.filter_reason, seniority=s.seniority,
+                                    min_years=s.min_years, role_category=s.role_category)
+            rescreened += 1
+            if was_filtered and not s.filtered:
+                unfiltered += 1
+            elif not was_filtered and s.filtered:
+                newly_filtered += 1
+        elif row["role_category"] != s.role_category:
+            with db.connect() as conn:
+                conn.execute("UPDATE jobs SET role_category = ? WHERE id = ?",
+                            (s.role_category, row["id"]))
+            recategorized += 1
+        else:
+            continue
+        category_counts[s.role_category] = category_counts.get(s.role_category, 0) + 1
+
+    return {"rescreened": rescreened, "unfiltered": unfiltered, "newly_filtered": newly_filtered,
+            "recategorized": recategorized, "category_counts": category_counts}
+
+
 def judge_all(min_score: int = 40, limit: int | None = None) -> dict:
     """Judge every stored job at/above a rule-score threshold that isn't judged yet.
     Skips jobs with no real JD content rather than burning a call on a title-only guess --
