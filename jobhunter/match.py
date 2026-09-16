@@ -288,7 +288,7 @@ def screen(job: Job, config: dict) -> Screening:
         flags.append(f"requires {min_years}+ yrs")
     if config.get("citizenship_gate", True) and has_citizenship_requirement(_text(job)):
         flags.append("citizenship/eligibility requirement")
-    if pts < config.get("min_score", 0):
+    if seniority != "junior" and pts < config.get("min_score", 0):
         flags.append(f"score<{config.get('min_score', 0)}")
 
     rule_flags, matched = _apply_rules(job, config)

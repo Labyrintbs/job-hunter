@@ -86,6 +86,16 @@ def test_junior_title_survives_even_with_years(config):
     assert s.seniority == "junior"
 
 
+def test_junior_title_exempt_from_min_score_gate(config):
+    cfg = {**config, "min_score": 999}   # force everything below threshold
+    junior = screen(J(title="Junior Machine Learning Engineer"), cfg)
+    assert junior.filtered is False   # exempt, same precedent as the years gate
+
+    non_junior = screen(J(title="Machine Learning Engineer"), cfg)
+    assert non_junior.filtered is True
+    assert "score<999" in non_junior.filter_reason
+
+
 def test_too_many_years_filtered(config):
     s = screen(J(title="Machine Learning Engineer",
                  desc="We need at least 6 years of experience in production ML."), config)
