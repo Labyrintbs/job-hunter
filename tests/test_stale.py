@@ -44,3 +44,20 @@ def test_threshold_is_configurable(tmp_db):
         _set_seen(conn, jid, "2026-01-25 00:00:00")   # 7 days behind latest run
         assert db.list_jobs(conn, filtered=None, staleness_days=14)[0]["is_stale"] == 0
         assert db.list_jobs(conn, filtered=None, staleness_days=5)[0]["is_stale"] == 1
+
+
+def test_stuck_enrichment_count_only_counts_exhausted_retries(tmp_db):
+    with db.connect() as conn:
+        stuck, _ = db.upsert_job(conn, J("1", title="ML Engineer A"), 60, "r")
+        conn.execute("UPDATE jobs SET description_full=0, enrich_attempts=? WHERE id=?",
+                     (db.MAX_ENRICH_ATTEMPTS, stuck))
+
+        not_yet_tried, _ = db.upsert_job(conn, J("2", title="ML Engineer B"), 60, "r")
+        conn.execute("UPDATE jobs SET description_full=0, enrich_attempts=0 WHERE id=?",
+                     (not_yet_tried,))
+
+        enriched, _ = db.upsert_job(conn, J("3", title="ML Engineer C"), 60, "r")
+        conn.execute("UPDATE jobs SET description_full=1, enrich_attempts=? WHERE id=?",
+                     (db.MAX_ENRICH_ATTEMPTS, enriched))
+
+        assert db.stuck_enrichment_count(conn) == 1

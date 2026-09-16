@@ -796,6 +796,18 @@ def stale_count(conn: sqlite3.Connection, staleness_days: int = 14) -> int:
     ).fetchone()[0]
 
 
+def stuck_enrichment_count(conn: sqlite3.Connection) -> int:
+    """Jobs that exhausted every enrichment retry (see MAX_ENRICH_ATTEMPTS) and still
+    have no real JD text -- permanently un-enrichable (delisted, or a JS-rendered
+    career page a static fetch can't read), distinct from the much larger set that
+    just hasn't been attempted yet."""
+    return conn.execute(
+        "SELECT COUNT(*) FROM jobs WHERE COALESCE(description_full, 0) = 0 "
+        "AND COALESCE(enrich_attempts, 0) >= ?",
+        (MAX_ENRICH_ATTEMPTS,),
+    ).fetchone()[0]
+
+
 def labeled_jobs(conn: sqlite3.Connection, label: str) -> list[sqlite3.Row]:
     """All jobs carrying an explicit label ('interested' or 'dismissed'), for learning."""
     return conn.execute(

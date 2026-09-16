@@ -32,3 +32,26 @@ def test_stale_pill_shows_stale_jobs_even_when_filtered_or_dismissed(tmp_db):
     assert resp.status_code == 200
     assert "Filtered Stale Job" in resp.text
     assert "Dismissed Stale Job" in resp.text
+
+
+def test_stuck_pill_shows_unenrichable_jobs_even_when_filtered_or_dismissed(tmp_db):
+    with db.connect() as conn:
+        filtered_id, _ = db.upsert_job(conn, J("1", title="Filtered No-JD Job"), 60, "r")
+        db.set_filtered(conn, filtered_id, True, "requires 5+ yrs")
+        dismissed_id, _ = db.upsert_job(conn, J("2", title="Dismissed No-JD Job"), 60, "r")
+        db.set_feedback(conn, dismissed_id, "dismissed")
+        conn.execute(
+            "UPDATE jobs SET description_full=0, enrich_attempts=? WHERE id IN (?, ?)",
+            (db.MAX_ENRICH_ATTEMPTS, filtered_id, dismissed_id),
+        )
+        not_yet_tried_id, _ = db.upsert_job(conn, J("3", title="Fresh Untried Job"), 60, "r")
+        conn.execute("UPDATE jobs SET description_full=0, enrich_attempts=0 WHERE id=?",
+                     (not_yet_tried_id,))
+
+    client = TestClient(app)
+    resp = client.get("/", params={"stuck": 1})
+
+    assert resp.status_code == 200
+    assert "Filtered No-JD Job" in resp.text
+    assert "Dismissed No-JD Job" in resp.text
+    assert "Fresh Untried Job" not in resp.text   # only exhausted retries, not just untried

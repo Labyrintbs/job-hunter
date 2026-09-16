@@ -8,19 +8,20 @@
   {% endfor %}
   {% if active_status %}<a class="pill" href="/{{ ('?' + sort_qs[1:]) if sort_qs else '' }}">✕ clear</a>{% endif %}
   <span class="grow"></span>
-  {% if filtered or dismissed or stale or interested %}
+  {% if filtered or dismissed or stale or interested or stuck %}
     <a class="pill" href="/{{ ('?' + sort_qs[1:]) if sort_qs else '' }}" style="border-color:var(--accent)">← back to main list</a>
   {% else %}
     <a class="pill" href="/?filtered=1{{ sort_qs }}" title="auto-hidden: senior / too many years / low score">🕳 filtered · {{ n_filtered }}</a>
     <a class="pill" href="/?dismissed=1{{ sort_qs }}" title="jobs you explicitly rejected">👎 dismissed · {{ n_dismissed }}</a>
     <a class="pill" href="/?interested=1{{ sort_qs }}" title="jobs you liked — track your applications here">👍 liked · {{ n_interested }}</a>
     <a class="pill" href="/?stale=1{{ sort_qs }}" title="not seen in recent fetches — posting likely taken down"{% if n_stale %} style="border-color:var(--danger)"{% endif %}>⚠ stale · {{ n_stale }}</a>
+    <a class="pill" href="/?stuck=1{{ sort_qs }}" title="JD couldn't be auto-fetched after 3 tries — delisted, or a JS-rendered page; check manually"{% if n_stuck %} style="border-color:var(--danger)"{% endif %}>📄 no JD · {{ n_stuck }}</a>
   {% endif %}
   <span class="muted">sort</span>
   <a class="pill{% if not sort or sort == 'score' %} on{% endif %}"
-     href="/?{% if active_status %}status={{ active_status }}&{% endif %}{% if min_score %}min_score={{ min_score }}&{% endif %}{% if filtered %}filtered=1&{% endif %}{% if dismissed %}dismissed=1&{% endif %}{% if stale %}stale=1&{% endif %}{% if interested %}interested=1&{% endif %}sort=score">score</a>
+     href="/?{% if active_status %}status={{ active_status }}&{% endif %}{% if min_score %}min_score={{ min_score }}&{% endif %}{% if filtered %}filtered=1&{% endif %}{% if dismissed %}dismissed=1&{% endif %}{% if stale %}stale=1&{% endif %}{% if interested %}interested=1&{% endif %}{% if stuck %}stuck=1&{% endif %}sort=score">score</a>
   <a class="pill{% if sort == 'fetched_at' %} on{% endif %}"
-     href="/?{% if active_status %}status={{ active_status }}&{% endif %}{% if min_score %}min_score={{ min_score }}&{% endif %}{% if filtered %}filtered=1&{% endif %}{% if dismissed %}dismissed=1&{% endif %}{% if stale %}stale=1&{% endif %}{% if interested %}interested=1&{% endif %}sort=fetched_at">newest added</a>
+     href="/?{% if active_status %}status={{ active_status }}&{% endif %}{% if min_score %}min_score={{ min_score }}&{% endif %}{% if filtered %}filtered=1&{% endif %}{% if dismissed %}dismissed=1&{% endif %}{% if stale %}stale=1&{% endif %}{% if interested %}interested=1&{% endif %}{% if stuck %}stuck=1&{% endif %}sort=fetched_at">newest added</a>
   <form method="get" style="margin:0; display:flex; gap:8px; align-items:center;">
     <label class="muted">min score</label>
     <input type="number" name="min_score" value="{{ min_score }}" style="width:70px; background:var(--panel); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:5px;">

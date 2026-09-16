@@ -24,9 +24,9 @@ def _startup() -> None:
 @app.get("/", response_class=HTMLResponse)
 def dashboard(request: Request, status: str | None = None, min_score: int = 0,
               filtered: int = 0, dismissed: int = 0, stale: int = 0,
-              interested: int = 0, sort: str = "score", q: str = ""):
+              interested: int = 0, stuck: int = 0, sort: str = "score", q: str = ""):
     days = load_search_config().get("staleness_days", 14)
-    exclude = ("unavailable", "rejected") if not (status or dismissed or interested or filtered or stale) else ()
+    exclude = ("unavailable", "rejected") if not (status or dismissed or interested or filtered or stale or stuck) else ()
     sort = sort if sort in db.SORT_ORDERS else "score"
     q = q.strip()
     with db.connect() as conn:
@@ -44,11 +44,12 @@ def dashboard(request: Request, status: str | None = None, min_score: int = 0,
                                 filtered=None, dismissed=None, interested=True,
                                 staleness_days=days, exclude_statuses=exclude, sort=sort)
         else:
-            # explicitly picking a status (e.g. the "unavailable" pill) or the stale pill
-            # should show every matching job regardless of filtered/dismissed/interested
-            # labels -- otherwise the count badge (status_counts / n_stale, both computed
-            # without those restrictions) doesn't match what's shown.
-            bypass = bool(status) or bool(stale)
+            # explicitly picking a status (e.g. the "unavailable" pill), the stale pill,
+            # or the stuck-enrichment pill should show every matching job regardless of
+            # filtered/dismissed/interested labels -- otherwise the count badge
+            # (status_counts / n_stale / n_stuck, all computed without those
+            # restrictions) doesn't match what's shown.
+            bypass = bool(status) or bool(stale) or bool(stuck)
             jobs = db.list_jobs(conn, status=status or None, min_score=min_score,
                                 filtered=None if bypass else filtered,
                                 dismissed=None if bypass else False,
@@ -56,11 +57,15 @@ def dashboard(request: Request, status: str | None = None, min_score: int = 0,
                                 staleness_days=days, exclude_statuses=exclude, sort=sort)
         if stale:
             jobs = [j for j in jobs if j["is_stale"]]
+        if stuck:
+            jobs = [j for j in jobs
+                    if not j["description_full"] and j["enrich_attempts"] >= db.MAX_ENRICH_ATTEMPTS]
         counts = db.status_counts(conn)
         n_filtered = db.filtered_count(conn)
         n_dismissed = db.dismissed_count(conn)
         n_stale = db.stale_count(conn, days)
         n_interested = db.interested_count(conn)
+        n_stuck = db.stuck_enrichment_count(conn)
         dup_map = db.possible_duplicates_map(conn)
         dup_ids = {i for ids in dup_map.values() for i in ids}
         dup_jobs = {}
@@ -94,12 +99,14 @@ def dashboard(request: Request, status: str | None = None, min_score: int = 0,
             "dismissed": dismissed,
             "stale": stale,
             "interested": interested,
+            "stuck": stuck,
             "sort": sort,
             "q": q,
             "n_filtered": n_filtered,
             "n_dismissed": n_dismissed,
             "n_stale": n_stale,
             "n_interested": n_interested,
+            "n_stuck": n_stuck,
             "dismiss_reasons": db.DISMISS_REASONS,
             "total": sum(counts.values()),
             "llm_available": provider.available(),
