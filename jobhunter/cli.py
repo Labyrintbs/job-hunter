@@ -8,8 +8,8 @@ from .config import DB_PATH, load_search_config
 from .llm import provider
 from .notify import dispatch as notify_dispatch
 from .pipeline import (cover_one, daily_run, enrich_one, enrich_pending, import_revised_cv,
-                       judge_all, judge_one, process_backlog, rejudge_juniors, rescreen_all,
-                       run_fetch, tailor_one)
+                       judge_all, judge_one, process_backlog, rejudge_category, rejudge_juniors,
+                       rescreen_all, run_fetch, tailor_one)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -95,6 +95,12 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("rescreen-all", help="one-off catch-up: re-run rule-based screening for "
                                         "every stored job against the current config (e.g. "
                                         "after a role_keywords/boost_keywords change)")
+
+    p_rejudge_category = sub.add_parser("rejudge-category", help="one-off catch-up: rejudge "
+                                        "every 'weak'-verdict job in a role_category (NLP/CV/"
+                                        "AI/ML-DL/PM) after a judge-prompt or scoring change")
+    p_rejudge_category.add_argument("category", help="role_category value, e.g. CV")
+    p_rejudge_category.add_argument("--limit", type=int, default=None)
 
     p_watchdog = sub.add_parser("watchdog", help="self-heal: refetch if the last run is "
                                 "older than --max-gap-hours (cron target)")
@@ -262,6 +268,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"rescreened={summary['rescreened']} unfiltered={summary['unfiltered']} "
               f"newly_filtered={summary['newly_filtered']} recategorized={summary['recategorized']}")
         print(f"category counts among touched jobs: {summary['category_counts']}")
+        return 0
+
+    if args.command == "rejudge-category":
+        summary = rejudge_category(args.category, limit=args.limit)
+        print(f"rejudged={summary['rejudged']} unfiltered={summary['unfiltered']}")
         return 0
 
     if args.command == "cron":

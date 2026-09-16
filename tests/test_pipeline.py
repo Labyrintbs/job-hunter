@@ -618,6 +618,44 @@ def test_rejudge_juniors_respects_limit(tmp_db, config, monkeypatch):
     assert summary["rejudged"] == 2
 
 
+def test_rejudge_category_rejudges_weak_verdicts_in_that_category_only(tmp_db, config, monkeypatch):
+    with db.connect() as conn:
+        cv_jid = _insert(conn, config, external_id="rc1", company="CVCo", description=_LONG_REAL_JD)
+        conn.execute("UPDATE jobs SET llm_verdict='weak', role_category='CV', filtered=1, "
+                     "filter_reason='llm judge: weak fit' WHERE id=?", (cv_jid,))
+        other_jid = _insert(conn, config, external_id="rc2", company="OtherCo", description=_LONG_REAL_JD)
+        conn.execute("UPDATE jobs SET llm_verdict='weak', role_category='ML/DL', filtered=1, "
+                     "filter_reason='llm judge: weak fit' WHERE id=?", (other_jid,))
+    called = []
+    monkeypatch.setattr(pipeline.llm_judge, "judge",
+                        lambda job, preferences="": called.append(job.external_id) or
+                        {"score": 60, "verdict": "stretch", "seniority": "junior",
+                         "min_years": 0, "reasons": "ok now"})
+
+    summary = pipeline.rejudge_category("CV")
+
+    assert summary == {"rejudged": 1, "unfiltered": 1}
+    assert called == ["rc1"]   # the ML/DL job was never touched
+    with db.connect() as conn:
+        assert db.get_job(conn, cv_jid)["filtered"] == 0
+        assert db.get_job(conn, other_jid)["filtered"] == 1
+
+
+def test_rejudge_category_skips_dismissed_and_interested_labels(tmp_db, config, monkeypatch):
+    with db.connect() as conn:
+        jid = _insert(conn, config, external_id="rc3", description=_LONG_REAL_JD)
+        conn.execute("UPDATE jobs SET llm_verdict='weak', role_category='CV', filtered=1, "
+                     "filter_reason='llm judge: weak fit', user_label='interested' WHERE id=?",
+                     (jid,))
+    called = []
+    monkeypatch.setattr(pipeline.llm_judge, "judge", lambda job, preferences="": called.append(1))
+
+    summary = pipeline.rejudge_category("CV")
+
+    assert summary == {"rejudged": 0, "unfiltered": 0}
+    assert called == []
+
+
 def test_rescreen_all_updates_pre_judgment_job_and_can_unfilter(tmp_db, config):
     with db.connect() as conn:
         jid = _insert(conn, config, external_id="rs1", title="Machine Learning Engineer",

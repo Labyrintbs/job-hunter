@@ -509,13 +509,42 @@ _LLM_WEAK_FILTER_REASON = "llm judge: weak fit"
 _SCORE_REASON_RE = re.compile(r"^score<\d+$")
 
 
-def _only_junior_exempt_reasons(reason: str) -> bool:
-    """True if every '; '-joined flag in a filter_reason is one this function's junior
-    exemptions have made moot (the old weak verdict, or the old min_score gate) -- i.e.
-    safe to unhide on an improved verdict. A job also blocked by anything else (a
+def _only_stale_gate_reasons(reason: str) -> bool:
+    """True if every '; '-joined flag in a filter_reason is one a rejudge can make
+    moot (the old weak verdict, or the old rule-based min_score gate) -- i.e. safe
+    to unhide on an improved verdict. A job also blocked by anything else (a
     citizenship hard disqualifier, a learned rule, ...) must stay filtered."""
     parts = [p.strip() for p in reason.split(";") if p.strip()]
     return all(p == _LLM_WEAK_FILTER_REASON or _SCORE_REASON_RE.match(p) for p in parts)
+
+
+def _rejudge_weak_verdicts(where_sql: str, params: tuple, limit: int | None) -> dict:
+    """Shared engine behind rejudge_juniors/rejudge_category: rejudge every
+    llm_verdict='weak' job matching an extra WHERE clause, unhiding on an improved
+    verdict only if the old filter_reason was solely made-moot flags (see
+    _only_stale_gate_reasons). Skips dismissed/interested jobs -- never overrides
+    a human label."""
+    label_filter = "AND COALESCE(user_label,'') NOT IN ('dismissed','interested')"
+    with db.connect() as conn:
+        weak_rows = conn.execute(
+            f"SELECT id, filter_reason FROM jobs WHERE llm_verdict = 'weak' {where_sql} {label_filter}",
+            params,
+        ).fetchall()
+    old_reason_by_id = {r["id"]: (r["filter_reason"] or "").strip() for r in weak_rows}
+    ids = list(old_reason_by_id)
+    if limit:
+        ids = ids[:limit]
+
+    rejudged = unfiltered = 0
+    for jid in ids:
+        result = judge_one(jid)
+        rejudged += 1
+        if (result.get("verdict") and result["verdict"] != "weak"
+                and _only_stale_gate_reasons(old_reason_by_id[jid])):
+            with db.connect() as conn:
+                db.set_filtered(conn, jid, False, "")
+            unfiltered += 1
+    return {"rejudged": rejudged, "unfiltered": unfiltered}
 
 
 def rejudge_juniors(limit: int | None = None) -> dict:
@@ -551,27 +580,21 @@ def rejudge_juniors(limit: int | None = None) -> dict:
                                     min_years=s.min_years, role_category=s.role_category)
             unfiltered += 1
 
-    with db.connect() as conn:
-        weak_rows = conn.execute(
-            f"""SELECT id, filter_reason FROM jobs WHERE llm_verdict = 'weak'
-                AND seniority = 'junior' {label_filter}"""
-        ).fetchall()
-    old_reason_by_id = {r["id"]: (r["filter_reason"] or "").strip() for r in weak_rows}
-    weak_ids = list(old_reason_by_id)
-    if limit:
-        weak_ids = weak_ids[:limit]
+    weak = _rejudge_weak_verdicts("AND seniority = 'junior'", (), limit)
+    unfiltered += weak["unfiltered"]
+    return {"rescreened": len(pre_judge_rows), "rejudged": weak["rejudged"], "unfiltered": unfiltered}
 
-    rejudged = 0
-    for jid in weak_ids:
-        result = judge_one(jid)
-        rejudged += 1
-        if (result.get("verdict") and result["verdict"] != "weak"
-                and _only_junior_exempt_reasons(old_reason_by_id[jid])):
-            with db.connect() as conn:
-                db.set_filtered(conn, jid, False, "")
-            unfiltered += 1
 
-    return {"rescreened": len(pre_judge_rows), "rejudged": rejudged, "unfiltered": unfiltered}
+def rejudge_category(role_category: str, limit: int | None = None) -> dict:
+    """One-off catch-up: rejudge every job in a role_category that's currently
+    judged 'weak', for after a judge-prompt or scoring-config change that should
+    apply retroactively (e.g. treating Computer Vision as a co-equal specialization
+    rather than an off-target domain, or expanding boost_keywords/role_categories
+    coverage via rescreen_all). Same unfilter-safety rule as rejudge_juniors --
+    only unhides a job whose old filter_reason was solely stale weak-verdict/
+    score-gate flags. Skips dismissed/interested jobs."""
+    db.init_db()
+    return _rejudge_weak_verdicts("AND role_category = ?", (role_category,), limit)
 
 
 def rescreen_all() -> dict:
