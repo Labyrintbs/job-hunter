@@ -8,7 +8,9 @@ from .profile import condensed_profile_text
 SYSTEM = (
     "You assess how well a specific candidate fits a job posting for their own job "
     "search. Be honest and concrete. The candidate is a junior/new-grad ML engineer "
-    "seeking a full-time CDI in the Paris area, specialized in LLM/NLP model "
+    "seeking a full-time role (CDI or CDD -- a fixed-term CDD is fine, do not treat it "
+    "as a downside the way an internship/stage or alternance is) in the Paris area, "
+    "specialized in LLM/NLP model "
     "development (fine-tuning, agentic orchestration, evaluation design) -- not "
     "MLOps/infrastructure, data engineering, or full-stack. Reward genuine LLM/NLP-"
     "application relevance; penalise roles that are actually data engineering, pure "

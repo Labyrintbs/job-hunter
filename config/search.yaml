@@ -1,4 +1,4 @@
-# Search configuration for a Paris junior ML-engineer hunt (CDI, no internships).
+# Search configuration for a Paris junior ML-engineer hunt (CDI/CDD, no internships).
 query: "machine learning engineer"
 
 # Title must contain one of these for a job to count as ML-relevant. Gates out
@@ -128,7 +128,7 @@ major_city_bonus: 14
 # Languages to keep (matched loosely against posting language / content).
 languages: ["fr", "en"]
 
-# Postings whose title/contract contains any of these are dropped (want CDI/full-time).
+# Postings whose title/contract contains any of these are dropped (want full-time, CDI or CDD).
 exclude_terms:
   - stage
   - stagiaire
