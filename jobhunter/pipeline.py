@@ -22,6 +22,10 @@ def _fetch_wttj(config: dict) -> list:
     for q in queries:
         jobs += wttj.fetch(query=q, max_hits=config.get("max_hits", 100),
                             country=(config.get("countries") or ["France"])[0])
+    if wt.get("fetch_europe_remote", True):
+        for q in queries:
+            jobs += wttj.fetch(query=q, max_hits=wt.get("europe_remote_max_hits", 100),
+                                remote_only=True, extra_countries=config.get("europe_countries", []))
     return jobs
 
 
@@ -29,14 +33,27 @@ def _fetch_linkedin(config: dict) -> list:
     li = config.get("linkedin") or {}
     if not li.get("enabled"):
         return []
-    return linkedin.fetch(
-        queries=li.get("queries") or [config["query"]],
+    queries = li.get("queries") or [config["query"]]
+    jobs = linkedin.fetch(
+        queries=queries,
         locations=li.get("locations") or ["Paris, France"],
         max_pages=li.get("max_pages", 5),
         recent_hours=li.get("recent_hours", 168),
         max_retries=li.get("max_retries", 3),
         backoff_base=li.get("backoff_seconds", 2.0),
     )
+    er = li.get("europe_remote") or {}
+    if er.get("enabled", True):
+        jobs += linkedin.fetch(
+            queries=queries,
+            locations=er.get("locations", ["Europe"]),
+            max_pages=er.get("max_pages", 5),
+            recent_hours=li.get("recent_hours", 168),
+            max_retries=li.get("max_retries", 3),
+            backoff_base=li.get("backoff_seconds", 2.0),
+            workplace_type=er.get("workplace_type", "2"),
+        )
+    return jobs
 
 
 def _fetch_francetravail(config: dict) -> list:
@@ -170,6 +187,7 @@ def run_fetch(config: dict | None = None, jobs: list | None = None, force: bool 
             "new_idf": tier_new["idf"], "new_major_city": tier_new.get("major_city", 0),
             "new_france": tier_new["france"],
             "new_remote": tier_new["remote"], "new_outside": tier_new["outside"],
+            "new_europe_remote": tier_new.get("europe_remote", 0),
         }
         db.add_fetch_run(conn, stats)
     return stats
@@ -645,13 +663,27 @@ def rescreen_all() -> dict:
             "recategorized": recategorized, "category_counts": category_counts}
 
 
+def _permanently_unfetchable(row) -> bool:
+    """True once a job has exhausted every enrichment retry (see MAX_ENRICH_ATTEMPTS)
+    and still has no real JD text -- it will never pass judge_one's description-length
+    gate, so leaving it in the queue would just have it silently reoccupy a limit slot
+    every single run, forever, ahead of anything genuinely judgeable."""
+    return (not row["description_full"]
+            and (row["enrich_attempts"] or 0) >= db.MAX_ENRICH_ATTEMPTS)
+
+
 def judge_all(min_score: int = 40, limit: int | None = None) -> dict:
     """Judge every stored job at/above a rule-score threshold that isn't judged yet.
     Skips jobs with no real JD content rather than burning a call on a title-only guess --
-    see judge_one's _MIN_DESCRIPTION_CHARS gate."""
+    see judge_one's _MIN_DESCRIPTION_CHARS gate. Jobs that will never get real JD content
+    (enrichment permanently exhausted) are excluded from the queue entirely, rather than
+    just skipped call-by-call -- otherwise a high rule-score but permanently-unfetchable
+    job sits at the front of the score-ordered queue forever, crowding out real candidates
+    behind it every run."""
     db.init_db()
     with db.connect() as conn:
-        rows = [r for r in db.list_jobs(conn, min_score=min_score) if r["llm_score"] is None]
+        rows = [r for r in db.list_jobs(conn, min_score=min_score)
+                if r["llm_score"] is None and not _permanently_unfetchable(r)]
     if limit:
         rows = rows[:limit]
     judged = 0

@@ -51,12 +51,15 @@ def _location(hit: dict) -> str:
 
 
 def _to_job(hit: dict) -> Job:
+    location = _location(hit)
+    if hit.get("remote") == "fulltime" and "remote" not in location.lower():
+        location = f"{location} - Remote" if location else "Remote"
     return Job(
         source="wttj",
         external_id=str(hit.get("objectID") or hit.get("reference") or hit.get("slug")),
         title=hit.get("name", "") or "",
         company=(hit.get("organization") or {}).get("name", "") or "",
-        location=_location(hit),
+        location=location,
         language=hit.get("language", "") or "",
         url=_job_url(hit),
         description=(hit.get("profile") or "")[:5000],
@@ -65,7 +68,13 @@ def _to_job(hit: dict) -> Job:
     )
 
 
-def fetch(query: str, max_hits: int = 100, country: str = "France") -> list[Job]:
+def fetch(
+    query: str,
+    max_hits: int = 100,
+    country: str = "France",
+    remote_only: bool = False,
+    extra_countries: list[str] | None = None,
+) -> list[Job]:
     jobs: list[Job] = []
     page = 0
     with httpx.Client(timeout=20.0) as client:
@@ -75,7 +84,12 @@ def fetch(query: str, max_hits: int = 100, country: str = "France") -> list[Job]
                 "hitsPerPage": HITS_PER_PAGE,
                 "page": page,
             }
-            if country:
+            if remote_only:
+                facet_filters: list = [["remote:fulltime"]]
+                if extra_countries:
+                    facet_filters.append([f"offices.country:{c}" for c in extra_countries])
+                body["facetFilters"] = facet_filters
+            elif country:
                 body["facetFilters"] = [[f"offices.country:{country}"]]
             resp = client.post(
                 QUERY_URL, params=_AGENT, headers=_HEADERS, content=json.dumps(body)

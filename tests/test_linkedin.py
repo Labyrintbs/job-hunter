@@ -105,3 +105,52 @@ def test_fetch_gives_up_after_max_retries(monkeypatch):
     jobs = linkedin.fetch(["ml"], ["Paris"], max_pages=1, max_retries=2, backoff_base=0.01)
     assert jobs == []
     assert len(client.urls) == 3   # initial + 2 retries, then gave up
+
+
+def test_workplace_type_param_added_when_set(monkeypatch):
+    monkeypatch.setattr(linkedin.time, "sleep", lambda *_: None)
+    client = _Client([])
+
+    class _CM:
+        def __enter__(self):
+            return client
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(linkedin.httpx, "Client", lambda *a, **k: _CM())
+    linkedin.fetch(["ml"], ["Europe"], max_pages=1, workplace_type="2")
+    assert "f_WT=2" in client.urls[0]
+
+
+def test_remote_pass_tags_location_with_remote_suffix(monkeypatch):
+    monkeypatch.setattr(linkedin.time, "sleep", lambda *_: None)
+    client = _Client([_Resp(200, CARD)])
+
+    class _CM:
+        def __enter__(self):
+            return client
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(linkedin.httpx, "Client", lambda *a, **k: _CM())
+    jobs = linkedin.fetch(["ml"], ["Europe"], max_pages=1, workplace_type="2")
+    assert len(jobs) == 1
+    assert jobs[0].location == "Levallois-Perret, Île-de-France, France - Remote"
+
+
+def test_no_remote_suffix_when_workplace_type_unset(monkeypatch):
+    monkeypatch.setattr(linkedin.time, "sleep", lambda *_: None)
+    client = _Client([_Resp(200, CARD)])
+
+    class _CM:
+        def __enter__(self):
+            return client
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(linkedin.httpx, "Client", lambda *a, **k: _CM())
+    jobs = linkedin.fetch(["ml"], ["Paris"], max_pages=1)
+    assert jobs[0].location == "Levallois-Perret, Île-de-France, France"

@@ -88,10 +88,65 @@ def test_fetch_wttj_loops_over_configured_queries(monkeypatch):
 
     monkeypatch.setattr(pipeline.wttj, "fetch", fake_fetch)
     cfg = {"query": "machine learning engineer", "max_hits": 100, "countries": ["France"],
-           "wttj": {"queries": ["machine learning engineer", "nlp engineer"]}}
+           "wttj": {"queries": ["machine learning engineer", "nlp engineer"],
+                     "fetch_europe_remote": False}}
     jobs = pipeline._fetch_wttj(cfg)
     assert calls == ["machine learning engineer", "nlp engineer"]
     assert len(jobs) == 2
+
+
+def test_fetch_wttj_also_fetches_europe_remote_pass_by_default(monkeypatch):
+    calls = []
+
+    def fake_fetch(query, max_hits, country=None, remote_only=False, extra_countries=None):
+        calls.append((query, remote_only))
+        return [Job(source="wttj", external_id=f"{query}-{remote_only}", title=query, company="Acme")]
+
+    monkeypatch.setattr(pipeline.wttj, "fetch", fake_fetch)
+    cfg = {"query": "machine learning engineer", "max_hits": 100, "countries": ["France"],
+           "europe_countries": ["Germany", "Spain"],
+           "wttj": {"queries": ["machine learning engineer", "nlp engineer"]}}
+    jobs = pipeline._fetch_wttj(cfg)
+    # one France-scoped call and one remote_only call per query
+    assert calls == [
+        ("machine learning engineer", False), ("nlp engineer", False),
+        ("machine learning engineer", True), ("nlp engineer", True),
+    ]
+    assert len(jobs) == 4
+
+
+def test_fetch_linkedin_also_fetches_europe_remote_pass_by_default(monkeypatch):
+    calls = []
+
+    def fake_fetch(queries, locations, max_pages=5, recent_hours=168, max_retries=3,
+                    backoff_base=2.0, workplace_type=None):
+        calls.append((tuple(locations), workplace_type))
+        return [Job(source="linkedin", external_id=f"{locations}-{workplace_type}",
+                     title="ML Engineer", company="Acme")]
+
+    monkeypatch.setattr(pipeline.linkedin, "fetch", fake_fetch)
+    cfg = {"query": "machine learning engineer",
+           "linkedin": {"enabled": True, "queries": ["machine learning engineer"],
+                         "locations": ["France"]}}
+    jobs = pipeline._fetch_linkedin(cfg)
+    assert calls == [(("France",), None), (("Europe",), "2")]
+    assert len(jobs) == 2
+
+
+def test_fetch_linkedin_europe_remote_pass_can_be_disabled(monkeypatch):
+    calls = []
+
+    def fake_fetch(queries, locations, max_pages=5, recent_hours=168, max_retries=3,
+                    backoff_base=2.0, workplace_type=None):
+        calls.append((tuple(locations), workplace_type))
+        return []
+
+    monkeypatch.setattr(pipeline.linkedin, "fetch", fake_fetch)
+    cfg = {"query": "machine learning engineer",
+           "linkedin": {"enabled": True, "queries": ["machine learning engineer"],
+                         "locations": ["France"], "europe_remote": {"enabled": False}}}
+    pipeline._fetch_linkedin(cfg)
+    assert calls == [(("France",), None)]
 
 
 def test_fetch_francetravail_loops_over_configured_queries(monkeypatch):
@@ -333,6 +388,32 @@ def test_judge_one_skips_jobs_with_no_real_description(tmp_db, config, monkeypat
     assert called == []   # never even called the LLM -- no ungrounded guess
     with db.connect() as conn:
         assert db.get_job(conn, jid)["llm_score"] is None
+
+
+def test_judge_all_excludes_permanently_unfetchable_jobs_from_the_queue(tmp_db, config, monkeypatch):
+    """A job that exhausted every enrichment retry with no real JD text must not
+    occupy a limit slot forever, ahead of a genuinely judgeable job behind it."""
+    with db.connect() as conn:
+        # keyword-rich teaser text (not a real JD) -> outscores the plain judgeable
+        # job below, so without the fix it would sort to the front of the queue.
+        # Distinct companies: same title+company+location would silently merge
+        # via upsert_job's cross-source dedup instead of creating two rows.
+        stuck = _insert(conn, config, external_id="stuck", company="StuckCo",
+                        description="machine learning deep learning nlp mlops pytorch")
+        for _ in range(db.MAX_ENRICH_ATTEMPTS):
+            db.bump_enrich_attempts(conn, stuck)
+        judgeable = _insert(conn, config, external_id="ok", company="OkCo", description=_REAL_JD)
+
+    monkeypatch.setattr(pipeline.llm_judge, "judge", lambda job, preferences="":
+                        {"score": 70, "verdict": "good", "seniority": "junior",
+                         "min_years": 0, "reasons": "solid fit"})
+
+    stats = pipeline.judge_all(min_score=0, limit=1)   # limit=1: only room for one candidate
+
+    assert stats["judged"] == 1
+    with db.connect() as conn:
+        assert db.get_job(conn, judgeable)["llm_score"] == 70   # the real candidate got the slot
+        assert db.get_job(conn, stuck)["llm_score"] is None     # never even attempted
 
 
 _LONG_REAL_JD = "x" * 250   # >200 chars so description_full=1 at insert -- skips enrich_new's throttled fetch

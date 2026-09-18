@@ -160,6 +160,51 @@ major_cities:
   - strasbourg
 major_city_bonus: 14
 
+# Any other named French city (not IDF, not a major hub above) -- always a real,
+# opportunistic part of the search now, not gated behind allow_remote_france.
+# Below major_city_bonus so the curated hubs still win.
+other_france_bonus: 10
+
+# EU member states (excluding France, already in scope above) recognized for
+# "fully remote at an EU company, candidate stays based in France" postings.
+# Matched against WTTJ's real offices.country facet values. Whether a given
+# employer can legally hire someone living in France (EOR vs French entity vs
+# direct foreign payroll) can't be told from a job description -- these are
+# surfaced like any other posting, not auto-vetted; the candidate checks each
+# one manually before applying.
+europe_countries:
+  - Germany
+  - Spain
+  - Italy
+  - Netherlands
+  - Belgium
+  - Portugal
+  - Ireland
+  - Poland
+  - Austria
+  - Sweden
+  - Denmark
+  - Finland
+  - Czechia
+  - Hungary
+  - Romania
+  - Bulgaria
+  - Croatia
+  - Greece
+  - Slovakia
+  - Slovenia
+  - Lithuania
+  - Latvia
+  - Estonia
+  - Luxembourg
+  - Malta
+  - Cyprus
+allow_remote_europe: true
+
+# No relocation at all, but real unresolved per-employer legal/payroll
+# uncertainty -- between other_france_bonus and major_city_bonus.
+europe_remote_bonus: 12
+
 # Languages to keep (matched loosely against posting language / content).
 languages: ["fr", "en"]
 
@@ -218,6 +263,13 @@ wttj:
     - "AI product manager"
     - "technical product manager"
     - "chef de produit IA"
+  # Second pass per query: WTTJ's own remote:fulltime facet, restricted to
+  # europe_countries above -- a real employer-declared field, not a text guess.
+  # Verified live counts (no country restriction): ai engineer 329, AI product
+  # manager 70, llm engineer 17, technical product manager 10, data scientist 4,
+  # computer vision engineer 3 -- bounded, not an explosion.
+  fetch_europe_remote: true
+  europe_remote_max_hits: 100
 
 # LinkedIn public guest search (read-only, no login). Each query is searched in
 # each location (a cross product); "France" (not city-specific) returns genuine
@@ -254,6 +306,17 @@ linkedin:
                         # finding new/relevant results; zero 429s at this depth
   max_retries: 3       # retries on 429 before giving up on a page
   backoff_seconds: 2.0
+  # Second pass: LinkedIn's own f_WT=2 workplace-type filter (remote), location
+  # "Europe" -- verified live returning genuine cross-EU remote hits (Zagreb,
+  # Lisbon, Barcelona, Gothenburg). max_pages kept at half the main pass as a
+  # conservative start -- the measured 429 headroom above was for one location,
+  # not double the request volume; raise later if it stays quiet.
+  europe_remote:
+    enabled: true
+    locations:
+      - "Europe"
+    workplace_type: "2"
+    max_pages: 5
 
 # France Travail (Pôle emploi) official API — needs a free key, see README.
 # Credentials: FRANCE_TRAVAIL_CLIENT_ID / FRANCE_TRAVAIL_CLIENT_SECRET env vars.

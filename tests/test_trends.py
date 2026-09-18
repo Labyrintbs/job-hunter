@@ -18,6 +18,9 @@ def test_geo_tier_classification(config):
     assert g("Remote") == "remote"
     assert g("Full remote") == "remote"
     assert g("Télétravail, France") == "remote"   # remote wins over generic 'france'
+    assert g("Madrid, Madrid, Spain - Remote") == "europe_remote"
+    assert g("Remote - Germany") == "europe_remote"
+    assert g("Berlin, Germany") == "outside"   # no remote signal -> real relocation, unwanted
     assert g("London, UK") == "outside"
     assert g("") == "unknown"
 
@@ -51,6 +54,15 @@ def test_run_fetch_records_a_fetch_run(tmp_db, config):
         assert len(runs) == 1
         assert runs[0]["new_idf"] == 1 and runs[0]["new_major_city"] == 1
         assert runs[0]["fetched"] == 3
+
+
+def test_run_fetch_records_europe_remote_tier(tmp_db, config):
+    injected = [J("1", loc="Madrid, Madrid, Spain - Remote")]
+    stats = __import__("jobhunter.pipeline", fromlist=["run_fetch"]).run_fetch(config, jobs=injected)
+    assert stats["new_europe_remote"] == 1
+    with db.connect() as conn:
+        row = conn.execute("SELECT * FROM fetch_runs").fetchone()
+        assert row["new_europe_remote"] == 1
 
 
 def test_views_return_rows(tmp_db, config):

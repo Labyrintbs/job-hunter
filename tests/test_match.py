@@ -250,3 +250,26 @@ def test_client_facing_language_penalizes_score(config):
 def test_client_facing_reason_surfaced(config):
     s = screen(J(desc="you'll join pre-sales calls with our customers"), config)
     assert any("client-facing" in r for r in s.reasons.split("; "))
+
+
+# --- Europe-remote / other-France geography ---
+
+def test_geo_bonus_ordering_other_france_below_europe_remote_below_major_city(config):
+    other_france = screen(J(loc="Amiens, Hauts-de-France, France"), config).score
+    europe_remote = screen(J(loc="Madrid, Madrid, Spain - Remote"), config).score
+    major_city = screen(J(loc="Lyon, Auvergne-Rhône-Alpes, France"), config).score
+    assert other_france < europe_remote < major_city
+
+
+def test_europe_remote_bonus_disabled_via_config(config):
+    cfg = {**config, "allow_remote_europe": False}
+    with_bonus = screen(J(loc="Madrid, Madrid, Spain - Remote"), config).score
+    without_bonus = screen(J(loc="Madrid, Madrid, Spain - Remote"), cfg).score
+    assert without_bonus < with_bonus
+
+
+def test_non_remote_foreign_city_still_penalized(config):
+    """A bare foreign city with no remote signal is a real relocation posting --
+    must not be rewarded just because its country is in europe_countries."""
+    s = screen(J(loc="Berlin, Germany"), config)
+    assert "outside France" in s.reasons

@@ -121,10 +121,12 @@ _REMOTE_TERMS = ("remote", "télétravail", "teletravail", "full remote", "100% 
 
 
 def geo_tier(location: str, config: dict) -> str:
-    """Coarse geography bucket for analytics: idf | major_city | remote | france |
-    outside | unknown. IDF wins first (it's the application focus), then the named
-    major-city list (a bare city name like "Lyon" has no "France" in it, so it needs
-    its own check ahead of the generic literal-"france" fallback), then remote."""
+    """Coarse geography bucket for analytics: idf | major_city | europe_remote |
+    remote | france | outside | unknown. IDF wins first (it's the application
+    focus), then the named major-city list (a bare city name like "Lyon" has no
+    "France" in it, so it needs its own check ahead of the generic literal-"france"
+    fallback), then remote (split into europe_remote vs plain remote depending on
+    whether an EU country name is present alongside the remote term)."""
     loc = (location or "").lower()
     if not loc:
         return "unknown"
@@ -133,6 +135,8 @@ def geo_tier(location: str, config: dict) -> str:
     if any(c.lower() in loc for c in config.get("major_cities", [])):
         return "major_city"
     if any(t in loc for t in _REMOTE_TERMS):
+        if any(c.lower() in loc for c in config.get("europe_countries", [])):
+            return "europe_remote"
         return "remote"
     if "france" in loc:
         return "france"
@@ -141,7 +145,8 @@ def geo_tier(location: str, config: dict) -> str:
 
 def _geo_tier(job: Job, config: dict) -> tuple[int, str]:
     """Returns (bonus_points, reason). Paris/IDF ranks above a named major city,
-    which ranks above generic other-France mobility."""
+    which ranks above europe_remote, which ranks above generic other-France
+    mobility."""
     tier = geo_tier(job.location, config)
     if tier == "idf":
         return 20, f"geo: Paris/IDF ({job.location})"
@@ -149,9 +154,14 @@ def _geo_tier(job: Job, config: dict) -> tuple[int, str]:
         return config.get("major_city_bonus", 14), f"geo: major French city ({job.location})"
     if tier == "unknown":
         return 5, "geo: unspecified"
-    if tier in ("france", "remote"):
+    if tier == "europe_remote":
+        bonus = config.get("europe_remote_bonus", 12) if config.get("allow_remote_europe", True) else 0
+        return bonus, f"geo: remote at an EU-based employer -- verify visa/payroll eligibility yourself ({job.location})"
+    if tier == "france":
+        return config.get("other_france_bonus", 10), f"geo: other-France city, opportunistic ({job.location})"
+    if tier == "remote":
         bonus = 8 if config.get("allow_remote_france") else 0
-        return bonus, f"geo: other-France mobility ({job.location})"
+        return bonus, f"geo: remote/France mobility ({job.location})"
     return -5, f"geo: outside France ({job.location})"
 
 

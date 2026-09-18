@@ -61,7 +61,8 @@ def _parse_card(card: str) -> Job | None:
 
 
 def _fetch_one(client: httpx.Client, query: str, location: str, max_pages: int,
-                recent_hours: int, max_retries: int, backoff_base: float) -> list[Job]:
+                recent_hours: int, max_retries: int, backoff_base: float,
+                workplace_type: str | None = None) -> list[Job]:
     jobs: list[Job] = []
     for page in range(max_pages):
         params = {
@@ -70,6 +71,8 @@ def _fetch_one(client: httpx.Client, query: str, location: str, max_pages: int,
             "start": page * 10,
             "f_TPR": f"r{recent_hours * 3600}",
         }
+        if workplace_type:
+            params["f_WT"] = workplace_type
         url = f"{SEARCH_URL}?{urllib.parse.urlencode(params)}"
         resp = None
         for attempt in range(max_retries + 1):
@@ -90,17 +93,27 @@ def _fetch_one(client: httpx.Client, query: str, location: str, max_pages: int,
 
 def fetch(queries: list[str], locations: list[str], max_pages: int = 5,
           recent_hours: int = 168, max_retries: int = 3,
-          backoff_base: float = 2.0) -> list[Job]:
+          backoff_base: float = 2.0, workplace_type: str | None = None) -> list[Job]:
     """One request per (query, location) pair's page. A 429 retries just that page
     with exponential backoff instead of abandoning the whole fetch; any other
     non-200/empty response or exhausted results only breaks that pair's pagination,
     so one bad combo doesn't cost the others. Cross-pair duplicates are harmless --
     external_id is stable regardless of which search surfaced the posting, and
-    db.py's dedup collapses them."""
+    db.py's dedup collapses them.
+
+    workplace_type passes LinkedIn's own f_WT filter (e.g. "2" = remote) -- a
+    real employer-declared field. When set, matched jobs are tagged with a
+    "- Remote" suffix on location (unless "remote" already appears there) so
+    match.py's text-based geo_tier() can recognize them."""
     jobs: list[Job] = []
     with httpx.Client(timeout=20, headers=_HEADERS) as client:
         for query in queries:
             for location in locations:
                 jobs.extend(_fetch_one(client, query, location, max_pages,
-                                        recent_hours, max_retries, backoff_base))
+                                        recent_hours, max_retries, backoff_base,
+                                        workplace_type))
+    if workplace_type:
+        for job in jobs:
+            if "remote" not in job.location.lower():
+                job.location = f"{job.location} - Remote" if job.location else "Remote"
     return jobs
