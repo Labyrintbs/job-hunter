@@ -11,7 +11,7 @@ from .llm import dedup as llm_dedup
 from .llm import judge as llm_judge
 from .llm import provider
 from .notify import dispatch as notify_dispatch
-from .sources import ats, ats_discovery, francetravail, hellowork, linkedin, wttj
+from .sources import arbeitnow, ats, ats_discovery, francetravail, hellowork, linkedin, wttj
 from .tailor import engine as cv_engine
 
 
@@ -84,6 +84,13 @@ def _fetch_hellowork(config: dict) -> list:
     return jobs
 
 
+def _fetch_arbeitnow(config: dict) -> list:
+    an = config.get("arbeitnow") or {}
+    if not an.get("enabled"):
+        return []
+    return arbeitnow.fetch(max_pages=an.get("max_pages", 5))
+
+
 def _hours_since(timestamp: str) -> float:
     from datetime import datetime, timezone
     then = datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
@@ -117,6 +124,7 @@ def _gather(config: dict, force: bool = False) -> list:
         ("linkedin", lambda: _fetch_linkedin(config)),
         ("francetravail", lambda: _fetch_francetravail(config)),
         ("hellowork", lambda: _fetch_hellowork(config)),
+        ("arbeitnow", lambda: _fetch_arbeitnow(config)),
     ]
     jobs: list = []
     counts: dict[str, object] = {}

@@ -363,6 +363,20 @@ hellowork:
   locations:
     - "France"
 
+# Arbeitnow — free public API, no key/login. Real pan-European coverage (Berlin,
+# London, Paris, Munich, Hamburg, ... -- verified live, not Germany-only), each
+# record ships its full description already. No server-side keyword search exists
+# (verified against the docs and live) -- match.py's screen() filters relevance
+# from the whole feed, same as ats.py/hellowork.py for sources without a query
+# param. The API's own remote=true param does NOT filter (verified live: identical
+# results with/without it) -- never passed; each record's own `remote` field
+# (employer-declared) is used instead, same category of signal as wttj's facet.
+arbeitnow:
+  enabled: true
+  fetch_interval_hours: 12
+  max_pages: 10   # 250 jobs/page; modest relevant-hit density (general job board,
+                  # not ML-specific) but real, free, and legitimate additional EU spread
+
 # Company ATS boards (config/companies.yaml) -- no query/location block needed here,
 # just a fetch cadence. Career pages change slowly (a handful of new roles a week),
 # so checking hourly like LinkedIn/WTTJ would be pure waste.

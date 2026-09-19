@@ -14,6 +14,7 @@ def test_gather_survives_a_source_exception(tmp_db, config, monkeypatch):
     monkeypatch.setattr(pipeline, "_fetch_linkedin", lambda cfg: [])
     monkeypatch.setattr(pipeline, "_fetch_francetravail", lambda cfg: [])
     monkeypatch.setattr(pipeline, "_fetch_hellowork", lambda cfg: [])
+    monkeypatch.setattr(pipeline, "_fetch_arbeitnow", lambda cfg: [])
 
     jobs = pipeline._gather(config)   # must not raise
     assert jobs == []
@@ -27,9 +28,11 @@ def test_gather_collects_every_source(tmp_db, config, monkeypatch):
     monkeypatch.setattr(pipeline, "_fetch_linkedin", lambda cfg: [make("linkedin", 3)])
     monkeypatch.setattr(pipeline, "_fetch_francetravail", lambda cfg: [make("francetravail", 4)])
     monkeypatch.setattr(pipeline, "_fetch_hellowork", lambda cfg: [make("hellowork", 5)])
+    monkeypatch.setattr(pipeline, "_fetch_arbeitnow", lambda cfg: [make("arbeitnow", 6)])
 
     jobs = pipeline._gather(config)
-    assert {j.source for j in jobs} == {"wttj", "ats", "linkedin", "francetravail", "hellowork"}
+    assert {j.source for j in jobs} == {"wttj", "ats", "linkedin", "francetravail",
+                                         "hellowork", "arbeitnow"}
 
 
 def _stub_all_sources_except_hellowork(monkeypatch, called):
@@ -39,6 +42,7 @@ def _stub_all_sources_except_hellowork(monkeypatch, called):
     monkeypatch.setattr(pipeline, "_fetch_linkedin", lambda cfg: [])
     monkeypatch.setattr(pipeline, "_fetch_francetravail", lambda cfg: [])
     monkeypatch.setattr(pipeline, "_fetch_hellowork", lambda cfg: called.append(1) or [])
+    monkeypatch.setattr(pipeline, "_fetch_arbeitnow", lambda cfg: [])
 
 
 def test_gather_skips_a_source_whose_interval_has_not_elapsed(tmp_db, config, monkeypatch):
@@ -166,6 +170,29 @@ def test_fetch_francetravail_loops_over_configured_queries(monkeypatch):
     jobs = pipeline._fetch_francetravail(cfg)
     assert calls == ["machine learning engineer", "computer vision engineer"]
     assert len(jobs) == 2
+
+
+def test_fetch_arbeitnow_passes_configured_max_pages(monkeypatch):
+    calls = []
+
+    def fake_fetch(max_pages=5):
+        calls.append(max_pages)
+        return [Job(source="arbeitnow", external_id="1", title="ML Engineer", company="Acme")]
+
+    monkeypatch.setattr(pipeline.arbeitnow, "fetch", fake_fetch)
+    cfg = {"arbeitnow": {"enabled": True, "max_pages": 7}}
+    jobs = pipeline._fetch_arbeitnow(cfg)
+    assert calls == [7]
+    assert len(jobs) == 1
+
+
+def test_fetch_arbeitnow_disabled_returns_nothing(monkeypatch):
+    called = []
+    monkeypatch.setattr(pipeline.arbeitnow, "fetch", lambda **k: called.append(1) or [])
+    cfg = {"arbeitnow": {"enabled": False}}
+    jobs = pipeline._fetch_arbeitnow(cfg)
+    assert jobs == []
+    assert called == []
 
 
 def _insert(conn, config, **kw):
