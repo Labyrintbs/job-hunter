@@ -273,3 +273,19 @@ def test_non_remote_foreign_city_still_penalized(config):
     must not be rewarded just because its country is in europe_countries."""
     s = screen(J(loc="Berlin, Germany"), config)
     assert "outside France" in s.reasons
+
+
+# --- detect_remote_from_text (post-enrichment remote confirmation) ---
+
+def test_detect_remote_from_text_finds_known_terms():
+    from jobhunter.match import detect_remote_from_text
+    assert detect_remote_from_text("This role is fully remote, work from home.")
+    assert detect_remote_from_text("Poste en télétravail complet")
+    assert detect_remote_from_text("100% Remote position")
+
+
+def test_detect_remote_from_text_false_for_plain_description():
+    from jobhunter.match import detect_remote_from_text
+    assert detect_remote_from_text("You will work on our Berlin office team, on-site.") is False
+    assert detect_remote_from_text("") is False
+    assert detect_remote_from_text(None) is False

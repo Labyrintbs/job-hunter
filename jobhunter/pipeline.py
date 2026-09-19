@@ -44,6 +44,9 @@ def _fetch_linkedin(config: dict) -> list:
     )
     er = li.get("europe_remote") or {}
     if er.get("enabled", True):
+        # f_WT here is only a coarse pre-filter (see linkedin.fetch's docstring) --
+        # these jobs carry their real location, unmodified; genuine remote status
+        # is confirmed later from full JD text once enriched (enrich_one).
         jobs += linkedin.fetch(
             queries=queries,
             locations=er.get("locations", ["Europe"]),
@@ -411,14 +414,26 @@ def enrich_one(job_id: int) -> dict:
     jd_path = jd_store.save_jd(source=source, external_id=ext, title=title, company=company,
                                 url=url, description=text)
     config = load_search_config()
+    location = row["location"] or ""
+    # Confirm remote from the real JD text once it lands, for sources whose search-side
+    # remote filter isn't trustworthy on its own (verified for LinkedIn's f_WT -- see
+    # match.detect_remote_from_text's docstring). Only acts when the location string
+    # doesn't already say remote -- wttj already tags this at fetch time from its own
+    # verified facet, so this is a no-op there.
+    if not match.detect_remote_from_text(location) and match.detect_remote_from_text(text):
+        location = f"{location} - Remote" if location else "Remote"
     with db.connect() as conn:
         db.set_description(conn, job_id, text)
+        if location != (row["location"] or ""):
+            conn.execute("UPDATE jobs SET location = ? WHERE id = ?", (location, job_id))
         job = db.job_from_row(db.get_job(conn, job_id))
         cfg = {**config, "_active_rules": [dict(r) for r in db.active_rules(conn)]}
         s = match.screen(job, cfg)
         db.update_screening(conn, job_id, s.score, s.reasons, filtered=s.filtered,
                             filter_reason=s.filter_reason, seniority=s.seniority,
                             min_years=s.min_years, role_category=s.role_category)
+        conn.execute("UPDATE jobs SET geo_tier = ? WHERE id = ?",
+                     (match.geo_tier(job.location, config), job_id))
     if not s.filtered:
         # Keep a copy of the JD right next to where the tailored CV will land,
         # so both are in one place for later analysis.

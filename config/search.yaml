@@ -306,11 +306,11 @@ linkedin:
                         # finding new/relevant results; zero 429s at this depth
   max_retries: 3       # retries on 429 before giving up on a page
   backoff_seconds: 2.0
-  # Second pass: LinkedIn's own f_WT=2 workplace-type filter (remote), location
-  # "Europe" -- verified live returning genuine cross-EU remote hits (Zagreb,
-  # Lisbon, Barcelona, Gothenburg). max_pages kept at half the main pass as a
-  # conservative start -- the measured 429 headroom above was for one location,
-  # not double the request volume; raise later if it stays quiet.
+  # Second pass: location "Europe", f_WT=2 as a coarse noise-reducer only -- verified
+  # live that f_WT=2 lets non-remote postings through (a "Hybrid" job came back under
+  # it), so results keep their real, untouched location; genuine remote status is
+  # confirmed later from the full JD text once enriched (see match.detect_remote_from_text,
+  # pipeline.enrich_one). max_pages kept at half the main pass as a conservative start.
   europe_remote:
     enabled: true
     locations:

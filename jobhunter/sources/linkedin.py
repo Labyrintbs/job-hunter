@@ -101,10 +101,14 @@ def fetch(queries: list[str], locations: list[str], max_pages: int = 5,
     external_id is stable regardless of which search surfaced the posting, and
     db.py's dedup collapses them.
 
-    workplace_type passes LinkedIn's own f_WT filter (e.g. "2" = remote) -- a
-    real employer-declared field. When set, matched jobs are tagged with a
-    "- Remote" suffix on location (unless "remote" already appears there) so
-    match.py's text-based geo_tier() can recognize them."""
+    workplace_type passes LinkedIn's own f_WT filter (e.g. "2" = remote) as a coarse
+    noise-reducing pre-filter ONLY -- verified live that it lets non-remote postings
+    through (a job explicitly marked "Hybrid" on its own page came back under f_WT=2),
+    so it is NOT trusted as a remote signal and jobs are returned with their real,
+    untouched location text. Confirming genuine remote status happens later, once the
+    full JD text is available -- see match.detect_remote_from_text and
+    pipeline.enrich_one. Same approach JobSpy (a maintained multi-site scraper) uses
+    for the same reason."""
     jobs: list[Job] = []
     with httpx.Client(timeout=20, headers=_HEADERS) as client:
         for query in queries:
@@ -112,8 +116,4 @@ def fetch(queries: list[str], locations: list[str], max_pages: int = 5,
                 jobs.extend(_fetch_one(client, query, location, max_pages,
                                         recent_hours, max_retries, backoff_base,
                                         workplace_type))
-    if workplace_type:
-        for job in jobs:
-            if "remote" not in job.location.lower():
-                job.location = f"{job.location} - Remote" if job.location else "Remote"
     return jobs

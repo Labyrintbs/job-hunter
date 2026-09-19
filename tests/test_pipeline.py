@@ -116,6 +116,9 @@ def test_fetch_wttj_also_fetches_europe_remote_pass_by_default(monkeypatch):
 
 
 def test_fetch_linkedin_also_fetches_europe_remote_pass_by_default(monkeypatch):
+    """f_WT=2 here is only a coarse pre-filter (verified unreliable as a remote
+    signal on its own) -- results keep their real location; confirming genuine
+    remote status happens later from full JD text (see enrich_one)."""
     calls = []
 
     def fake_fetch(queries, locations, max_pages=5, recent_hours=168, max_retries=3,
@@ -199,6 +202,53 @@ def test_enrich_one_rescopes_with_real_content(tmp_db, config, monkeypatch, tmp_
     jd_file = tmp_path / "jd" / f"linkedin__{after['external_id']}.txt"
     assert jd_file.exists()
     assert rich_text in jd_file.read_text(encoding="utf-8")
+
+
+def test_enrich_one_confirms_remote_from_full_jd_text(tmp_db, config, monkeypatch):
+    """A job whose location doesn't say remote (e.g. a LinkedIn card from the
+    europe_remote pre-filter pass) gets tagged and re-tiered once the real JD
+    text confirms it -- see match.detect_remote_from_text."""
+    with db.connect() as conn:
+        jid = _insert(conn, config, location="Berlin, Germany")
+
+    remote_jd = "We are a fully remote team. " + _REAL_JD
+    monkeypatch.setattr(pipeline.enrich, "fetch_full_text", lambda *a, **k: remote_jd)
+
+    pipeline.enrich_one(jid)
+
+    with db.connect() as conn:
+        after = db.get_job(conn, jid)
+    assert after["location"] == "Berlin, Germany - Remote"
+    assert after["geo_tier"] == "europe_remote"
+
+
+def test_enrich_one_leaves_location_alone_when_jd_does_not_confirm_remote(tmp_db, config, monkeypatch):
+    with db.connect() as conn:
+        jid = _insert(conn, config, location="Berlin, Germany")
+
+    onsite_jd = "You will join our Berlin office team on-site. " + _REAL_JD
+    monkeypatch.setattr(pipeline.enrich, "fetch_full_text", lambda *a, **k: onsite_jd)
+
+    pipeline.enrich_one(jid)
+
+    with db.connect() as conn:
+        after = db.get_job(conn, jid)
+    assert after["location"] == "Berlin, Germany"
+    assert after["geo_tier"] == "outside"
+
+
+def test_enrich_one_does_not_double_tag_already_remote_location(tmp_db, config, monkeypatch):
+    with db.connect() as conn:
+        jid = _insert(conn, config, location="Berlin, Germany - Remote")
+
+    remote_jd = "This role is fully remote. " + _REAL_JD
+    monkeypatch.setattr(pipeline.enrich, "fetch_full_text", lambda *a, **k: remote_jd)
+
+    pipeline.enrich_one(jid)
+
+    with db.connect() as conn:
+        after = db.get_job(conn, jid)
+    assert after["location"].count("Remote") == 1
 
 
 def test_run_fetch_persists_role_category(tmp_db, config, monkeypatch):

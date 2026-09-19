@@ -107,7 +107,7 @@ def test_fetch_gives_up_after_max_retries(monkeypatch):
     assert len(client.urls) == 3   # initial + 2 retries, then gave up
 
 
-def test_workplace_type_param_added_when_set(monkeypatch):
+def test_workplace_type_adds_f_wt_param_when_set(monkeypatch):
     monkeypatch.setattr(linkedin.time, "sleep", lambda *_: None)
     client = _Client([])
 
@@ -123,7 +123,25 @@ def test_workplace_type_param_added_when_set(monkeypatch):
     assert "f_WT=2" in client.urls[0]
 
 
-def test_remote_pass_tags_location_with_remote_suffix(monkeypatch):
+def test_no_f_wt_param_when_workplace_type_unset(monkeypatch):
+    monkeypatch.setattr(linkedin.time, "sleep", lambda *_: None)
+    client = _Client([])
+
+    class _CM:
+        def __enter__(self):
+            return client
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(linkedin.httpx, "Client", lambda *a, **k: _CM())
+    linkedin.fetch(["ml"], ["Paris"], max_pages=1)
+    assert "f_WT" not in client.urls[0]
+
+
+def test_workplace_type_does_not_alter_returned_location(monkeypatch):
+    """f_WT is a coarse pre-filter only (verified unreliable as a remote signal) --
+    fetch() must return each job's real, untouched location, never tag it remote."""
     monkeypatch.setattr(linkedin.time, "sleep", lambda *_: None)
     client = _Client([_Resp(200, CARD)])
 
@@ -136,21 +154,6 @@ def test_remote_pass_tags_location_with_remote_suffix(monkeypatch):
 
     monkeypatch.setattr(linkedin.httpx, "Client", lambda *a, **k: _CM())
     jobs = linkedin.fetch(["ml"], ["Europe"], max_pages=1, workplace_type="2")
-    assert len(jobs) == 1
-    assert jobs[0].location == "Levallois-Perret, Île-de-France, France - Remote"
-
-
-def test_no_remote_suffix_when_workplace_type_unset(monkeypatch):
-    monkeypatch.setattr(linkedin.time, "sleep", lambda *_: None)
-    client = _Client([_Resp(200, CARD)])
-
-    class _CM:
-        def __enter__(self):
-            return client
-
-        def __exit__(self, *a):
-            return False
-
-    monkeypatch.setattr(linkedin.httpx, "Client", lambda *a, **k: _CM())
-    jobs = linkedin.fetch(["ml"], ["Paris"], max_pages=1)
     assert jobs[0].location == "Levallois-Perret, Île-de-France, France"
+
+

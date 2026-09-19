@@ -117,7 +117,20 @@ def is_excluded(job: Job, config: dict) -> str | None:
     return None
 
 
-_REMOTE_TERMS = ("remote", "télétravail", "teletravail", "full remote", "100% remote")
+_REMOTE_TERMS = ("remote", "télétravail", "teletravail", "full remote", "100% remote",
+                  "work from home", "home office", "wfh")
+
+
+def detect_remote_from_text(text: str) -> bool:
+    """Keyword check for a genuine remote mention in a job's own full text (title +
+    description). Used to confirm remote status from real JD content once enrichment
+    lands, for sources (e.g. LinkedIn) whose search-side "remote" filter was verified
+    unreliable on its own -- see pipeline.enrich_one. Same simple substring approach
+    as geo_tier()'s location check, and the same technique established scrapers (e.g.
+    JobSpy) use for the same reason: no site gives a fully trustworthy structured
+    signal here except a facet independently confirmed against the posting itself."""
+    t = (text or "").lower()
+    return any(term in t for term in _REMOTE_TERMS)
 
 
 def geo_tier(location: str, config: dict) -> str:
