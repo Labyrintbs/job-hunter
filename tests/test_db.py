@@ -789,3 +789,29 @@ def test_duplicate_check_round_trips_and_is_order_independent(tmp_db):
         row = db.get_duplicate_check(conn, 5, 9)
         assert row["verdict"] == "different"   # updated, not duplicated
         assert conn.execute("SELECT COUNT(*) FROM duplicate_checks").fetchone()[0] == 1
+
+
+def test_record_market_snapshot_upserts_same_day_without_duplicating(tmp_db):
+    with db.connect() as conn:
+        db.record_market_snapshot(conn, "france", "Whole IT/CS market", 9679)
+        db.record_market_snapshot(conn, "idf", "Whole IT/CS market", 3200)
+        db.record_market_snapshot(conn, "france", "AI engineering", 215)
+        assert conn.execute("SELECT COUNT(*) FROM market_snapshots").fetchone()[0] == 3
+
+        # Same (date, scope, category) again -- updates in place, no duplicate row.
+        db.record_market_snapshot(conn, "france", "Whole IT/CS market", 9700)
+        rows = conn.execute(
+            "SELECT total_count FROM market_snapshots WHERE scope='france' AND category='Whole IT/CS market'"
+        ).fetchall()
+        assert len(rows) == 1
+        assert rows[0]["total_count"] == 9700
+        assert conn.execute("SELECT COUNT(*) FROM market_snapshots").fetchone()[0] == 3
+
+
+def test_v_market_trend_is_exportable(tmp_db):
+    assert "v_market_trend" in db.VIEW_NAMES
+    with db.connect() as conn:
+        db.record_market_snapshot(conn, "france", "AI engineering", 200)
+        rows = conn.execute("SELECT * FROM v_market_trend").fetchall()
+        assert len(rows) == 1
+        assert rows[0]["category"] == "AI engineering"

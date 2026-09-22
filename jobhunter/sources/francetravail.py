@@ -13,6 +13,7 @@ these never need a separate enrichment pass.
 from __future__ import annotations
 
 import os
+import re
 import time
 
 import httpx
@@ -34,6 +35,20 @@ THROTTLE_SECONDS = 0.3
 MAX_DEPARTEMENTS_PER_REQUEST = 5
 
 _token_cache: dict[str, tuple[str, float]] = {}
+_CONTENT_RANGE_TOTAL_RE = re.compile(r"/(\d+)$")
+
+
+def _dept_batches(departements: str | None) -> list[str | None]:
+    """Split a comma-separated departement string into groups of at most
+    MAX_DEPARTEMENTS_PER_REQUEST -- the API rejects more than that in one
+    request. None (no filter, nationwide) stays a single [None] batch."""
+    if not departements:
+        return [None]
+    dept_list = [d.strip() for d in departements.split(",") if d.strip()]
+    return [
+        ",".join(dept_list[i:i + MAX_DEPARTEMENTS_PER_REQUEST])
+        for i in range(0, len(dept_list), MAX_DEPARTEMENTS_PER_REQUEST)
+    ] or [None]
 
 
 def _get_token(client_id: str, client_secret: str) -> str:
@@ -88,21 +103,19 @@ def fetch(query: str, departements: str = IDF_DEPARTEMENTS,
 
     token = _get_token(client_id, client_secret)
     headers = {"Authorization": f"Bearer {token}"}
-    dept_list = [d.strip() for d in departements.split(",") if d.strip()]
-    batches = [dept_list[i:i + MAX_DEPARTEMENTS_PER_REQUEST]
-               for i in range(0, len(dept_list), MAX_DEPARTEMENTS_PER_REQUEST)] or [[]]
 
     jobs: list[Job] = []
     seen_ids: set[str] = set()
     with httpx.Client(timeout=20, headers=headers) as client:
-        for batch in batches:
+        for batch in _dept_batches(departements):
             start = 0
             while len(jobs) < max_results:
                 end = start + PAGE_SIZE - 1
-                resp = client.get(SEARCH_URL, params={
-                    "motsCles": query,
-                    "departement": ",".join(batch),
-                }, headers={"Range": f"offres {start}-{end}"})
+                params = {"motsCles": query}
+                if batch:
+                    params["departement"] = batch
+                resp = client.get(SEARCH_URL, params=params,
+                                   headers={"Range": f"offres {start}-{end}"})
                 if resp.status_code not in (200, 206):
                     break
                 data = resp.json()
@@ -121,3 +134,34 @@ def fetch(query: str, departements: str = IDF_DEPARTEMENTS,
             if len(jobs) >= max_results:
                 break
     return jobs[:max_results]
+
+
+def count(departements: str | None = None, **filters: str) -> int | None:
+    """Exact total open-postings count for arbitrary search filters (e.g.
+    domaine="M18", codeROME="M1805" -- France Travail's own official IT/CS
+    taxonomy, not a free-text guess), via the Content-Range header of a
+    1-row request -- no job details fetched. None on missing credentials or
+    any batch failure, never a silently-wrong partial number (a posting's
+    departement is a single value, so batches partition cleanly and their
+    totals are safe to sum)."""
+    client_id = os.environ.get("FRANCE_TRAVAIL_CLIENT_ID")
+    client_secret = os.environ.get("FRANCE_TRAVAIL_CLIENT_SECRET")
+    if not (client_id and client_secret):
+        return None
+
+    token = _get_token(client_id, client_secret)
+    headers = {"Authorization": f"Bearer {token}"}
+    total = 0
+    with httpx.Client(timeout=20, headers=headers) as client:
+        for batch in _dept_batches(departements):
+            params = dict(filters)
+            if batch:
+                params["departement"] = batch
+            resp = client.get(SEARCH_URL, params=params, headers={"Range": "offres 0-0"})
+            if resp.status_code not in (200, 206):
+                return None
+            m = _CONTENT_RANGE_TOTAL_RE.search(resp.headers.get("Content-Range", ""))
+            if not m:
+                return None
+            total += int(m.group(1))
+    return total

@@ -157,6 +157,19 @@ CREATE TABLE IF NOT EXISTS fetch_runs (
     new_europe_remote INTEGER DEFAULT 0
 );
 
+-- Daily open-postings count per (scope, category) from France Travail's official
+-- Content-Range total, categorized by its own domaine/ROME taxonomy -- a market-
+-- demand signal, independent of the daily job-search config/pipeline.
+CREATE TABLE IF NOT EXISTS market_snapshots (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    snapshot_date TEXT NOT NULL,
+    scope         TEXT NOT NULL,   -- 'france' | 'idf'
+    category      TEXT NOT NULL,   -- e.g. 'Whole IT/CS market', 'AI engineering'
+    total_count   INTEGER NOT NULL,
+    fetched_at    TEXT DEFAULT (datetime('now')),
+    UNIQUE(snapshot_date, scope, category)
+);
+
 -- Grafana/Metabase read these directly. Views are recreated each init to stay current.
 DROP VIEW IF EXISTS v_new_jobs_by_day;
 CREATE VIEW v_new_jobs_by_day AS
@@ -189,9 +202,19 @@ CREATE VIEW v_score_seniority_mix AS
            SUM(CASE WHEN score>=40 AND score<60 THEN 1 ELSE 0 END) AS n_score_40_59,
            SUM(CASE WHEN score<40 THEN 1 ELSE 0 END) AS n_score_lt40
     FROM jobs GROUP BY seniority;
+
+DROP VIEW IF EXISTS v_market_trend;
+CREATE VIEW v_market_trend AS
+    SELECT snapshot_date AS day, scope, category, total_count,
+           total_count - LAG(total_count) OVER (
+               PARTITION BY scope, category ORDER BY snapshot_date
+           ) AS day_over_day_change
+    FROM market_snapshots
+    ORDER BY scope, category, snapshot_date;
 """
 
-VIEW_NAMES = ["v_new_jobs_by_day", "v_market_by_run", "v_top_companies", "v_score_seniority_mix"]
+VIEW_NAMES = ["v_new_jobs_by_day", "v_market_by_run", "v_top_companies", "v_score_seniority_mix",
+              "v_market_trend"]
 
 
 def get_connection(db_path: Path | None = None) -> sqlite3.Connection:
@@ -587,6 +610,20 @@ def add_fetch_run(conn: sqlite3.Connection, stats: dict) -> int:
         ),
     )
     return cur.lastrowid
+
+
+def record_market_snapshot(conn: sqlite3.Connection, scope: str, category: str,
+                           total_count: int) -> None:
+    """Upsert today's open-postings count for one (scope, category) -- safe to
+    call more than once the same day (e.g. a retried run), never creates a
+    duplicate row."""
+    conn.execute(
+        """INSERT INTO market_snapshots (snapshot_date, scope, category, total_count)
+           VALUES (date('now'), ?, ?, ?)
+           ON CONFLICT(snapshot_date, scope, category)
+           DO UPDATE SET total_count = excluded.total_count, fetched_at = datetime('now')""",
+        (scope, category, total_count),
+    )
 
 
 SORT_ORDERS = {

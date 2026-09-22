@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from . import db, export as export_mod, jd_store, learn, schedule
+from . import db, export as export_mod, jd_store, learn, market_trend, schedule
 from .config import DB_PATH, load_search_config
 from .llm import provider
 from .notify import dispatch as notify_dispatch
@@ -68,7 +68,7 @@ def main(argv: list[str] | None = None) -> int:
     p_cron = sub.add_parser("cron", help="manage the daily crontab entry")
     p_cron.add_argument("action", choices=["show", "install", "uninstall"], nargs="?", default="show")
     p_cron.add_argument("--time", default="08:00", help="HH:MM (default 08:00), used when --interval-hours is not given")
-    p_cron.add_argument("--job", choices=["daily", "watchdog", "process"], default="daily",
+    p_cron.add_argument("--job", choices=["daily", "watchdog", "process", "market-snapshot"], default="daily",
                         help="which crontab entry to manage")
     p_cron.add_argument("--interval-hours", type=int, default=None,
                         help="run every N hours instead of once at --time (e.g. 12 for twice a day); "
@@ -110,6 +110,9 @@ def main(argv: list[str] | None = None) -> int:
 
     p_notify = sub.add_parser("notify", help="send a digest of current top jobs to configured channels")
     p_notify.add_argument("--min-score", type=int, default=None, help="override notifications.min_score")
+
+    sub.add_parser("market-snapshot", help="record today's France Travail IT/CS "
+                   "market-demand counts (independent of the job-search pipeline)")
 
     p_rules = sub.add_parser("rules", help="learn / review filter rules from your feedback")
     p_rules.add_argument("action", choices=["mine", "list", "approve", "reject", "add"], default="list", nargs="?")
@@ -300,6 +303,17 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"current:\n  {cur}" if cur else "not installed")
                 print(f"\nwould install:\n  {schedule.process_cron_line(interval)}")
             return 0
+        if args.job == "market-snapshot":
+            if args.action == "install":
+                line = schedule.install_market_snapshot()
+                print(f"installed:\n  {line}")
+            elif args.action == "uninstall":
+                print("removed" if schedule.uninstall_market_snapshot() else "no market-snapshot entry found")
+            else:
+                cur = schedule.current_market_snapshot()
+                print(f"current:\n  {cur}" if cur else "not installed")
+                print(f"\nwould install:\n  {schedule.market_snapshot_cron_line()}")
+            return 0
         try:
             hour, minute = (int(x) for x in args.time.split(":"))
         except ValueError:
@@ -339,6 +353,11 @@ def main(argv: list[str] | None = None) -> int:
                     if not r["is_stale"]]   # don't notify about postings likely taken down
         result = notify_dispatch.send(rows, {**cfg, "notifications": {**notif, "min_score": min_score}})
         print(f"selected={result['selected']} results={result.get('results', {})}")
+        return 0
+
+    if args.command == "market-snapshot":
+        result = market_trend.snapshot()
+        print(f"recorded={result['recorded']} failed={result['failed']}")
         return 0
 
     if args.command == "rules":

@@ -28,6 +28,7 @@ LAUNCH_AGENTS_DIR = Path.home() / "Library" / "LaunchAgents"
 MARKER = "com.jobhunter.daily"
 WATCHDOG_MARKER = "com.jobhunter.watchdog"
 PROCESS_MARKER = "com.jobhunter.process"
+MARKET_SNAPSHOT_MARKER = "com.jobhunter.market-snapshot"
 
 
 def _python() -> str:
@@ -175,3 +176,23 @@ def uninstall_process() -> bool:
 
 def current_process() -> str | None:
     return _current(PROCESS_MARKER)
+
+
+def market_snapshot_cron_line(hour: int = 6, minute: int = 10) -> str:
+    """Once a day, not hourly like watchdog/process -- market demand doesn't
+    move hour to hour, and this is a handful of cheap count-only requests."""
+    return _describe(MARKET_SNAPSHOT_MARKER, _command("market-snapshot", "market_snapshot_cron.log"),
+                     _calendar_intervals(hour, minute, None))
+
+
+def install_market_snapshot(hour: int = 6, minute: int = 10) -> str:
+    return _install(MARKET_SNAPSHOT_MARKER, "market-snapshot", "market_snapshot_cron.log",
+                    hour, minute, None)
+
+
+def uninstall_market_snapshot() -> bool:
+    return _uninstall(MARKET_SNAPSHOT_MARKER)
+
+
+def current_market_snapshot() -> str | None:
+    return _current(MARKET_SNAPSHOT_MARKER)

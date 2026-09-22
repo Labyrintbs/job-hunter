@@ -389,3 +389,22 @@ notifications:
   enabled: true
   min_score: 60       # only notify jobs at/above this effective score
   channels: [file]    # add: telegram, email
+
+# Daily France-Travail-backed market-demand snapshot (jobhunter/market_trend.py) --
+# a standalone dataset tracking the whole IT/CS market, independent of the
+# francetravail.queries used above for actual candidate fetching. Categories are
+# France Travail's own domaine/ROME codes (see /referentiel/domaines,
+# /referentiel/metiers), not free-text keyword guesses -- domaine:M18 is the
+# official aggregate for the whole "Systemes d'information et de telecommunication"
+# domain; the codeROME entries are a representative slice of it. Needs the same
+# FRANCE_TRAVAIL_CLIENT_ID/SECRET as francetravail above.
+market_trend:
+  enabled: true
+  idf_departements: "75,92,93,94,77,78,91,95"
+  categories:
+    - { label: "Whole IT/CS market", param: domaine, code: M18 }
+    - { label: "Software development", param: codeROME, code: M1805 }
+    - { label: "Data engineering", param: codeROME, code: M1811 }
+    - { label: "AI engineering", param: codeROME, code: M1889 }
+    - { label: "DevOps", param: codeROME, code: M1827 }
+    - { label: "Cybersecurity", param: codeROME, code: M1856 }

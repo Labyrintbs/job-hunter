@@ -98,6 +98,51 @@ def test_watchdog_and_process_use_distinct_labels_and_dont_collide(tmp_path, mon
     assert schedule.current_process() is not None   # untouched
 
 
+def test_market_snapshot_cron_line_shape():
+    line = schedule.market_snapshot_cron_line()
+    assert schedule.MARKET_SNAPSHOT_MARKER in line
+    assert "jobhunter.cli market-snapshot" in line
+
+
+def test_market_snapshot_runs_once_daily_not_hourly():
+    # Unlike watchdog/process (hourly), market-snapshot is a single fixed daily
+    # time -- market demand doesn't move hour to hour. _describe joins multiple
+    # fire times with ", ", so a single time means no comma in that segment.
+    line = schedule.market_snapshot_cron_line(hour=6, minute=10)
+    times_segment = line.split(" -> ")[0]
+    assert "06:10" in times_segment
+    assert ", " not in times_segment
+
+
+def test_install_market_snapshot_writes_a_loadable_plist(tmp_path, monkeypatch):
+    monkeypatch.setattr(schedule, "LAUNCH_AGENTS_DIR", tmp_path)
+    monkeypatch.setattr(schedule.subprocess, "run", lambda *a, **k: _FakeProc())
+
+    line = schedule.install_market_snapshot()
+
+    plist_path = tmp_path / f"{schedule.MARKET_SNAPSHOT_MARKER}.plist"
+    assert plist_path.exists()
+    with open(plist_path, "rb") as f:
+        data = plistlib.load(f)
+    assert data["Label"] == schedule.MARKET_SNAPSHOT_MARKER
+    assert "jobhunter.cli market-snapshot" in data["ProgramArguments"][2]
+    assert data["StartCalendarInterval"] == [{"Hour": 6, "Minute": 10}]   # once a day
+    assert schedule.current_market_snapshot() == line
+
+
+def test_uninstall_market_snapshot_removes_the_plist_and_leaves_others_alone(tmp_path, monkeypatch):
+    monkeypatch.setattr(schedule, "LAUNCH_AGENTS_DIR", tmp_path)
+    monkeypatch.setattr(schedule.subprocess, "run", lambda *a, **k: _FakeProc())
+
+    assert schedule.uninstall_market_snapshot() is False   # nothing installed yet
+    schedule.install_market_snapshot()
+    schedule.install_watchdog(1)
+
+    assert schedule.uninstall_market_snapshot() is True
+    assert not (tmp_path / f"{schedule.MARKET_SNAPSHOT_MARKER}.plist").exists()
+    assert (tmp_path / f"{schedule.WATCHDOG_MARKER}.plist").exists()   # untouched
+
+
 def test_python_resolution_prefers_override_then_conda(tmp_path, monkeypatch):
     monkeypatch.delenv("JOBHUNTER_PYTHON", raising=False)
     monkeypatch.delenv("CONDA_PREFIX", raising=False)

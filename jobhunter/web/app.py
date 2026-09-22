@@ -212,6 +212,23 @@ def companies_page(request: Request):
     )
 
 
+@app.get("/market", response_class=HTMLResponse)
+def market_page(request: Request):
+    """Daily France Travail IT/CS market-demand trend -- independent of the
+    job-search pipeline (jobhunter/market_trend.py)."""
+    with db.connect() as conn:
+        rows = export_mod.view_rows(conn, "v_market_trend")
+    by_scope: dict[str, dict[str, dict[str, object]]] = {"france": {}, "idf": {}}
+    for r in rows:
+        series = by_scope.setdefault(r["scope"], {}).setdefault(
+            r["category"], {"days": [], "counts": []})
+        series["days"].append(r["day"])
+        series["counts"].append(r["total_count"])
+    return TEMPLATES.TemplateResponse(
+        request, "market.html", {"by_scope": by_scope},
+    )
+
+
 @app.get("/rules", response_class=HTMLResponse)
 def rules_page(request: Request):
     with db.connect() as conn:

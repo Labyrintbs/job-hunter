@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block content %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<div class="filters">
+  <span class="pill">Daily open-postings count, France Travail's official IT/CS taxonomy (domaine M18 + ROME sub-codes)</span>
+</div>
+{% for scope, label in [("france", "France (nationwide)"), ("idf", "Île-de-France")] %}
+  <h3 style="margin:24px 0 8px">{{ label }}</h3>
+  {% if by_scope.get(scope) %}
+    <canvas id="chart-{{ scope }}" height="90"></canvas>
+  {% else %}
+    <p class="muted">No snapshots yet -- run <code>jobhunter market-snapshot</code> (or wait for its daily cron) to start collecting data.</p>
+  {% endif %}
+{% endfor %}
+<p class="muted" style="margin-top:20px">
+  Raw data: <a href="/export/v_market_trend.csv">v_market_trend.csv</a>
+  · <code>jobhunter export --view v_market_trend</code>
+</p>
+<script>
+  const BY_SCOPE = {{ by_scope | tojson }};
+  const PALETTE = ["#6ea8fe", "#5ad1a0", "#f6c453", "#f76c6c", "#b78cf6", "#4fd1c5"];
+
+  function renderChart(scope) {
+    const el = document.getElementById("chart-" + scope);
+    if (!el) return;
+    const series = BY_SCOPE[scope] || {};
+    const labels = new Set();
+    Object.values(series).forEach(s => s.days.forEach(d => labels.add(d)));
+    const days = Array.from(labels).sort();
+
+    const datasets = Object.entries(series).map(([category, s], i) => {
+      const byDay = Object.fromEntries(s.days.map((d, j) => [d, s.counts[j]]));
+      return {
+        label: category,
+        data: days.map(d => byDay[d] ?? null),
+        borderColor: PALETTE[i % PALETTE.length],
+        backgroundColor: PALETTE[i % PALETTE.length],
+        spanGaps: true,
+        tension: 0.15,
+      };
+    });
+
+    new Chart(el, {
+      type: "line",
+      data: { labels: days, datasets },
+      options: {
+        responsive: true,
+        interaction: { mode: "index", intersect: false },
+        scales: { y: { beginAtZero: true } },
+      },
+    });
+  }
+
+  renderChart("france");
+  renderChart("idf");
+</script>
+{% endblock %}
