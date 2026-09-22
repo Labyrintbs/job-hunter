@@ -83,6 +83,61 @@ def test_condense_profile_insufficient(tmp_db, monkeypatch):
         assert learn.condense_profile(conn)["status"] == "insufficient"
 
 
+def test_condense_profile_includes_prior_as_reference(tmp_db, monkeypatch):
+    monkeypatch.setattr(learn.provider, "available", lambda: True)
+    captured = {}
+
+    def fake_generate(prompt, system=None, **kw):
+        captured["prompt"] = prompt
+        return "- Prefer applied ML product roles\n- Avoid blockchain / web3"
+
+    monkeypatch.setattr(learn.provider, "generate", fake_generate)
+    with db.connect() as conn:
+        db.add_profile(conn, "- Prefer backend roles\n- Avoid startups", 5, 5)
+        _add(conn, "1", "ML Engineer", "GoodCo", "pytorch", "interested")
+        _add(conn, "2", "Blockchain Engineer", "BadCorp", "solidity", "dismissed", "wrong_domain")
+        _add(conn, "3", "Web3 Engineer", "BadCorp", "ethereum", "dismissed", "wrong_domain")
+        learn.condense_profile(conn)
+    assert "Prefer backend roles" in captured["prompt"]
+    assert "reference" in captured["prompt"].lower() or "refine" in captured["prompt"].lower()
+
+
+def test_condense_profile_first_run_omits_prior_section(tmp_db, monkeypatch):
+    monkeypatch.setattr(learn.provider, "available", lambda: True)
+    captured = {}
+
+    def fake_generate(prompt, system=None, **kw):
+        captured["prompt"] = prompt
+        return "x"
+
+    monkeypatch.setattr(learn.provider, "generate", fake_generate)
+    with db.connect() as conn:
+        _add(conn, "1", "ML Engineer", "GoodCo", "pytorch", "interested")
+        _add(conn, "2", "Blockchain Engineer", "BadCorp", "solidity", "dismissed", "wrong_domain")
+        _add(conn, "3", "Web3 Engineer", "BadCorp", "ethereum", "dismissed", "wrong_domain")
+        learn.condense_profile(conn)
+    assert "PREVIOUS PROFILE" not in captured["prompt"]
+    assert "(none)" not in captured["prompt"]
+
+
+def test_example_block_shows_interested_reasons(tmp_db):
+    with db.connect() as conn:
+        _add(conn, "1", "ML Engineer", "GoodCo", "pytorch", "interested", "custom:great team")
+        rows = db.labeled_jobs(conn, "interested")
+    block = learn._example_block(rows, "interested_reasons")
+    assert "[reasons: custom:great team]" in block
+
+
+def test_example_block_truncates_long_reason(tmp_db):
+    with db.connect() as conn:
+        _add(conn, "1", "X", "Y", "z", "dismissed", "a" * 5000)
+        rows = db.labeled_jobs(conn, "dismissed")
+    block = learn._example_block(rows, "dismiss_reasons")
+    assert len(block) < 1000  # well under the raw 5000-char reason
+    assert "a" * learn._MAX_REASON_CHARS in block
+    assert "a" * (learn._MAX_REASON_CHARS + 1) not in block
+
+
 def test_approve_and_reject_flow(tmp_db):
     with db.connect() as conn:
         db.add_rule(conn, "negative_kw", "blockchain", source="learned", active=0)

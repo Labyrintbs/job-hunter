@@ -129,7 +129,9 @@ block that feeds back into the judge. See *The feedback loop* near the bottom.
 - **Preference profile (LLM-condensed)**: Claude distills your interested-vs-dismissed
   jobs into a short "Prefer … / Avoid …" instruction block, versioned in the DB and
   shown on the Rules page. It's injected into the LLM judge (Phase 5). Grounded in
-  your evidence only. CLI: `jobhunter profile show|update`.
+  your evidence only — each update re-derives the profile from the full current
+  evidence, using the prior version only as a reference to refine (never appended
+  to or copied unchanged). CLI: `jobhunter profile show|update`.
 - **Track**: SQLite with cross-run dedup (by id *and* content); each posting moves
   through a status lifecycle from a table + kanban dashboard.
 - **Market trends**: every fetch records an aggregate snapshot (`fetch_runs`) and
