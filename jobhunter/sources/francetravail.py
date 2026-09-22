@@ -28,6 +28,10 @@ IDF_DEPARTEMENTS = "75,92,93,94,77,78,91,95"
 
 PAGE_SIZE = 50
 THROTTLE_SECONDS = 0.3
+# The API rejects a "departement" filter with more than 5 values (HTTP 400: "Le
+# nombre de departements maximum autorise pour la recherche est de 5") -- verified
+# live. IDF alone is already 8, so any real departements list needs batching.
+MAX_DEPARTEMENTS_PER_REQUEST = 5
 
 _token_cache: dict[str, tuple[str, float]] = {}
 
@@ -84,24 +88,36 @@ def fetch(query: str, departements: str = IDF_DEPARTEMENTS,
 
     token = _get_token(client_id, client_secret)
     headers = {"Authorization": f"Bearer {token}"}
+    dept_list = [d.strip() for d in departements.split(",") if d.strip()]
+    batches = [dept_list[i:i + MAX_DEPARTEMENTS_PER_REQUEST]
+               for i in range(0, len(dept_list), MAX_DEPARTEMENTS_PER_REQUEST)] or [[]]
+
     jobs: list[Job] = []
-    start = 0
+    seen_ids: set[str] = set()
     with httpx.Client(timeout=20, headers=headers) as client:
-        while len(jobs) < max_results:
-            end = start + PAGE_SIZE - 1
-            resp = client.get(SEARCH_URL, params={
-                "motsCles": query,
-                "departement": departements,
-            }, headers={"Range": f"offres {start}-{end}"})
-            if resp.status_code not in (200, 206):
-                break
-            data = resp.json()
-            results = data.get("resultats", [])
-            if not results:
-                break
-            jobs.extend(_to_job(o) for o in results)
-            start += PAGE_SIZE
-            time.sleep(THROTTLE_SECONDS)
-            if len(results) < PAGE_SIZE:
+        for batch in batches:
+            start = 0
+            while len(jobs) < max_results:
+                end = start + PAGE_SIZE - 1
+                resp = client.get(SEARCH_URL, params={
+                    "motsCles": query,
+                    "departement": ",".join(batch),
+                }, headers={"Range": f"offres {start}-{end}"})
+                if resp.status_code not in (200, 206):
+                    break
+                data = resp.json()
+                results = data.get("resultats", [])
+                if not results:
+                    break
+                for o in results:
+                    oid = str(o.get("id", ""))
+                    if oid not in seen_ids:
+                        seen_ids.add(oid)
+                        jobs.append(_to_job(o))
+                start += PAGE_SIZE
+                time.sleep(THROTTLE_SECONDS)
+                if len(results) < PAGE_SIZE:
+                    break
+            if len(jobs) >= max_results:
                 break
     return jobs[:max_results]

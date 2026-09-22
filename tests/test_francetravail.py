@@ -66,8 +66,8 @@ def test_fetch_paginates_until_short_page(monkeypatch):
                 "lieuTravail": {"libelle": "Paris"}, "description": "d"}
 
     pages = [
-        {"resultats": [make_offer(i) for i in range(ft.PAGE_SIZE)]},   # full page -> keep going
-        {"resultats": [make_offer(i) for i in range(5)]},              # short page -> stop
+        {"resultats": [make_offer(i) for i in range(ft.PAGE_SIZE)]},           # full page -> keep going
+        {"resultats": [make_offer(i) for i in range(ft.PAGE_SIZE, ft.PAGE_SIZE + 5)]},  # short page -> stop
     ]
 
     class Client:
@@ -90,5 +90,58 @@ def test_fetch_paginates_until_short_page(monkeypatch):
             return Resp()
 
     monkeypatch.setattr(ft.httpx, "Client", Client)
-    jobs = ft.fetch("ml engineer", max_results=1000)
+    # A single department (<= MAX_DEPARTEMENTS_PER_REQUEST) -- one batch, so this
+    # test exercises pure pagination without the batching loop in play.
+    jobs = ft.fetch("ml engineer", departements="75", max_results=1000)
     assert len(jobs) == ft.PAGE_SIZE + 5
+
+
+def test_fetch_batches_departements_and_dedups_across_batches(monkeypatch):
+    # The API rejects more than 5 departements per request (verified live), so a
+    # real departements list (e.g. IDF's 8) must be split into batches -- and the
+    # same offer can legitimately appear in more than one department's results
+    # (multi-site postings), so results must be deduped by id across batches.
+    ft._token_cache.clear()
+    monkeypatch.setenv("FRANCE_TRAVAIL_CLIENT_ID", "cid")
+    monkeypatch.setenv("FRANCE_TRAVAIL_CLIENT_SECRET", "csecret")
+    monkeypatch.setattr(ft, "_get_token", lambda cid, secret: "tok")
+    monkeypatch.setattr(ft.time, "sleep", lambda *_: None)
+
+    def make_offer(i):
+        return {"id": str(i), "intitule": "ML Engineer", "entreprise": {"nom": "Acme"},
+                "lieuTravail": {"libelle": "Paris"}, "description": "d"}
+
+    class Client:
+        def __init__(self, *a, **k):
+            self.requested_departements = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def get(self, url, params=None, headers=None):
+            self.requested_departements.append(params["departement"])
+            # batch 1 -> offers 0,1 ; batch 2 -> offers 1,2 (id 1 overlaps -> dedup)
+            offers = [make_offer(0), make_offer(1)] if len(self.requested_departements) == 1 \
+                else [make_offer(1), make_offer(2)]
+            class Resp:
+                status_code = 200
+                def json(self_inner):
+                    return {"resultats": offers}
+            return Resp()
+
+    client_holder = {}
+
+    def fake_client(*a, **k):
+        c = Client(*a, **k)
+        client_holder["client"] = c
+        return c
+
+    monkeypatch.setattr(ft.httpx, "Client", fake_client)
+    jobs = ft.fetch("ml engineer", departements=ft.IDF_DEPARTEMENTS, max_results=1000)
+
+    client = client_holder["client"]
+    assert client.requested_departements == ["75,92,93,94,77", "78,91,95"]
+    assert sorted(j.external_id for j in jobs) == ["0", "1", "2"]
