@@ -232,23 +232,14 @@ def market_page(request: Request):
 @app.get("/rules", response_class=HTMLResponse)
 def rules_page(request: Request):
     with db.connect() as conn:
-        pending = db.list_rules(conn, active=0)
         active = db.list_rules(conn, active=1)
-        n_dismissed = db.dismissed_count(conn)
         profile = db.current_profile(conn)
         metrics = db.false_negative_stats(conn)
     return TEMPLATES.TemplateResponse(
         request, "rules.html",
-        {"pending": pending, "active": active, "n_dismissed": n_dismissed,
-         "profile": profile, "metrics": metrics, "llm_available": provider.available()},
+        {"active": active, "profile": profile, "metrics": metrics,
+         "llm_available": provider.available()},
     )
-
-
-@app.post("/rules/mine")
-def rules_mine_route():
-    with db.connect() as conn:
-        learn.mine_rules(conn)
-    return RedirectResponse(url="/rules", status_code=303)
 
 
 @app.post("/rules/{rule_id}/approve")

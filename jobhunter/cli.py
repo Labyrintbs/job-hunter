@@ -115,7 +115,7 @@ def main(argv: list[str] | None = None) -> int:
                    "market-demand counts (independent of the job-search pipeline)")
 
     p_rules = sub.add_parser("rules", help="learn / review filter rules from your feedback")
-    p_rules.add_argument("action", choices=["mine", "list", "approve", "reject", "add"], default="list", nargs="?")
+    p_rules.add_argument("action", choices=["list", "approve", "reject", "add"], default="list", nargs="?")
     p_rules.add_argument("rule_id", type=int, nargs="?", help="rule id for approve/reject")
     p_rules.add_argument("--show", choices=["all", "pending", "active"], default="all")
     p_rules.add_argument("--kind", choices=list(db.RULE_KINDS), help="for add")
@@ -362,19 +362,6 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "rules":
         db.init_db()
-        if args.action == "mine":
-            with db.connect() as conn:
-                result = learn.mine_rules(conn)
-            if result["status"] == "insufficient":
-                print(f"not enough feedback yet: {result['dismissed']} dismissed "
-                      f"(need {result['need']}). Dismiss more jobs, then re-run.")
-                return 0
-            print(f"from {result['dismissed']} dismissed / {result['interested']} interested: "
-                  f"{result['suggested']} candidates, {result['new']} new (inactive, pending your approval)")
-            for c in result["rules"][:15]:
-                print(f"  [{c['score']:.2f}] {c['kind']:13s} {c['value']:30s} ({c['evidence']})")
-            print("\napprove with: jobhunter rules approve <id>   (see: jobhunter rules list)")
-            return 0
         if args.action in ("approve", "reject"):
             if args.rule_id is None:
                 print(f"{args.action} needs a rule id"); return 1

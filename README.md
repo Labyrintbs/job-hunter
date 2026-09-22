@@ -21,7 +21,7 @@ target); individual stages are also their own CLI commands / dashboard buttons.
    │                  Filtered     — stored but auto-hidden: senior title,
    │                                 requires > seniority.max_years, citizenship
    │                                 requirement, below min_score, or matched an
-   │                                 approved learned rule. Never deleted.
+   │                                 active filter rule. Never deleted.
    │                  main list    — everything else
    ▼
  db.upsert_job      SQLite (data/jobhunter.db). 3-tier cross-source dedup:
@@ -61,10 +61,10 @@ target); individual stages are also their own CLI commands / dashboard buttons.
 ```
 
 **The feedback you give closes the loop.** 👍 interested / 👎 dismiss (with
-reason chips) is explicit-only ground truth: `jobhunter rules mine` turns it into
-candidate keyword/company filter rules (approval-gated — nothing filters your
-jobs until you approve it), and `jobhunter profile update` distills a Prefer/Avoid
-block that feeds back into the judge. See *The feedback loop* near the bottom.
+reason chips) is explicit-only ground truth: `jobhunter profile update` distills
+it into a Prefer/Avoid block that feeds back into the judge, and you can hand-add
+your own keyword/company filter rules any time with `jobhunter rules add`. See
+*The feedback loop* near the bottom.
 
 ## Features
 - **Fetch** from Welcome to the Jungle (public Algolia backend), company ATS
@@ -119,13 +119,11 @@ block that feeds back into the judge. See *The feedback loop* near the bottom.
 - **Feedback (explicit-only)**: 👍 interested / 👎 dismiss with fixed reason chips
   (`too_senior`, `wrong_domain`, `location`, …). Dismissed jobs leave the main list
   into a Dismissed view; 👍 rescues a job from the Filtered bucket. This is the
-  clean ground-truth signal the learning phases (4/5) will mine. CLI:
+  clean ground-truth signal the learning phase (4) draws on. CLI:
   `jobhunter feedback <id> --label dismissed --reasons too_senior,location`.
-- **Learn filter rules (approval-gated)**: a transparent miner reads your dismissed
-  (negatives) vs interested (positives) jobs and proposes discriminative keyword /
-  company rules by document-frequency difference — each with its evidence. Rules
-  land **inactive**; nothing filters your jobs until you approve it in the Rules
-  page (or `jobhunter rules approve <id>`). CLI: `jobhunter rules mine|list|approve|reject|add`.
+- **Manual filter rules**: hand-add a keyword or company block any time you know
+  for certain you never want to see it again — applies immediately (no approval
+  step), shown and removable on the Rules page. CLI: `jobhunter rules add|list|approve|reject`.
 - **Preference profile (LLM-condensed)**: Claude distills your interested-vs-dismissed
   jobs into a short "Prefer … / Avoid …" instruction block, versioned in the DB and
   shown on the Rules page. It's injected into the LLM judge (Phase 5). Grounded in
@@ -314,10 +312,10 @@ $P -m pytest -q
 ```
 jobhunter/
   sources/                          fetch: wttj, ats, linkedin, francetravail, hellowork
-  match.py                          scoring + relevance/seniority gate; applies approved rules
+  match.py                          scoring + relevance/seniority gate; applies active filter rules
   enrich.py                         full-description fetch (new jobs + engaged backlog)
   jd_store.py                       saves each enriched JD to data/jd/ as plain text
-  learn.py                          rule miner + LLM preference-profile condenser
+  learn.py                          LLM preference-profile condenser
   llm/provider.py                   Claude seam (API key or claude CLI)
   llm/judge.py, apply/cover_letter.py   LLM fit-judge (profile-injected) + cover letter
   tailor/snippet_bank.py, tailor/engine.py   parse + reorder + compile CV
@@ -331,9 +329,9 @@ config/, templates/, tests/, data/  (data/ created on first run; git-ignored)
 1. **Screen** — obvious senior/mismatch jobs auto-hide into the Filtered bucket.
 2. **Judge** you — 👍/👎 with reasons; explicit-only ground truth.
 3. **Enrich** — engaged jobs get their full description fetched.
-4. **Learn** — `rules mine` proposes keyword/company rules (approval-gated);
-   `profile update` distills a Prefer/Avoid block.
-5. **Apply** — approved rules feed `match.screen`; the profile feeds the LLM judge.
+4. **Learn** — `profile update` distills a Prefer/Avoid block; hand-add a
+   keyword/company rule any time with `rules add`.
+5. **Apply** — active rules feed `match.screen`; the profile feeds the LLM judge.
 6. **Calibrate** — `jobhunter metrics` reports the false-negative rate (interested
    jobs the screen had hidden); if it climbs, loosen `seniority.max_years` or drop a rule.
 
