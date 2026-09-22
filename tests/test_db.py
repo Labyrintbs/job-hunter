@@ -45,6 +45,51 @@ def test_cross_source_content_dedup(tmp_db):
         assert db.get_job(conn, jid1)["score"] == 65   # refreshed by the second sighting
 
 
+def test_upsert_refreshes_score_and_geo_tier_before_enrichment(tmp_db):
+    # Baseline: an un-enriched row (description_full=0) is exactly the case that
+    # SHOULD keep refreshing on every re-fetch -- e.g. a rule change or a corrected
+    # rule-based score. This must keep working after the enrichment guard below.
+    with db.connect() as conn:
+        jid, _ = db.upsert_job(conn, J("1", url="http://x/1"), 40, "r1", geo_tier="outside")
+        assert db.get_job(conn, jid)["score"] == 40
+        db.upsert_job(conn, J("1", url="http://x/1"), 70, "r2", geo_tier="idf")
+        row = db.get_job(conn, jid)
+        assert row["score"] == 70 and row["geo_tier"] == "idf" and row["match_reasons"] == "r2"
+
+
+def test_upsert_does_not_clobber_screening_after_enrichment(tmp_db):
+    # Regression: pipeline.enrich_one() confirms LinkedIn's real remote status from
+    # the full JD text and bumps geo_tier/score accordingly -- but recent_hours means
+    # the same posting keeps resurfacing in later fetches for up to 7 days. A routine
+    # re-fetch only ever has the raw, un-tagged location (LinkedIn never tags remote
+    # at fetch time), so recomputing score/geo_tier from it on every pass silently
+    # reverted the enrichment-confirmed values back to the thinner pre-enrichment
+    # ones -- verified live against a real production row (job #1403).
+    with db.connect() as conn:
+        jid, _ = db.upsert_job(conn, J("1", url="http://x/1"), 37, "geo: outside France",
+                               geo_tier="outside")
+        # Enrichment lands: full JD text confirms remote, location/geo_tier/score updated.
+        db.set_description(conn, jid, "x" * 500)
+        db.update_screening(conn, jid, 54, "geo: remote at an EU-based employer",
+                            filtered=False, filter_reason="", seniority="", min_years=None,
+                            role_category="ML")
+        conn.execute("UPDATE jobs SET geo_tier = ? WHERE id = ?", ("europe_remote", jid))
+        row = db.get_job(conn, jid)
+        assert row["description_full"] == 1
+        assert row["score"] == 54 and row["geo_tier"] == "europe_remote"
+
+        # A later re-fetch of the SAME posting only has the raw, un-tagged location --
+        # this must NOT revert the enrichment-confirmed score/geo_tier/filtered/reasons.
+        db.upsert_job(conn, J("1", url="http://x/1"), 37, "geo: outside France",
+                      geo_tier="outside", filtered=True, filter_reason="score<15")
+        row = db.get_job(conn, jid)
+        assert row["score"] == 54
+        assert row["geo_tier"] == "europe_remote"
+        assert row["filtered"] == 0
+        assert row["match_reasons"] == "geo: remote at an EU-based employer"
+        assert row["role_category"] == "ML"
+
+
 def test_cross_source_dedup_backfills_missing_url_but_never_overwrites(tmp_db):
     # Regression: a manually-imported job (pipeline.import_manual_job) can be added
     # with no url. When an automated fetch later matches it to a real posting, the

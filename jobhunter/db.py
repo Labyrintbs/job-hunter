@@ -502,7 +502,14 @@ def upsert_job(conn: sqlite3.Connection, job: Job, score: int, reasons: str, *,
                geo_tier: str = "", role_category: str = "") -> tuple[int, bool]:
     """Insert a job if new. Returns (job_id, is_new). Existing jobs keep their
     application status; their score/reasons and screening flags are refreshed, and
-    last_seen is stamped every time the job is seen (for staleness / market signals).
+    last_seen is stamped every time the job is seen (for staleness / market signals) --
+    unless the row has already been enriched (description_full=1), in which case
+    score/match_reasons/filtered/filter_reason/seniority/min_years/geo_tier/role_category
+    are left untouched. A routine re-fetch only ever supplies a raw search-result
+    listing, never richer than the full JD already saved, so once enrichment has
+    refined those fields (e.g. LinkedIn's "- Remote" suffix, only added post-enrichment
+    from real JD text -- see pipeline.enrich_one), a plain re-fetch must not silently
+    recompute and clobber them back to the thinner pre-enrichment values.
     Dedups on (source, external_id), then on exact URL, then cross-source on normalized
     (company, title, location) — the same posting fetched from WTTJ, a company's own ATS
     board, and LinkedIn all land on one row instead of three. If the existing row has no
@@ -519,11 +526,20 @@ def upsert_job(conn: sqlite3.Connection, job: Job, score: int, reasons: str, *,
     if not row:
         row = _find_content_match(conn, job)
     if row:
-        old = conn.execute("SELECT filtered FROM jobs WHERE id = ?", (row["id"],)).fetchone()
+        old = conn.execute(
+            "SELECT filtered FROM jobs WHERE id = ?", (row["id"],)
+        ).fetchone()
         conn.execute(
-            """UPDATE jobs SET score = ?, match_reasons = ?, filtered = ?,
-               filter_reason = ?, seniority = ?, min_years = ?, geo_tier = ?,
-               role_category = ?, last_seen = datetime('now'),
+            """UPDATE jobs SET
+               score = CASE WHEN description_full THEN score ELSE ? END,
+               match_reasons = CASE WHEN description_full THEN match_reasons ELSE ? END,
+               filtered = CASE WHEN description_full THEN filtered ELSE ? END,
+               filter_reason = CASE WHEN description_full THEN filter_reason ELSE ? END,
+               seniority = CASE WHEN description_full THEN seniority ELSE ? END,
+               min_years = CASE WHEN description_full THEN min_years ELSE ? END,
+               geo_tier = CASE WHEN description_full THEN geo_tier ELSE ? END,
+               role_category = CASE WHEN description_full THEN role_category ELSE ? END,
+               last_seen = datetime('now'),
                url = CASE WHEN COALESCE(url, '') = '' THEN ? ELSE url END,
                was_filtered = CASE WHEN ? THEN 1 ELSE was_filtered END WHERE id = ?""",
             (score, reasons, int(filtered), filter_reason, seniority, min_years, geo_tier,
