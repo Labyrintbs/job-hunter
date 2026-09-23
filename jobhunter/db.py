@@ -488,10 +488,10 @@ def possible_duplicates_map(conn: sqlite3.Connection) -> dict[int, list[int]]:
 
 
 def _find_content_match(conn: sqlite3.Connection, job: Job) -> sqlite3.Row | None:
-    """Cross-source dedup: same normalized company + title + city, any source (different
-    platforms give the same real posting different URLs and IDs, so those can't be the
-    match key here). SQL narrows to same company first (cheap, uses no accent folding)
-    before the accent-aware Python comparison on the small remainder."""
+    """Cross-source dedup: matches on normalized company + title + city, since different
+    platforms give the same real posting different URLs/IDs. First filters to same-company
+    rows in SQL (cheap), then compares title/city on just that shortlist in Python, where
+    normalization can also fold out accents."""
     norm_title = _normalize(job.title)
     norm_city = _norm_city(job.location)
     candidates = conn.execute(
@@ -523,21 +523,14 @@ def upsert_job(conn: sqlite3.Connection, job: Job, score: int, reasons: str, *,
                filtered: bool = False, filter_reason: str = "",
                seniority: str = "", min_years: int | None = None,
                geo_tier: str = "", role_category: str = "") -> tuple[int, bool]:
-    """Insert a job if new. Returns (job_id, is_new). Existing jobs keep their
-    application status; their score/reasons and screening flags are refreshed, and
-    last_seen is stamped every time the job is seen (for staleness / market signals) --
-    unless the row has already been enriched (description_full=1), in which case
-    score/match_reasons/filtered/filter_reason/seniority/min_years/geo_tier/role_category
-    are left untouched. A routine re-fetch only ever supplies a raw search-result
-    listing, never richer than the full JD already saved, so once enrichment has
-    refined those fields (e.g. LinkedIn's "- Remote" suffix, only added post-enrichment
-    from real JD text -- see pipeline.enrich_one), a plain re-fetch must not silently
-    recompute and clobber them back to the thinner pre-enrichment values.
-    Dedups on (source, external_id), then on exact URL, then cross-source on normalized
-    (company, title, location) — the same posting fetched from WTTJ, a company's own ATS
-    board, and LinkedIn all land on one row instead of three. If the existing row has no
-    url (e.g. a manually-imported job added without one), a later match backfills it —
-    but never overwrites a url that's already there."""
+    """Insert a job if new, else refresh it. Returns (job_id, is_new).
+
+    Matches on (source, external_id), then exact url, then cross-source content
+    match (company+title+location) -- so the same posting from WTTJ/an ATS/LinkedIn
+    collapses to one row. Once description_full=1, score/reasons/filtered/seniority/
+    geo_tier/role_category are frozen: a routine re-fetch only has the thinner
+    search-result listing and must not overwrite fields refined from the full JD.
+    url is backfilled if missing but never overwritten once set."""
     row = conn.execute(
         "SELECT id FROM jobs WHERE source = ? AND external_id = ?",
         (job.source, job.external_id),

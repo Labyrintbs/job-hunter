@@ -266,15 +266,11 @@ def _auto_tailor_jobs(job_ids: list[int], limit: int) -> int:
 def daily_run(judge: bool = True, judge_min_score: int = 15, judge_limit: int = 15,
               auto_tailor: bool = True, auto_tailor_limit: int = 10,
               force_fetch: bool = False) -> dict:
-    """One scheduled run: fetch everywhere, enrich every new job with real JD content
-    (LinkedIn/SmartRecruiters cards carry none up front), re-score with that content,
-    THEN LLM-judge the new promising jobs (highest rule-score first, capped to bound
-    cost) so the judge sees real descriptions instead of title-only stubs. Jobs the
-    judge rates strong/good/stretch (i.e. not an outright "weak" fit) then get a CV
-    auto-tailored + a cover letter drafted (capped separately, since each cover letter
-    is its own LLM call) so they're ready for you to review and submit yourself --
-    never auto-submitted. Returns a summary including the new job rows (for
-    notification)."""
+    """One scheduled run: fetch, enrich new jobs (so the judge sees real JD text, not
+    title-only stubs), LLM-judge the promising ones (capped, highest-score first), then
+    auto-tailor a CV + cover letter for strong/good/stretch verdicts (capped separately,
+    since each cover letter is its own LLM call) -- ready for you to review and submit
+    yourself, never auto-submitted."""
     config = load_search_config()
     stats = run_fetch(config, force=force_fetch)
 

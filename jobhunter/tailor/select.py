@@ -103,9 +103,8 @@ def select(job: Job, experiences: list[tuple[str, list[str]]], projects: list[tu
     """`experiences`/`projects` are [(block text, [bullet strings])] pairs, see
     engine._menu_pairs. `feedback` (optional) is a hint from a previous attempt
     that didn't fit the page, e.g. "compiled to 3 pages, trim more content".
-    `judge_context` (optional) is the LLM fit-judge's own verdict/reasons for
-    this same posting -- already computed and stored on the job before tailoring
-    ever runs, so this is just reusing it as background, not a new inference."""
+    `judge_context` (optional) is the fit-judge's own verdict/reasons for this
+    posting, passed through as background (see pipeline._judge_context)."""
     feedback_block = f"\nNOTE: {feedback}\n" if feedback else "\n"
     judge_block = f"\nFIT-JUDGE'S OWN ASSESSMENT OF THIS POSTING (background only, don't quote it back):\n{judge_context}\n" if judge_context else ""
     prompt = PROMPT.format(

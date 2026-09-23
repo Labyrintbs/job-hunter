@@ -41,10 +41,8 @@ Write the cover letter body only (no address block, no placeholders like [Name])
 
 
 def draft(job: Job, judge_context: str | None = None) -> str:
-    """`judge_context` (optional) is the LLM fit-judge's own verdict/reasons for
-    this same posting -- already computed and stored on the job before the
-    cover letter is drafted, so this reuses it as background rather than
-    re-deriving the fit assessment from scratch."""
+    """`judge_context` (optional) is the fit-judge's own verdict/reasons for this
+    posting, passed through as background (see pipeline._judge_context)."""
     judge_block = f"\nFIT-JUDGE'S OWN ASSESSMENT OF THIS POSTING (background only, don't quote it back):\n{judge_context}\n" if judge_context else ""
     prompt = PROMPT.format(
         profile=profile_text()[:6000],
