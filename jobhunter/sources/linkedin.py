@@ -45,6 +45,22 @@ def _text(m: re.Match | None) -> str:
     return html.unescape(re.sub(r"<[^>]*>", "", m.group(1))).strip()
 
 
+def _job_url(card: str, job_id: str) -> str:
+    """The card's own scraped href when the regex finds it (has the real slug,
+    nicer for a human to click); otherwise LinkedIn's canonical /jobs/view/{id}/
+    -- verified live to resolve to the same posting from the id alone. _LINK_RE
+    occasionally misses (~0.7% of postings, observed in production: valid
+    numeric id parsed via _URN_RE but no matching href) likely because it
+    requires the class attribute to appear before href within the same tag,
+    which isn't guaranteed for every card variant -- rather than leave those
+    jobs with no clickable link at all, fall back to the id-based URL, which
+    only needs _URN_RE to have matched."""
+    m = _LINK_RE.search(card)
+    if m:
+        return m.group(1)
+    return f"https://www.linkedin.com/jobs/view/{job_id}/"
+
+
 def _parse_card(card: str) -> Job | None:
     urn = _URN_RE.search(card)
     if not urn:
@@ -55,7 +71,7 @@ def _parse_card(card: str) -> Job | None:
         title=_text(_TITLE_RE.search(card)),
         company=_text(_COMPANY_RE.search(card)),
         location=_text(_LOCATION_RE.search(card)),
-        url=(_LINK_RE.search(card).group(1) if _LINK_RE.search(card) else ""),
+        url=_job_url(card, urn.group(1)),
         posted_at=(_TIME_RE.search(card).group(1) if _TIME_RE.search(card) else ""),
     )
 

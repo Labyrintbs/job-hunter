@@ -32,6 +32,34 @@ def test_card_without_urn_is_skipped():
     assert linkedin._parse_card("<div>no urn here</div>") is None
 
 
+CARD_WITHOUT_MATCHING_LINK = """
+<li>
+  <div class="base-card job-search-card" data-entity-urn="urn:li:jobPosting:4468070547">
+    <a href="https://fr.linkedin.com/jobs/view/data-scientist-4468070547" class="base-card__full-link">
+      <span class="sr-only"> Data scientist (H/F) </span>
+    </a>
+    <h3 class="base-search-card__title"> Data scientist (H/F) </h3>
+    <h4 class="base-search-card__subtitle"><a class="hidden-nested-link">Portify Services</a></h4>
+    <span class="job-search-card__location">Paris, Île-de-France, France</span>
+  </div>
+</li>
+"""
+
+
+def test_parse_card_falls_back_to_canonical_url_when_link_regex_misses():
+    # Regression: observed live in production -- a valid numeric id parses fine
+    # via _URN_RE but _LINK_RE (which requires the class attribute before href
+    # within the same tag) doesn't match every card variant, e.g. href-before-
+    # class attribute order as in this fixture. Previously this left job.url
+    # empty, which the dashboard renders as an unclickable title with no way
+    # to reach the real posting. LinkedIn's canonical /jobs/view/{id}/ URL
+    # works from the id alone (verified live) and is used as a fallback.
+    jobs = [j for j in (linkedin._parse_card(c) for c in linkedin._CARD_RE.findall(CARD_WITHOUT_MATCHING_LINK)) if j]
+    assert len(jobs) == 1
+    assert jobs[0].external_id == "4468070547"
+    assert jobs[0].url == "https://www.linkedin.com/jobs/view/4468070547/"
+
+
 class _Resp:
     def __init__(self, status_code, text=""):
         self.status_code = status_code
