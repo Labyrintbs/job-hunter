@@ -89,3 +89,45 @@ companies:
   - { name: Dolead, ats: teamtailor, token: dolead }
   - { name: Deskbird, ats: personio, token: deskbird }
   - { name: Schindler, ats: successfactors, token: job.schindler.com }
+  # Below: added 2026-09-24, found via GitHub/web research and live-verified
+  # (real board, >=1 France-located posting) before adding.
+  - { name: Alma, ats: greenhouse, token: alma31 }
+  - { name: Dashlane, ats: greenhouse, token: dashlane }
+  - { name: DataDome, ats: greenhouse, token: ddome }
+  - { name: DNA Script, ats: greenhouse, token: dnascript }  # weak fit: biotech, only 1 France posting
+  - { name: Ouihelp, ats: greenhouse, token: ouihelp }  # weak fit: mostly caregiver roles, not ML/data
+  - { name: Finary, ats: ashby, token: finary }
+  - { name: Holonomy, ats: ashby, token: holonomy }
+  - { name: Harmattan AI, ats: ashby, token: harmattan-ai }
+  - { name: AMI, ats: ashby, token: ami }
+  - { name: Seyna, ats: ashby, token: seyna }
+  - { name: Cheerz, ats: lever, token: cheerz }
+  - { name: Choose, ats: lever, token: choose }  # weak fit: mostly sales/BD roles
+  - { name: Malt, ats: lever, token: malt }
+  - { name: Swan, ats: teamtailor, token: swanio }
+  - { name: Pasqal, ats: teamtailor, token: pasqal }
+  - { name: Stoik, ats: teamtailor, token: stoik }
+  - { name: GitGuardian, ats: teamtailor, token: gitguardian }
+  - { name: Descartes Underwriting, ats: teamtailor, token: descartesunderwriting }
+  - { name: Click&Boat, ats: teamtailor, token: clickboat }
+  - { name: MWM, ats: teamtailor, token: mwm }
+  - { name: Leocare, ats: teamtailor, token: leocare }
+  - { name: Legalplace, ats: teamtailor, token: legalplace }
+  - { name: Hublo, ats: teamtailor, token: hublo }
+  - { name: MyUnisoft, ats: teamtailor, token: myunisoft }
+  - { name: Exotrail, ats: teamtailor, token: exotrail }
+  - { name: Ornikar, ats: teamtailor, token: ornikar }
+  - { name: Deepki, ats: teamtailor, token: deepki }
+  - { name: Sweep, ats: teamtailor, token: sweep }
+  - { name: MyLight150, ats: teamtailor, token: mylight150 }
+  - { name: Waat, ats: teamtailor, token: waat }
+  - { name: HomeExchange, ats: teamtailor, token: homeexchange }
+  - { name: Tissium, ats: teamtailor, token: tissium }
+  - { name: Papernest, ats: teamtailor, token: papernest }
+  - { name: Quandela, ats: workable, token: quandela }
+  - { name: Ubisoft, ats: smartrecruiters, token: Ubisoft2 }
+  - { name: Capgemini, ats: successfactors, token: careers.capgemini.com }
+  - { name: Alstom, ats: successfactors, token: jobsearch.alstom.com }
+  - { name: Bureau Veritas, ats: successfactors, token: careers.bureauveritas.com }
+  - { name: EssilorLuxottica, ats: successfactors, token: careers.essilorluxottica.com }
+  - { name: Payflows, ats: recruitee, token: payflows }
