@@ -64,6 +64,49 @@ def test_smartrecruiters_france_filter(monkeypatch):
     assert jobs[0].url == "https://jobs.smartrecruiters.com/acme/s1"
 
 
+class _SmartRecruitersClient:
+    """Serves canned page bodies in order, recording every URL requested."""
+    def __init__(self, pages):
+        self._pages = list(pages)
+        self.urls = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def get(self, url):
+        self.urls.append(url)
+        return Resp(self._pages.pop(0))
+
+
+def test_smartrecruiters_paginates_past_one_page(monkeypatch):
+    # Regression: Veolia (2,941 open postings) and Sopra Steria (2,014) both
+    # exceeded the old hardcoded limit=100/no-pagination fetch, silently
+    # dropping >95% of their postings -- confirmed live.
+    page1 = {"content": [{"id": "s1", "name": "A", "location": {"country": "fr"}}], "totalFound": 150}
+    page2 = {"content": [{"id": "s2", "name": "B", "location": {"country": "fr"}}], "totalFound": 150}
+    client = _SmartRecruitersClient([page1, page2])
+    monkeypatch.setattr(ats.httpx, "Client", lambda *a, **k: client)
+
+    jobs = ats.fetch_smartrecruiters("acme", "Acme")
+
+    assert [j.external_id for j in jobs] == ["s1", "s2"]
+    assert len(client.urls) == 2
+    assert "offset=0" in client.urls[0] and "offset=100" in client.urls[1]
+
+
+def test_smartrecruiters_stops_once_totalfound_covered(monkeypatch):
+    page = {"content": [{"id": "s1", "name": "A", "location": {"country": "fr"}}], "totalFound": 1}
+    client = _SmartRecruitersClient([page])
+    monkeypatch.setattr(ats.httpx, "Client", lambda *a, **k: client)
+
+    jobs = ats.fetch_smartrecruiters("acme", "Acme")
+
+    assert len(jobs) == 1 and len(client.urls) == 1
+
+
 def test_recruitee_france_filter(monkeypatch):
     _patch(monkeypatch, {"offers": [
         {"id": 1, "title": "ML Engineer", "city": "Paris", "country": "France",

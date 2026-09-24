@@ -121,27 +121,44 @@ def fetch_ashby(token: str, company: str, country_only: bool = True) -> list[Job
     return jobs
 
 
+_SMARTRECRUITERS_PAGE_SIZE = 100
+# Safety ceiling, not an expected real depth -- confirmed live that Veolia (2,941
+# open postings) and Sopra Steria (2,014) both exceed one page under the old
+# limit=100/no-pagination code, silently dropping >95% of their postings.
+_SMARTRECRUITERS_MAX_PAGES = 50
+
+
 def fetch_smartrecruiters(token: str, company: str, country_only: bool = True) -> list[Job]:
-    url = f"https://api.smartrecruiters.com/v1/companies/{token}/postings?limit=100"
     jobs: list[Job] = []
+    offset = 0
     with httpx.Client(timeout=20, headers=_UA) as c:
-        resp = c.get(url)
-        resp.raise_for_status()
-        for p in resp.json().get("content", []):
-            loc = p.get("location") or {}
-            location = ", ".join(filter(None, [loc.get("city"), loc.get("region"), loc.get("country")]))
-            if country_only and not _is_france(location, loc.get("country", "")):
-                continue
-            pid = p.get("id")
-            jobs.append(Job(
-                source="smartrecruiters",
-                external_id=str(pid),
-                title=(p.get("name") or "").strip(),
-                company=company or (p.get("company") or {}).get("name", ""),
-                location=location + (" (remote)" if loc.get("remote") else ""),
-                url=f"https://jobs.smartrecruiters.com/{token}/{pid}",
-                posted_at=p.get("releasedDate", "") or "",
-            ))
+        for _ in range(_SMARTRECRUITERS_MAX_PAGES):
+            url = (f"https://api.smartrecruiters.com/v1/companies/{token}/postings"
+                   f"?limit={_SMARTRECRUITERS_PAGE_SIZE}&offset={offset}")
+            resp = c.get(url)
+            resp.raise_for_status()
+            data = resp.json()
+            content = data.get("content", [])
+            if not content:
+                break
+            for p in content:
+                loc = p.get("location") or {}
+                location = ", ".join(filter(None, [loc.get("city"), loc.get("region"), loc.get("country")]))
+                if country_only and not _is_france(location, loc.get("country", "")):
+                    continue
+                pid = p.get("id")
+                jobs.append(Job(
+                    source="smartrecruiters",
+                    external_id=str(pid),
+                    title=(p.get("name") or "").strip(),
+                    company=company or (p.get("company") or {}).get("name", ""),
+                    location=location + (" (remote)" if loc.get("remote") else ""),
+                    url=f"https://jobs.smartrecruiters.com/{token}/{pid}",
+                    posted_at=p.get("releasedDate", "") or "",
+                ))
+            offset += _SMARTRECRUITERS_PAGE_SIZE
+            if offset >= data.get("totalFound", 0):
+                break
     return jobs
 
 
