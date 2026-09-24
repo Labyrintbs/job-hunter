@@ -1077,3 +1077,157 @@ def test_judge_context_is_none_when_job_not_yet_judged(tmp_db, config, monkeypat
     pipeline.tailor_one(jid)
 
     assert captured["tailor_ctx"] is None
+
+
+# --- backfill: shared persist helper -----------------------------------------
+
+def test_persist_jobs_does_not_write_fetch_runs(tmp_db, config):
+    job = Job(source="arbeitnow", external_id="1", title="ML Engineer", company="Acme", location="Paris")
+    with db.connect() as conn:
+        kept = pipeline._persist_jobs(conn, config, [job])
+        assert len(kept) == 1
+        assert conn.execute("SELECT COUNT(*) FROM fetch_runs").fetchone()[0] == 0
+    # run_fetch, by contrast, does log a fetch_runs row -- confirms the two
+    # paths genuinely differ, not just that _persist_jobs happens to skip it.
+    pipeline.run_fetch(config, jobs=[Job(source="arbeitnow", external_id="2", title="ML Engineer",
+                                         company="Acme", location="Paris")])
+    with db.connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM fetch_runs").fetchone()[0] == 1
+
+
+def test_persist_jobs_applies_active_filter_rule(tmp_db, config):
+    with db.connect() as conn:
+        db.add_rule(conn, "company_block", "badcorp", active=1)
+        job = Job(source="arbeitnow", external_id="1", title="ML Engineer",
+                 company="BadCorp", location="Paris")
+        kept = pipeline._persist_jobs(conn, config, [job])
+        assert len(kept) == 1
+        jid = kept[0][3]
+        assert db.get_job(conn, jid)["filtered"] == 1
+
+
+# --- backfill: day-of-week group routing -------------------------------------
+
+def _stub_all_backfills(monkeypatch, calls):
+    stub = lambda name: lambda force=False: calls.append(name) or {"fetched": 0}
+    monkeypatch.setattr(pipeline, "_BACKFILL_FUNCS",
+                        {name: stub(name) for name in pipeline._BACKFILL_FUNCS})
+
+
+def test_run_backfill_saturday_runs_only_its_group(monkeypatch):
+    calls = []
+    _stub_all_backfills(monkeypatch, calls)
+    pipeline.run_backfill(day="saturday")
+    assert set(calls) == {"arbeitnow", "wttj"}
+
+
+def test_run_backfill_sunday_runs_only_its_group(monkeypatch):
+    calls = []
+    _stub_all_backfills(monkeypatch, calls)
+    pipeline.run_backfill(day="sunday")
+    assert set(calls) == {"workday", "francetravail", "linkedin_wide"}
+
+
+def test_run_backfill_weekday_runs_nothing(monkeypatch):
+    calls = []
+    _stub_all_backfills(monkeypatch, calls)
+    result = pipeline.run_backfill(day="tuesday")
+    assert calls == [] and result == {}
+
+
+def test_run_backfill_force_ignores_day_and_runs_everything(monkeypatch):
+    calls = []
+    _stub_all_backfills(monkeypatch, calls)
+    pipeline.run_backfill(day="tuesday", force=True)
+    assert set(calls) == set(pipeline._BACKFILL_FUNCS)
+
+
+def test_run_backfill_one_source_failing_does_not_stop_others(monkeypatch, tmp_path):
+    monkeypatch.setattr(pipeline, "BACKFILL_LOG_PATH", tmp_path / "backfill.log")
+    monkeypatch.setattr(pipeline, "_BACKFILL_FUNCS", {
+        "arbeitnow": lambda force=False: (_ for _ in ()).throw(RuntimeError("boom")),
+        "wttj": lambda force=False: {"fetched": 3},
+    })
+    result = pipeline.run_backfill(day="saturday")
+    assert "error" in result["arbeitnow"]
+    assert result["wttj"] == {"fetched": 3}
+
+
+# --- backfill: francetravail resumable date-window walk ----------------------
+
+def test_backfill_francetravail_first_run_starts_with_no_cursor(tmp_db, config, monkeypatch):
+    monkeypatch.setattr(pipeline, "BACKFILL_LOG_PATH", tmp_db.parent / "backfill.log")
+    captured = {}
+    monkeypatch.setattr(pipeline.francetravail, "fetch_before",
+                        lambda query, deps, before_date, window_days=90:
+                        captured.update(before_date=before_date) or ([], "2026-01-01T00:00:00Z", True))
+    pipeline.backfill_francetravail()
+    assert captured["before_date"] is None
+
+
+def test_backfill_francetravail_resumes_saved_cursor_when_due(tmp_db, config, monkeypatch):
+    monkeypatch.setattr(pipeline, "BACKFILL_LOG_PATH", tmp_db.parent / "backfill.log")
+    with db.connect() as conn:
+        db.record_backfill_progress(conn, "francetravail_backfill", "2026-03-01T00:00:00Z", False, 50)
+        conn.execute("UPDATE source_fetch_state SET last_attempted_at = datetime('now', '-200 hours') "
+                     "WHERE source = 'francetravail_backfill'")
+
+    captured = {}
+    monkeypatch.setattr(pipeline.francetravail, "fetch_before",
+                        lambda query, deps, before_date, window_days=90:
+                        captured.update(before_date=before_date) or ([], "2026-02-01T00:00:00Z", False))
+    pipeline.backfill_francetravail()
+    assert captured["before_date"] == "2026-03-01T00:00:00Z"   # resumed, not restarted
+
+
+def test_backfill_francetravail_skips_when_not_due(tmp_db, config, monkeypatch):
+    monkeypatch.setattr(pipeline, "BACKFILL_LOG_PATH", tmp_db.parent / "backfill.log")
+    with db.connect() as conn:
+        db.record_backfill_progress(conn, "francetravail_backfill", "2026-03-01T00:00:00Z", False, 50)
+        # last_attempted_at defaults to "now" -- well under the 168h interval
+
+    called = []
+    monkeypatch.setattr(pipeline.francetravail, "fetch_before",
+                        lambda *a, **k: called.append(1) or ([], "", True))
+    result = pipeline.backfill_francetravail()
+    assert result == {"skipped": "not due yet"} and called == []
+
+
+def test_backfill_francetravail_idles_once_caught_up(tmp_db, config, monkeypatch):
+    monkeypatch.setattr(pipeline, "BACKFILL_LOG_PATH", tmp_db.parent / "backfill.log")
+    with db.connect() as conn:
+        db.record_backfill_progress(conn, "francetravail_backfill", "", True, 0)   # done, just now
+
+    called = []
+    monkeypatch.setattr(pipeline.francetravail, "fetch_before",
+                        lambda *a, **k: called.append(1) or ([], "", True))
+    result = pipeline.backfill_francetravail()
+    assert result == {"skipped": "caught up, idling"} and called == []
+
+
+def test_backfill_francetravail_rewalks_from_scratch_after_idle_period(tmp_db, config, monkeypatch):
+    monkeypatch.setattr(pipeline, "BACKFILL_LOG_PATH", tmp_db.parent / "backfill.log")
+    with db.connect() as conn:
+        db.record_backfill_progress(conn, "francetravail_backfill", "", True, 0)
+        conn.execute("UPDATE source_fetch_state SET last_attempted_at = datetime('now', '-300 hours') "
+                     "WHERE source = 'francetravail_backfill'")   # past the 7-day rewalk_after_days
+
+    captured = {}
+    monkeypatch.setattr(pipeline.francetravail, "fetch_before",
+                        lambda query, deps, before_date, window_days=90:
+                        captured.update(before_date=before_date) or ([], "2026-09-01T00:00:00Z", False))
+    pipeline.backfill_francetravail()
+    assert captured["before_date"] is None   # restarted fresh, not resumed from ""
+
+
+def test_backfill_francetravail_force_bypasses_due_check(tmp_db, config, monkeypatch):
+    monkeypatch.setattr(pipeline, "BACKFILL_LOG_PATH", tmp_db.parent / "backfill.log")
+    with db.connect() as conn:
+        db.record_backfill_progress(conn, "francetravail_backfill", "2026-03-01T00:00:00Z", False, 50)
+
+    called = []
+    monkeypatch.setattr(pipeline.francetravail, "fetch_before",
+                        lambda *a, **k: called.append(1) or ([], "", True))
+    result = pipeline.backfill_francetravail(force=True)
+    assert called   # one call per configured francetravail query, at least one
+    assert "skipped" not in result

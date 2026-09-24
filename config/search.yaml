@@ -377,6 +377,44 @@ arbeitnow:
   max_pages: 10   # 250 jobs/page; modest relevant-hit density (general job board,
                   # not ML-specific) but real, free, and legitimate additional EU spread
 
+# Deep sweep (`jobhunter backfill`) -- separate from the regular polls above, which
+# always restart at position 0/page 1 and are capped shallow for freshness+cost.
+# Split across Saturday (arbeitnow, wttj) and Sunday (workday, francetravail,
+# linkedin_wide) -- see pipeline.BACKFILL_GROUPS -- rather than one big sweep, and
+# most companies don't post over the weekend anyway. arbeitnow/wttj/workday walk
+# fully every run (no cursor -- a saved page/offset number doesn't survive a week
+# of new postings inserting at the front, confirmed live for arbeitnow's feed);
+# dedup (upsert_job) makes the resulting overlap harmless. francetravail is the
+# exception: its minCreationDate/maxCreationDate window is calendar-anchored, so a
+# saved cursor safely resumes across weeks, and sweeping it unboundedly every week
+# would be impolite for a national authenticated API (unlike the two free ones).
+arbeitnow_backfill:
+  enabled: true
+  fetch_interval_hours: 168    # once a week
+  max_pages: 100                # moderate estimate, not a confirmed archive size --
+                                 # probing further live triggered a real HTTP 429
+
+wttj_backfill:
+  enabled: true
+  fetch_interval_hours: 168
+  max_hits: 1100                # confirmed live: covers Algolia's real per-query ceiling (max observed 1,020)
+
+workday_backfill:
+  enabled: true
+  fetch_interval_hours: 168
+  pages_per_query: 15           # confirmed live: covers real observed max (Airbus/"machine learning" = 186)
+
+francetravail_backfill:
+  enabled: true
+  fetch_interval_hours: 168
+  window_days: 90
+  rewalk_after_days: 7          # once fully caught up, re-walk weekly to catch anything a gap missed
+
+linkedin_backfill:
+  enabled: true
+  fetch_interval_hours: 168
+  wide_recent_hours: 720        # 30 days, vs. the regular poll's 168 (7 days)
+
 # Company ATS boards (config/companies.yaml) -- no query/location block needed here,
 # just a fetch cadence. Career pages change slowly (a handful of new roles a week),
 # so checking hourly like LinkedIn/WTTJ would be pure waste.

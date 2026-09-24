@@ -49,8 +49,9 @@ def test_to_job_maps_core_fields():
 
 
 class _Resp:
-    def __init__(self, body):
+    def __init__(self, body, status_code=200):
         self._body = body
+        self.status_code = status_code
 
     def raise_for_status(self):
         pass
@@ -73,10 +74,14 @@ class _Client:
 
     def get(self, url):
         self.urls.append(url)
-        return _Resp(self._pages.pop(0) if self._pages else {"data": [], "links": {}})
+        page = self._pages.pop(0) if self._pages else {"data": [], "links": {}}
+        if isinstance(page, _Resp):
+            return page
+        return _Resp(page)
 
 
 def test_fetch_paginates_via_links_next(monkeypatch):
+    monkeypatch.setattr(arbeitnow.time, "sleep", lambda *_: None)
     page1 = {"data": [_item(slug="a")], "links": {"next": "https://www.arbeitnow.com/api/job-board-api?page=2"}}
     page2 = {"data": [_item(slug="b")], "links": {"next": None}}
     client = _Client([page1, page2])
@@ -89,6 +94,7 @@ def test_fetch_paginates_via_links_next(monkeypatch):
 
 
 def test_fetch_stops_at_max_pages_even_with_more_next_links(monkeypatch):
+    monkeypatch.setattr(arbeitnow.time, "sleep", lambda *_: None)
     page = {"data": [_item(slug="a")], "links": {"next": "https://www.arbeitnow.com/api/job-board-api?page=2"}}
     client = _Client([page, page, page, page, page])
     monkeypatch.setattr(arbeitnow.httpx, "Client", lambda *a, **k: client)
@@ -117,3 +123,30 @@ def test_fetch_skips_items_without_a_slug(monkeypatch):
     jobs = arbeitnow.fetch(max_pages=5)
 
     assert [j.external_id for j in jobs] == ["a"]
+
+
+def test_walk_retries_429_with_backoff_then_succeeds(monkeypatch):
+    sleeps = []
+    monkeypatch.setattr(arbeitnow.time, "sleep", lambda s: sleeps.append(s))
+    page = {"data": [_item(slug="a")], "links": {"next": None}}
+    client = _Client([_Resp(None, 429), _Resp(None, 429), _Resp(page, 200)])
+    monkeypatch.setattr(arbeitnow.httpx, "Client", lambda *a, **k: client)
+
+    jobs, reached_end, rate_limited = arbeitnow._walk(max_pages=5, max_retries=3, backoff_base=0.01)
+
+    assert [j.external_id for j in jobs] == ["a"]
+    assert reached_end is True and rate_limited is False
+    assert len(client.urls) == 3   # two 429s retried, third attempt served the page
+
+
+def test_walk_gives_up_after_max_retries_and_reports_rate_limited(monkeypatch):
+    monkeypatch.setattr(arbeitnow.time, "sleep", lambda *_: None)
+    page1 = {"data": [_item(slug="a")], "links": {"next": "https://www.arbeitnow.com/api/job-board-api?page=2"}}
+    client = _Client([page1, _Resp(None, 429), _Resp(None, 429), _Resp(None, 429)])
+    monkeypatch.setattr(arbeitnow.httpx, "Client", lambda *a, **k: client)
+
+    jobs, reached_end, rate_limited = arbeitnow._walk(max_pages=5, max_retries=2, backoff_base=0.01)
+
+    # page 1's job is kept even though page 2 got rate-limited past retries
+    assert [j.external_id for j in jobs] == ["a"]
+    assert reached_end is False and rate_limited is True

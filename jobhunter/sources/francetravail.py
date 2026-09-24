@@ -15,6 +15,7 @@ from __future__ import annotations
 import os
 import re
 import time
+from datetime import datetime, timedelta, timezone
 
 import httpx
 
@@ -94,8 +95,8 @@ def _to_job(offer: dict) -> Job:
     )
 
 
-def fetch(query: str, departements: str = IDF_DEPARTEMENTS,
-          max_results: int = 150) -> list[Job]:
+def _search(query: str, departements: str | None, max_results: int,
+            extra_params: dict | None = None) -> list[Job]:
     client_id = os.environ.get("FRANCE_TRAVAIL_CLIENT_ID")
     client_secret = os.environ.get("FRANCE_TRAVAIL_CLIENT_SECRET")
     if not (client_id and client_secret):
@@ -111,7 +112,7 @@ def fetch(query: str, departements: str = IDF_DEPARTEMENTS,
             start = 0
             while len(jobs) < max_results:
                 end = start + PAGE_SIZE - 1
-                params = {"motsCles": query}
+                params = {"motsCles": query, **(extra_params or {})}
                 if batch:
                     params["departement"] = batch
                 resp = client.get(SEARCH_URL, params=params,
@@ -134,6 +135,34 @@ def fetch(query: str, departements: str = IDF_DEPARTEMENTS,
             if len(jobs) >= max_results:
                 break
     return jobs[:max_results]
+
+
+def fetch(query: str, departements: str = IDF_DEPARTEMENTS,
+          max_results: int = 150) -> list[Job]:
+    return _search(query, departements, max_results)
+
+
+def fetch_before(query: str, departements: str, before_date: str | None,
+                  window_days: int = 90, max_results: int = 150) -> tuple[list[Job], str, bool]:
+    """Backfill entry point (see pipeline.backfill_francetravail): searches a
+    fixed calendar window [before_date - window_days, before_date), using the
+    API's own documented minCreationDate/maxCreationDate params (ISO-8601).
+    Unlike arbeitnow/wttj/workday's page/offset position, a date window means
+    the same real postings every time regardless of how many newer ones exist
+    -- safe to resume from a saved date, not just a one-shot deep walk.
+    before_date=None starts at now. Returns (jobs, next_before_date, reached_end)
+    -- next_before_date is the window's own start, to walk further back next
+    call; reached_end is True once a window comes back empty (assume no
+    listings remain that old)."""
+    end = (datetime.now(timezone.utc) if not before_date
+           else datetime.fromisoformat(before_date))
+    start = end - timedelta(days=window_days)
+    extra = {
+        "minCreationDate": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "maxCreationDate": end.strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+    jobs = _search(query, departements, max_results, extra_params=extra)
+    return jobs, start.strftime("%Y-%m-%dT%H:%M:%SZ"), len(jobs) == 0
 
 
 def count(departements: str | None = None, **filters: str) -> int | None:

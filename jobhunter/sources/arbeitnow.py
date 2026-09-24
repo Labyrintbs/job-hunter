@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import html
 import re
+import time
 from datetime import datetime, timezone
 
 import httpx
@@ -25,6 +26,9 @@ import httpx
 from ..models import Job
 
 API_URL = "https://www.arbeitnow.com/api/job-board-api"
+THROTTLE_SECONDS = 1.0
+# Confirmed live: this API rate-limits (HTTP 429) after roughly a dozen rapid,
+# unthrottled requests -- fetch() previously had no throttle or retry at all.
 
 
 def _strip_html(raw: str) -> str:
@@ -55,19 +59,51 @@ def _to_job(item: dict) -> Job:
     )
 
 
-def fetch(max_pages: int = 5) -> list[Job]:
+def _walk(max_pages: int, max_retries: int = 3,
+          backoff_base: float = 2.0) -> tuple[list[Job], bool, bool]:
+    """Follows links.next for up to max_pages pages, throttled, retrying a 429
+    with exponential backoff before giving up on that page. Returns
+    (jobs, reached_end, rate_limited) -- reached_end is True once links.next
+    is null or a page is empty (the feed's real end); rate_limited is True if
+    a page had to be abandoned after exhausting retries (jobs collected before
+    that point are still returned, not discarded)."""
     jobs: list[Job] = []
     url: str | None = API_URL
     with httpx.Client(timeout=20.0) as client:
-        for _ in range(max_pages):
+        for i in range(max_pages):
             if not url:
-                break
-            resp = client.get(url)
+                return jobs, True, False
+            if i:
+                time.sleep(THROTTLE_SECONDS)
+            resp = None
+            for attempt in range(max_retries + 1):
+                resp = client.get(url)
+                if resp.status_code != 429:
+                    break
+                if attempt < max_retries:
+                    time.sleep(backoff_base * 2 ** attempt)
+            if resp.status_code == 429:
+                return jobs, False, True
             resp.raise_for_status()
             body = resp.json()
             items = body.get("data") or []
             if not items:
-                break
+                return jobs, True, False
             jobs.extend(_to_job(item) for item in items if item.get("slug"))
             url = (body.get("links") or {}).get("next")
+    return jobs, url is None, False
+
+
+def fetch(max_pages: int = 5) -> list[Job]:
+    jobs, _, _ = _walk(max_pages)
     return jobs
+
+
+def fetch_deep(max_pages: int) -> tuple[list[Job], bool, bool]:
+    """Backfill entry point (see pipeline.backfill_arbeitnow): same walk as
+    fetch(), but more patient about rate-limiting -- a real 429 tends to clear
+    within seconds to a couple minutes, not days, so it's simpler and just as
+    effective to retry harder within this one run than to defer a cut-short
+    walk to the next scheduled day (which would also reopen the page-drift
+    problem, just over a shorter gap). Returns (jobs, reached_end, rate_limited)."""
+    return _walk(max_pages, max_retries=6, backoff_base=3.0)

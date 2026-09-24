@@ -29,6 +29,7 @@ MARKER = "com.jobhunter.daily"
 WATCHDOG_MARKER = "com.jobhunter.watchdog"
 PROCESS_MARKER = "com.jobhunter.process"
 MARKET_SNAPSHOT_MARKER = "com.jobhunter.market-snapshot"
+BACKFILL_MARKER = "com.jobhunter.backfill"
 
 
 def _python() -> str:
@@ -59,30 +60,50 @@ def _command(subcommand: str, log_name: str) -> str:
     return f"cd {REPO_ROOT} && {py} -m jobhunter.cli {subcommand} >> {REPO_ROOT}/data/{log_name} 2>&1"
 
 
-def _calendar_intervals(hour: int, minute: int, interval_hours: int | None) -> list[dict]:
+_LAUNCHD_WEEKDAY_NAMES = {0: "Sun", 1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu", 5: "Fri", 6: "Sat", 7: "Sun"}
+
+
+def _calendar_intervals(hour: int, minute: int, interval_hours: int | None = None,
+                        weekdays: tuple[int, ...] | None = None) -> list[dict]:
     """A fixed daily time, or (if interval_hours is given) a fire time every N
     hours anchored at `hour` -- e.g. hour=2, interval_hours=12 fires at 02:00
-    and 14:00."""
+    and 14:00. If `weekdays` is given instead, one {"Weekday": w, "Hour": hour,
+    "Minute": minute} dict per entry -- launchd's StartCalendarInterval fires on
+    every dict in the list, so this is how a single plist fires on more than one
+    day of the week. Uses launchd's own Weekday numbering (0 or 7 = Sunday, 6 =
+    Saturday) -- not Python's datetime.weekday() (0 = Monday), kept intentionally
+    separate from pipeline.py's own day-name-keyed BACKFILL_GROUPS lookup so the
+    two numbering systems never get mixed up."""
+    if weekdays:
+        return [{"Weekday": w, "Hour": hour, "Minute": minute} for w in weekdays]
     if interval_hours:
         return [{"Hour": (hour + h) % 24, "Minute": minute} for h in range(0, 24, interval_hours)]
     return [{"Hour": hour, "Minute": minute}]
 
 
 def _describe(label: str, command: str, intervals: list[dict]) -> str:
-    times = ", ".join(f"{d['Hour']:02d}:{d['Minute']:02d}" for d in intervals)
+    times = ", ".join(
+        (f"{_LAUNCHD_WEEKDAY_NAMES.get(d['Weekday'], d['Weekday'])} " if "Weekday" in d else "")
+        + f"{d['Hour']:02d}:{d['Minute']:02d}"
+        for d in intervals
+    )
     return f"{label} @ {times} -> {command}"
 
 
-def _write_plist(label: str, command: str, intervals: list[dict]) -> Path:
+def _write_plist(label: str, command: str, intervals: list[dict],
+                 env: dict[str, str] | None = None) -> Path:
     LAUNCH_AGENTS_DIR.mkdir(parents=True, exist_ok=True)
     path = _plist_path(label)
+    plist = {
+        "Label": label,
+        "ProgramArguments": ["/bin/bash", "-c", command],
+        "StartCalendarInterval": intervals,
+        "RunAtLoad": False,
+    }
+    if env:
+        plist["EnvironmentVariables"] = env
     with open(path, "wb") as f:
-        plistlib.dump({
-            "Label": label,
-            "ProgramArguments": ["/bin/bash", "-c", command],
-            "StartCalendarInterval": intervals,
-            "RunAtLoad": False,
-        }, f)
+        plistlib.dump(plist, f)
     return path
 
 
@@ -92,10 +113,12 @@ def _load(path: Path) -> None:
 
 
 def _install(label: str, subcommand: str, log_name: str,
-            hour: int, minute: int, interval_hours: int | None) -> str:
+            hour: int, minute: int, interval_hours: int | None = None,
+            weekdays: tuple[int, ...] | None = None,
+            env: dict[str, str] | None = None) -> str:
     command = _command(subcommand, log_name)
-    intervals = _calendar_intervals(hour, minute, interval_hours)
-    path = _write_plist(label, command, intervals)
+    intervals = _calendar_intervals(hour, minute, interval_hours, weekdays)
+    path = _write_plist(label, command, intervals, env)
     _load(path)
     return _describe(label, command, intervals)
 
@@ -196,3 +219,40 @@ def uninstall_market_snapshot() -> bool:
 
 def current_market_snapshot() -> str | None:
     return _current(MARKET_SNAPSHOT_MARKER)
+
+
+def _francetravail_env() -> dict[str, str] | None:
+    """A LaunchAgent doesn't inherit the interactive shell's exported env vars,
+    so francetravail's API credentials must be written into the plist itself --
+    same reason com.jobhunter.daily.plist and com.jobhunter.market-snapshot.plist
+    already carry them (previously done by hand; now done here so a fresh
+    install/reinstall of any francetravail-dependent job keeps working). Only
+    included if both are actually set in the installing shell; otherwise the
+    backfill job runs without them and francetravail's own fetch functions
+    already degrade gracefully (return no jobs rather than erroring)."""
+    client_id = os.environ.get("FRANCE_TRAVAIL_CLIENT_ID")
+    client_secret = os.environ.get("FRANCE_TRAVAIL_CLIENT_SECRET")
+    if client_id and client_secret:
+        return {"FRANCE_TRAVAIL_CLIENT_ID": client_id, "FRANCE_TRAVAIL_CLIENT_SECRET": client_secret}
+    return None
+
+
+def backfill_cron_line(hour: int = 9, minute: int = 0) -> str:
+    """Saturday + Sunday only (launchd Weekday 6, 0) -- run_backfill() itself
+    picks which streams run on which day (pipeline.BACKFILL_GROUPS), so this
+    plist just needs to fire on both."""
+    return _describe(BACKFILL_MARKER, _command("backfill", "backfill_cron.log"),
+                     _calendar_intervals(hour, minute, weekdays=(6, 0)))
+
+
+def install_backfill(hour: int = 9, minute: int = 0) -> str:
+    return _install(BACKFILL_MARKER, "backfill", "backfill_cron.log",
+                    hour, minute, weekdays=(6, 0), env=_francetravail_env())
+
+
+def uninstall_backfill() -> bool:
+    return _uninstall(BACKFILL_MARKER)
+
+
+def current_backfill() -> str | None:
+    return _current(BACKFILL_MARKER)
