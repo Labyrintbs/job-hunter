@@ -3,15 +3,16 @@ from __future__ import annotations
 import re
 import shutil
 import time
+from datetime import datetime, timezone
 
 from . import db, enrich, jd_store, match
 from .apply import cover_letter
-from .config import load_companies, load_search_config
+from .config import DATA_DIR, load_companies, load_search_config
 from .llm import dedup as llm_dedup
 from .llm import judge as llm_judge
 from .llm import provider
 from .notify import dispatch as notify_dispatch
-from .sources import arbeitnow, ats, ats_discovery, francetravail, hellowork, linkedin, wttj
+from .sources import arbeitnow, ats, ats_discovery, francetravail, hellowork, linkedin, workday, wttj
 from .tailor import engine as cv_engine
 
 
@@ -148,6 +149,33 @@ def _gather(config: dict, force: bool = False) -> list:
     return jobs
 
 
+def _persist_jobs(conn, config: dict, jobs: list) -> list[tuple]:
+    """Screen and upsert each job. Injects config['_active_rules'] itself
+    (reads db.active_rules(conn)) rather than trusting the caller to -- match.screen
+    depends on it for manual filter-rule enforcement, and a backfilled job must
+    still be blockable by an existing company/keyword rule just like any other
+    job. Returns one (job, screen_result, geo_tier, job_id, is_new) tuple per
+    job that passed screening (s.keep=True) -- shared by run_fetch (which adds
+    tier/rule-hit tracking and fetch_runs logging on top) and every backfill_*
+    function (which doesn't, since a backfill discovery isn't a 'new posting
+    this run' for market-trend purposes -- see v_market_by_run)."""
+    config = {**config, "_active_rules": [dict(r) for r in db.active_rules(conn)]}
+    results = []
+    for job in jobs:
+        s = match.screen(job, config)
+        if not s.keep:
+            continue
+        tier = match.geo_tier(job.location, config)
+        jid, is_new = db.upsert_job(
+            conn, job, s.score, s.reasons,
+            filtered=s.filtered, filter_reason=s.filter_reason,
+            seniority=s.seniority, min_years=s.min_years, geo_tier=tier,
+            role_category=s.role_category,
+        )
+        results.append((job, s, tier, jid, is_new))
+    return results
+
+
 def run_fetch(config: dict | None = None, jobs: list | None = None, force: bool = False) -> dict:
     config = config or load_search_config()
     db.init_db()
@@ -155,28 +183,14 @@ def run_fetch(config: dict | None = None, jobs: list | None = None, force: bool 
     if jobs is None:
         jobs = _gather(config, force=force)
 
-    seen = 0
-    kept = 0
     new_ids: list[int] = []
     filtered_new = 0
     per_source: dict[str, int] = {}
     # Geography of ALL new postings this run (filtered included) = the market signal.
     tier_new = {"idf": 0, "france": 0, "remote": 0, "outside": 0, "unknown": 0}
     with db.connect() as conn:
-        config = {**config, "_active_rules": [dict(r) for r in db.active_rules(conn)]}
-        for job in jobs:
-            seen += 1
-            s = match.screen(job, config)
-            if not s.keep:
-                continue
-            kept += 1
-            tier = match.geo_tier(job.location, config)
-            jid, is_new = db.upsert_job(
-                conn, job, s.score, s.reasons,
-                filtered=s.filtered, filter_reason=s.filter_reason,
-                seniority=s.seniority, min_years=s.min_years, geo_tier=tier,
-                role_category=s.role_category,
-            )
+        kept = _persist_jobs(conn, config, jobs)
+        for job, s, tier, jid, is_new in kept:
             if is_new:
                 tier_new[tier] = tier_new.get(tier, 0) + 1
                 for rid in s.matched_rules:
@@ -193,7 +207,7 @@ def run_fetch(config: dict | None = None, jobs: list | None = None, force: bool 
                     out_dir.mkdir(parents=True, exist_ok=True)
 
         stats = {
-            "fetched": seen, "kept": kept, "new": len(new_ids),
+            "fetched": len(jobs), "kept": len(kept), "new": len(new_ids),
             "filtered_new": filtered_new, "new_ids": new_ids, "new_by_source": per_source,
             "new_idf": tier_new["idf"], "new_major_city": tier_new.get("major_city", 0),
             "new_france": tier_new["france"],
@@ -346,6 +360,241 @@ def process_backlog(judge_min_score: int = 15, judge_limit: int = 10,
             "skipped_no_description": judge_stats["skipped_no_description"],
             "tailored": tailored,
             "dup_checked": dup_stats["checked"], "dup_filtered": dup_stats["filtered"]}
+
+
+BACKFILL_LOG_PATH = DATA_DIR / "backfill.log"
+
+
+def _log_backfill(line: str) -> None:
+    """Timestamped append to data/backfill.log, mirroring watchdog.py's own
+    _log() pattern -- one line per stream per run: jobs found, reached_end,
+    and whether it was cut short by rate-limiting. Purely diagnostic, never
+    used to make the next run resume from a cut-short position (see
+    backfill_arbeitnow's docstring)."""
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    with open(BACKFILL_LOG_PATH, "a", encoding="utf-8") as f:
+        f.write(f"[{ts} UTC] {line}\n")
+
+
+BACKFILL_GROUPS = {
+    "saturday": ("arbeitnow", "wttj"),
+    "sunday": ("workday", "francetravail", "linkedin_wide"),
+}
+
+
+def backfill_arbeitnow(force: bool = False) -> dict:
+    """Weekly deep walk: calls arbeitnow.fetch_deep(max_pages=100) -- the same
+    walk fetch() does (now throttled/retry-safe), just far deeper and far less
+    often, and more patient about rate-limiting within this one run (see
+    fetch_deep's docstring) rather than deferring a cut-short walk to another
+    day. 100 pages (~25,000 jobs) is a moderate, honestly-labeled estimate,
+    not a confirmed archive size -- probing arbeitnow's true depth further
+    live triggered a real 429, so this wasn't fully mapped the way wttj/
+    workday's ceilings were. Persists via _persist_jobs (not run_fetch), so
+    this never writes to fetch_runs (keeps v_market_by_run regular-poll-only).
+    Gated by config['arbeitnow_backfill']['fetch_interval_hours'] via the
+    existing _is_due, keyed 'arbeitnow_backfill' (a row distinct from the
+    regular poll's own 'arbeitnow' row)."""
+    config = load_search_config()
+    bf = config.get("arbeitnow_backfill") or {}
+    if not bf.get("enabled", True):
+        return {"skipped": "disabled"}
+    db.init_db()
+    with db.connect() as conn:
+        if not force and not _is_due(conn, "arbeitnow_backfill", config):
+            return {"skipped": "not due yet"}
+
+    jobs, reached_end, rate_limited = arbeitnow.fetch_deep(max_pages=bf.get("max_pages", 100))
+    with db.connect() as conn:
+        kept = _persist_jobs(conn, config, jobs)
+        db.record_source_fetch(conn, "arbeitnow_backfill", len(jobs))
+    _log_backfill(f"arbeitnow: {len(jobs)} jobs fetched, {len(kept)} kept, "
+                  f"reached_end={reached_end}, rate_limited={rate_limited}")
+    return {"fetched": len(jobs), "kept": len(kept), "reached_end": reached_end,
+            "rate_limited": rate_limited}
+
+
+def backfill_wttj(force: bool = False) -> dict:
+    """Weekly deep walk per configured wttj query: wttj.fetch(query=q,
+    max_hits=1100, country='France') -- confirmed live this reaches Algolia's
+    own real per-query ceiling (max observed reachable: 1,020) on every
+    configured query, so no cursor/resume is needed -- a full walk always
+    covers everything reachable. Single due-check ('wttj_backfill') covers
+    all queries in one run. Persists via _persist_jobs, never writes to
+    fetch_runs."""
+    config = load_search_config()
+    bf = config.get("wttj_backfill") or {}
+    if not bf.get("enabled", True):
+        return {"skipped": "disabled"}
+    db.init_db()
+    with db.connect() as conn:
+        if not force and not _is_due(conn, "wttj_backfill", config):
+            return {"skipped": "not due yet"}
+
+    wt = config.get("wttj") or {}
+    queries = wt.get("queries") or [config["query"]]
+    country = (config.get("countries") or ["France"])[0]
+    jobs: list = []
+    for q in queries:
+        jobs += wttj.fetch(query=q, max_hits=bf.get("max_hits", 1100), country=country)
+
+    with db.connect() as conn:
+        kept = _persist_jobs(conn, config, jobs)
+        db.record_source_fetch(conn, "wttj_backfill", len(jobs))
+    _log_backfill(f"wttj: {len(jobs)} jobs fetched across {len(queries)} queries, {len(kept)} kept")
+    return {"fetched": len(jobs), "kept": len(kept)}
+
+
+def backfill_workday(force: bool = False) -> dict:
+    """Weekly deep walk per companies.yaml entry with ats: workday:
+    workday.fetch(..., pages_per_query=15) -- confirmed live this covers the
+    real observed max (Airbus/'machine learning' = 186) with headroom, so
+    (like wttj) no cursor/resume is needed. Keyed 'workday_backfill'."""
+    config = load_search_config()
+    bf = config.get("workday_backfill") or {}
+    if not bf.get("enabled", True):
+        return {"skipped": "disabled"}
+    db.init_db()
+    with db.connect() as conn:
+        if not force and not _is_due(conn, "workday_backfill", config):
+            return {"skipped": "not due yet"}
+
+    companies = [c for c in load_companies() if (c.get("ats") or "").lower() == "workday"]
+    jobs: list = []
+    for co in companies:
+        try:
+            jobs += workday.fetch(co["tenant"], co["wd_host"], co["site"], co.get("name", ""),
+                                  locale=co.get("locale", "en-US"),
+                                  pages_per_query=bf.get("pages_per_query", 15))
+        except Exception as exc:
+            print(f"  backfill_workday warn: {co.get('name')}: {exc}")
+
+    with db.connect() as conn:
+        kept = _persist_jobs(conn, config, jobs)
+        db.record_source_fetch(conn, "workday_backfill", len(jobs))
+    _log_backfill(f"workday: {len(jobs)} jobs fetched across {len(companies)} companies, {len(kept)} kept")
+    return {"fetched": len(jobs), "kept": len(kept)}
+
+
+def backfill_francetravail(force: bool = False) -> dict:
+    """The one stream that resumes: reads the saved cursor (an ISO date) from
+    source_fetch_state['francetravail_backfill'], queries one more window
+    further back via francetravail.fetch_before using real minCreationDate/
+    maxCreationDate params -- safe to resume across weeks, since a date window
+    means the same real postings every time regardless of how many newer ones
+    now exist (unlike arbeitnow/wttj/workday's page/offset position). done=1
+    once a window comes back empty (assume no listings remain that old);
+    idles until rewalk_after_days, then restarts from today."""
+    config = load_search_config()
+    bf = config.get("francetravail_backfill") or {}
+    if not bf.get("enabled", True):
+        return {"skipped": "disabled"}
+    db.init_db()
+    with db.connect() as conn:
+        state = db.get_source_fetch_state(conn, "francetravail_backfill")
+
+    if state and not force:
+        if state["done"]:
+            rewalk_hours = bf.get("rewalk_after_days", 7) * 24
+            if not state["last_attempted_at"] or _hours_since(state["last_attempted_at"]) < rewalk_hours:
+                return {"skipped": "caught up, idling"}
+            cursor = None  # time to re-walk from today
+        else:
+            interval = bf.get("fetch_interval_hours", 168)
+            if state["last_attempted_at"] and _hours_since(state["last_attempted_at"]) < interval:
+                return {"skipped": "not due yet"}
+            cursor = state["cursor"] or None
+    else:
+        cursor = state["cursor"] if (state and not state["done"] and state["cursor"]) else None
+
+    ft = config.get("francetravail") or {}
+    departements = ft.get("departements", francetravail.IDF_DEPARTEMENTS)
+    queries = ft.get("queries") or [config["query"]]
+    window_days = bf.get("window_days", 90)
+
+    jobs: list = []
+    next_cursor = cursor
+    reached_end = True
+    for q in queries:
+        q_jobs, next_cursor, q_reached_end = francetravail.fetch_before(
+            q, departements, cursor, window_days=window_days)
+        jobs += q_jobs
+        reached_end = reached_end and q_reached_end
+
+    with db.connect() as conn:
+        kept = _persist_jobs(conn, config, jobs)
+        db.record_backfill_progress(conn, "francetravail_backfill", next_cursor, reached_end, len(jobs))
+    _log_backfill(f"francetravail: {len(jobs)} jobs fetched across {len(queries)} queries, "
+                  f"{len(kept)} kept, window_ending={cursor or 'now'}, reached_end={reached_end}")
+    return {"fetched": len(jobs), "kept": len(kept), "reached_end": reached_end}
+
+
+def backfill_linkedin_wide(force: bool = False) -> dict:
+    """No cursor needed -- calls linkedin.fetch with a much larger recent_hours
+    (config's linkedin_backfill.wide_recent_hours, e.g. 720 vs. the regular
+    poll's 168) to occasionally catch postings a narrower window missed.
+    Keyed 'linkedin_backfill' purely for due-gating via the existing _is_due;
+    cursor/done stay at their defaults, unused."""
+    config = load_search_config()
+    bf = config.get("linkedin_backfill") or {}
+    if not bf.get("enabled", True):
+        return {"skipped": "disabled"}
+    li = config.get("linkedin") or {}
+    if not li.get("enabled"):
+        return {"skipped": "linkedin disabled"}
+    db.init_db()
+    with db.connect() as conn:
+        if not force and not _is_due(conn, "linkedin_backfill", config):
+            return {"skipped": "not due yet"}
+
+    queries = li.get("queries") or [config["query"]]
+    jobs = linkedin.fetch(
+        queries=queries,
+        locations=li.get("locations") or ["Paris, France"],
+        max_pages=li.get("max_pages", 5),
+        recent_hours=bf.get("wide_recent_hours", 720),
+        max_retries=li.get("max_retries", 3),
+        backoff_base=li.get("backoff_seconds", 2.0),
+    )
+
+    with db.connect() as conn:
+        kept = _persist_jobs(conn, config, jobs)
+        db.record_source_fetch(conn, "linkedin_backfill", len(jobs))
+    _log_backfill(f"linkedin_wide: {len(jobs)} jobs fetched, {len(kept)} kept")
+    return {"fetched": len(jobs), "kept": len(kept)}
+
+
+_BACKFILL_FUNCS = {
+    "arbeitnow": backfill_arbeitnow,
+    "wttj": backfill_wttj,
+    "workday": backfill_workday,
+    "francetravail": backfill_francetravail,
+    "linkedin_wide": backfill_linkedin_wide,
+}
+
+
+def run_backfill(force: bool = False, day: str | None = None) -> dict:
+    """Umbrella called by `jobhunter backfill` and the twice-weekly LaunchAgent.
+    Splits the 5 streams across Saturday/Sunday (BACKFILL_GROUPS) rather than
+    running everything in one sitting -- roughly balances request volume per
+    day (arbeitnow+wttj vs. workday+francetravail+linkedin_wide), and most
+    companies don't post over the weekend anyway, so nothing timely is being
+    delayed by spreading it out. `day` defaults to today's real weekday name
+    (so a cron-triggered call auto-picks the right group); force=True ignores
+    the day split and runs every stream regardless -- used for an immediate
+    manual full sweep. Never lets one source's failure stop the others (same
+    isolation principle as _gather)."""
+    day = (day or datetime.now(timezone.utc).strftime("%A").lower())
+    names = tuple(_BACKFILL_FUNCS) if force else BACKFILL_GROUPS.get(day, ())
+    results = {}
+    for name in names:
+        try:
+            results[name] = _BACKFILL_FUNCS[name](force=force)
+        except Exception as exc:
+            results[name] = {"error": str(exc)}
+            _log_backfill(f"{name}: FAILED -- {exc!r}")
+    return results
 
 
 def check_duplicates(limit: int = 10) -> dict:

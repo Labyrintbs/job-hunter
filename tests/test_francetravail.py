@@ -247,3 +247,72 @@ def test_count_returns_none_on_a_failed_batch(monkeypatch):
     monkeypatch.setattr(ft.httpx, "Client", lambda *a, **k: FailingClient())
 
     assert ft.count(domaine="M18") is None
+
+
+def test_fetch_before_passes_date_window_and_reports_reached_end(monkeypatch):
+    ft._token_cache.clear()
+    monkeypatch.setenv("FRANCE_TRAVAIL_CLIENT_ID", "cid")
+    monkeypatch.setenv("FRANCE_TRAVAIL_CLIENT_SECRET", "csecret")
+    monkeypatch.setattr(ft, "_get_token", lambda cid, secret: "tok")
+    monkeypatch.setattr(ft.time, "sleep", lambda *_: None)
+
+    offer = {"id": "1", "intitule": "ML Engineer", "entreprise": {"nom": "Acme"},
+             "lieuTravail": {"libelle": "Paris"}, "description": "d"}
+
+    class Client:
+        def __init__(self, *a, **k):
+            self.calls = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def get(self, url, params=None, headers=None):
+            self.calls.append(params)
+            class Resp:
+                status_code = 200
+                def json(self_inner):
+                    return {"resultats": [offer]}
+            return Resp()
+
+    client = Client()
+    monkeypatch.setattr(ft.httpx, "Client", lambda *a, **k: client)
+
+    jobs, next_before, reached_end = ft.fetch_before(
+        "ml engineer", departements="75", before_date="2026-06-01T00:00:00Z", window_days=30)
+
+    assert len(jobs) == 1 and reached_end is False
+    assert next_before == "2026-05-02T00:00:00Z"   # before_date - 30 days
+    params = client.calls[0]
+    assert params["minCreationDate"] == "2026-05-02T00:00:00Z"
+    assert params["maxCreationDate"] == "2026-06-01T00:00:00Z"
+
+
+def test_fetch_before_reports_reached_end_on_empty_window(monkeypatch):
+    ft._token_cache.clear()
+    monkeypatch.setenv("FRANCE_TRAVAIL_CLIENT_ID", "cid")
+    monkeypatch.setenv("FRANCE_TRAVAIL_CLIENT_SECRET", "csecret")
+    monkeypatch.setattr(ft, "_get_token", lambda cid, secret: "tok")
+    monkeypatch.setattr(ft.time, "sleep", lambda *_: None)
+
+    class Client:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def get(self, url, params=None, headers=None):
+            class Resp:
+                status_code = 200
+                def json(self_inner):
+                    return {"resultats": []}
+            return Resp()
+
+    monkeypatch.setattr(ft.httpx, "Client", lambda *a, **k: Client())
+
+    jobs, _, reached_end = ft.fetch_before("ml engineer", departements="75",
+                                            before_date="2026-06-01T00:00:00Z")
+    assert jobs == [] and reached_end is True

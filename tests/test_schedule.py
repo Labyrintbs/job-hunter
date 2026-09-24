@@ -143,6 +143,71 @@ def test_uninstall_market_snapshot_removes_the_plist_and_leaves_others_alone(tmp
     assert (tmp_path / f"{schedule.WATCHDOG_MARKER}.plist").exists()   # untouched
 
 
+def test_calendar_intervals_weekdays():
+    assert schedule._calendar_intervals(9, 0, weekdays=(6, 0)) == [
+        {"Weekday": 6, "Hour": 9, "Minute": 0}, {"Weekday": 0, "Hour": 9, "Minute": 0},
+    ]
+
+
+def test_backfill_cron_line_shape():
+    line = schedule.backfill_cron_line()
+    assert schedule.BACKFILL_MARKER in line
+    assert "jobhunter.cli backfill" in line
+    assert "Sat 09:00" in line
+    assert "Sun 09:00" in line
+
+
+def test_install_backfill_writes_a_loadable_plist_saturday_and_sunday(tmp_path, monkeypatch):
+    monkeypatch.setattr(schedule, "LAUNCH_AGENTS_DIR", tmp_path)
+    monkeypatch.setattr(schedule.subprocess, "run", lambda *a, **k: _FakeProc())
+    monkeypatch.delenv("FRANCE_TRAVAIL_CLIENT_ID", raising=False)
+    monkeypatch.delenv("FRANCE_TRAVAIL_CLIENT_SECRET", raising=False)
+
+    line = schedule.install_backfill()
+
+    plist_path = tmp_path / f"{schedule.BACKFILL_MARKER}.plist"
+    assert plist_path.exists()
+    with open(plist_path, "rb") as f:
+        data = plistlib.load(f)
+    assert data["Label"] == schedule.BACKFILL_MARKER
+    assert "jobhunter.cli backfill" in data["ProgramArguments"][2]
+    assert data["StartCalendarInterval"] == [
+        {"Weekday": 6, "Hour": 9, "Minute": 0}, {"Weekday": 0, "Hour": 9, "Minute": 0},
+    ]
+    assert "EnvironmentVariables" not in data   # no creds in this shell -> not written
+    assert schedule.current_backfill() == line
+
+
+def test_install_backfill_carries_francetravail_credentials_into_the_plist(tmp_path, monkeypatch):
+    # A LaunchAgent doesn't inherit the installing shell's env, so credentials
+    # francetravail's fetch needs must be baked into the plist itself.
+    monkeypatch.setattr(schedule, "LAUNCH_AGENTS_DIR", tmp_path)
+    monkeypatch.setattr(schedule.subprocess, "run", lambda *a, **k: _FakeProc())
+    monkeypatch.setenv("FRANCE_TRAVAIL_CLIENT_ID", "id123")
+    monkeypatch.setenv("FRANCE_TRAVAIL_CLIENT_SECRET", "secret456")
+
+    schedule.install_backfill()
+
+    with open(tmp_path / f"{schedule.BACKFILL_MARKER}.plist", "rb") as f:
+        data = plistlib.load(f)
+    assert data["EnvironmentVariables"] == {
+        "FRANCE_TRAVAIL_CLIENT_ID": "id123", "FRANCE_TRAVAIL_CLIENT_SECRET": "secret456",
+    }
+
+
+def test_uninstall_backfill_removes_the_plist_and_leaves_others_alone(tmp_path, monkeypatch):
+    monkeypatch.setattr(schedule, "LAUNCH_AGENTS_DIR", tmp_path)
+    monkeypatch.setattr(schedule.subprocess, "run", lambda *a, **k: _FakeProc())
+
+    assert schedule.uninstall_backfill() is False   # nothing installed yet
+    schedule.install_backfill()
+    schedule.install_watchdog(1)
+
+    assert schedule.uninstall_backfill() is True
+    assert not (tmp_path / f"{schedule.BACKFILL_MARKER}.plist").exists()
+    assert (tmp_path / f"{schedule.WATCHDOG_MARKER}.plist").exists()   # untouched
+
+
 def test_python_resolution_prefers_override_then_conda(tmp_path, monkeypatch):
     monkeypatch.delenv("JOBHUNTER_PYTHON", raising=False)
     monkeypatch.delenv("CONDA_PREFIX", raising=False)

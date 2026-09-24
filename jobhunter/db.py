@@ -100,11 +100,15 @@ CREATE TABLE IF NOT EXISTS target_companies (
 
 -- Per-source fetch cadence bookkeeping -- keyed by the coarse source names
 -- pipeline._gather() uses internally (wttj/linkedin/hellowork/francetravail/ats),
--- not the finer per-job job.source value (e.g. "workday", "greenhouse").
+-- not the finer per-job job.source value (e.g. "workday", "greenhouse"). Also
+-- reused under synthetic keys (e.g. "arbeitnow_backfill") for backfill due-gating
+-- and, for francetravail's resumable date-window walk, cursor/done.
 CREATE TABLE IF NOT EXISTS source_fetch_state (
     source            TEXT PRIMARY KEY,
     last_attempted_at TEXT,
-    last_count        INTEGER DEFAULT 0
+    last_count        INTEGER DEFAULT 0,
+    cursor            TEXT DEFAULT '',
+    done              INTEGER DEFAULT 0
 );
 
 -- Cache of LLM verdicts on heuristically-flagged possible-duplicate pairs (see
@@ -262,6 +266,10 @@ MIGRATIONS = {
     "fetch_runs": {
         "new_major_city": "INTEGER DEFAULT 0",
         "new_europe_remote": "INTEGER DEFAULT 0",
+    },
+    "source_fetch_state": {
+        "cursor": "TEXT DEFAULT ''",
+        "done": "INTEGER DEFAULT 0",
     },
 }
 
@@ -1219,6 +1227,22 @@ def record_source_fetch(conn: sqlite3.Connection, source: str, count: int) -> No
            ON CONFLICT(source) DO UPDATE SET
              last_attempted_at = datetime('now'), last_count = excluded.last_count""",
         (source, count),
+    )
+
+
+def record_backfill_progress(conn: sqlite3.Connection, source: str, cursor: str | None,
+                             done: bool, count: int) -> None:
+    """Persist a resumable position after a francetravail backfill step (a
+    date, walking further back each call) -- keyed by a synthetic source name
+    (e.g. 'francetravail_backfill') distinct from the regular poll's own row
+    for that source. See pipeline.backfill_francetravail."""
+    conn.execute(
+        """INSERT INTO source_fetch_state (source, last_attempted_at, last_count, cursor, done)
+           VALUES (?, datetime('now'), ?, ?, ?)
+           ON CONFLICT(source) DO UPDATE SET
+             last_attempted_at = datetime('now'), last_count = excluded.last_count,
+             cursor = excluded.cursor, done = excluded.done""",
+        (source, count, cursor or "", int(done)),
     )
 
 

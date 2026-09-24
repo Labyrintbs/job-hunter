@@ -9,7 +9,7 @@ from .llm import provider
 from .notify import dispatch as notify_dispatch
 from .pipeline import (cover_one, daily_run, enrich_one, enrich_pending, import_revised_cv,
                        judge_all, judge_one, process_backlog, rejudge_category, rejudge_juniors,
-                       rescreen_all, run_fetch, tailor_one)
+                       rescreen_all, run_backfill, run_fetch, tailor_one)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -20,6 +20,13 @@ def main(argv: list[str] | None = None) -> int:
     p_fetch.add_argument("--force", action="store_true",
                          help="bypass each source's fetch_interval_hours and fetch everything now")
     sub.add_parser("init", help="create the database")
+
+    p_backfill = sub.add_parser(
+        "backfill",
+        help="deep sweep split across Sat/Sun: arbeitnow/wttj/workday full-depth "
+             "walk, francetravail resumable date-window walk, linkedin wide-window pass")
+    p_backfill.add_argument("--force", action="store_true",
+                            help="run every stream now regardless of day/due-check")
 
     p_list = sub.add_parser("list", help="list stored jobs")
     p_list.add_argument("--status", default=None)
@@ -68,8 +75,8 @@ def main(argv: list[str] | None = None) -> int:
     p_cron = sub.add_parser("cron", help="manage the daily crontab entry")
     p_cron.add_argument("action", choices=["show", "install", "uninstall"], nargs="?", default="show")
     p_cron.add_argument("--time", default="08:00", help="HH:MM (default 08:00), used when --interval-hours is not given")
-    p_cron.add_argument("--job", choices=["daily", "watchdog", "process", "market-snapshot"], default="daily",
-                        help="which crontab entry to manage")
+    p_cron.add_argument("--job", choices=["daily", "watchdog", "process", "market-snapshot", "backfill"],
+                        default="daily", help="which crontab entry to manage")
     p_cron.add_argument("--interval-hours", type=int, default=None,
                         help="run every N hours instead of once at --time (e.g. 12 for twice a day); "
                              "for --job watchdog/process this is its interval, default 1")
@@ -155,6 +162,14 @@ def main(argv: list[str] | None = None) -> int:
               f"filtered_new={stats.get('filtered_new', 0)}")
         if stats.get("new_by_source"):
             print("  new by source:", dict(stats["new_by_source"]))
+        return 0
+
+    if args.command == "backfill":
+        results = run_backfill(force=args.force)
+        if not results:
+            print("nothing scheduled for today's group (not --force)")
+        for name, r in results.items():
+            print(f"  {name}: {r}")
         return 0
 
     if args.command == "list":
@@ -313,6 +328,17 @@ def main(argv: list[str] | None = None) -> int:
                 cur = schedule.current_market_snapshot()
                 print(f"current:\n  {cur}" if cur else "not installed")
                 print(f"\nwould install:\n  {schedule.market_snapshot_cron_line()}")
+            return 0
+        if args.job == "backfill":
+            if args.action == "install":
+                line = schedule.install_backfill()
+                print(f"installed:\n  {line}")
+            elif args.action == "uninstall":
+                print("removed" if schedule.uninstall_backfill() else "no backfill entry found")
+            else:
+                cur = schedule.current_backfill()
+                print(f"current:\n  {cur}" if cur else "not installed")
+                print(f"\nwould install:\n  {schedule.backfill_cron_line()}")
             return 0
         try:
             hour, minute = (int(x) for x in args.time.split(":"))

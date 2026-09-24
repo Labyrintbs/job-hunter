@@ -774,6 +774,21 @@ def test_source_fetch_state_round_trips_and_defaults_to_none(tmp_db):
         assert conn.execute("SELECT COUNT(*) FROM source_fetch_state").fetchone()[0] == 1
 
 
+def test_record_backfill_progress_round_trips_cursor_and_done(tmp_db):
+    with db.connect() as conn:
+        db.record_backfill_progress(conn, "francetravail_backfill", "2026-05-01T00:00:00Z", False, 40)
+        state = db.get_source_fetch_state(conn, "francetravail_backfill")
+        assert state["cursor"] == "2026-05-01T00:00:00Z"
+        assert state["done"] == 0 and state["last_count"] == 40
+
+        db.record_backfill_progress(conn, "francetravail_backfill", "", True, 0)
+        state = db.get_source_fetch_state(conn, "francetravail_backfill")
+        assert state["cursor"] == "" and state["done"] == 1
+        # distinct from the regular poll's own row for the same underlying source
+        db.record_source_fetch(conn, "francetravail", 10)
+        assert conn.execute("SELECT COUNT(*) FROM source_fetch_state").fetchone()[0] == 2
+
+
 def test_duplicate_check_round_trips_and_is_order_independent(tmp_db):
     with db.connect() as conn:
         assert db.get_duplicate_check(conn, 5, 9) is None
