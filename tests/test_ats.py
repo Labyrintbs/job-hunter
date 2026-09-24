@@ -11,8 +11,10 @@ def test_is_france_recognizes_city_only_locations():
 
 
 class Resp:
-    def __init__(self, payload):
+    def __init__(self, payload, status_code=200, text=""):
         self._p = payload
+        self.status_code = status_code
+        self.text = text
 
     def raise_for_status(self):
         pass
@@ -160,3 +162,117 @@ def test_fetch_all_tolerates_malformed_workday_entry(monkeypatch):
     monkeypatch.setattr(ats.time, "sleep", lambda *_: None)
     out = ats.fetch_all([{"name": "Missing Fields", "ats": "workday"}])   # no tenant/wd_host/site
     assert out == []
+
+
+def test_teamtailor_france_filter_and_multi_location_join(monkeypatch):
+    _patch(monkeypatch, {"items": [
+        {"id": "t1", "title": "Analytics PM", "url": "http://t/1",
+         "_jobposting": {"description": "<p>d</p>", "datePosted": "2026-09-01T00:00:00+02:00",
+                          "jobLocation": [{"address": {"addressLocality": "Paris", "addressCountry": "FR"}}]}},
+        {"id": "t2", "title": "Multi-location freelance", "url": "http://t/2",
+         "_jobposting": {"jobLocation": [
+             {"address": {"addressLocality": "Berlin", "addressCountry": "DE"}},
+             {"address": {"addressRegion": "USA", "addressCountry": "US"}},
+         ]}},
+    ]})
+    jobs = ats.fetch_teamtailor("dolead", "Dolead")
+    assert len(jobs) == 1
+    assert jobs[0].source == "teamtailor" and jobs[0].external_id == "t1"
+    assert jobs[0].location == "Paris, FR"
+
+
+def test_teamtailor_warns_on_suspicious_100_item_count(monkeypatch, capsys):
+    # A low-confidence report claims a 100-item server-side cap with no cursor --
+    # couldn't confirm or rule this out live, so an exact-100 response is flagged
+    # for a human to check rather than silently trusted.
+    items = [{"id": f"t{i}", "title": "X", "url": "http://t", "_jobposting": {}} for i in range(100)]
+    _patch(monkeypatch, {"items": items})
+    ats.fetch_teamtailor("acme", "Acme", country_only=False)
+    assert "possible undocumented cap" in capsys.readouterr().out
+
+
+class _XmlClient:
+    def __init__(self, text, status_code=200):
+        self._text = text
+        self._status = status_code
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def get(self, url):
+        return Resp(None, status_code=self._status, text=self._text)
+
+
+_PERSONIO_XML = """<?xml version="1.0" encoding="UTF-8"?>
+<workzag-jobs>
+<position>
+    <id>1</id>
+    <office>Paris, France</office>
+    <name>ML Engineer</name>
+    <jobDescriptions>
+        <jobDescription><name>Mission</name><value><![CDATA[<p>Build stuff</p>]]></value></jobDescription>
+    </jobDescriptions>
+    <employmentType>permanent</employmentType>
+    <createdAt>2026-09-01T00:00:00+00:00</createdAt>
+</position>
+<position>
+    <id>2</id>
+    <office>Berlin, Germany</office>
+    <name>Other</name>
+</position>
+</workzag-jobs>"""
+
+
+def test_personio_xml_parse_and_france_filter(monkeypatch):
+    monkeypatch.setattr(ats.httpx, "Client", lambda *a, **k: _XmlClient(_PERSONIO_XML))
+    jobs = ats.fetch_personio("acme", "Acme")
+    assert len(jobs) == 1
+    assert jobs[0].source == "personio" and jobs[0].external_id == "1"
+    assert jobs[0].url == "https://acme.jobs.personio.com/job/1"
+    assert "Build stuff" in jobs[0].description
+
+
+def test_personio_404_means_feed_not_enabled(monkeypatch):
+    # The XML feed is opt-in per Personio customer -- a 404 is the normal "not
+    # turned on" state, confirmed live, not a fetch error.
+    monkeypatch.setattr(ats.httpx, "Client", lambda *a, **k: _XmlClient("", status_code=404))
+    jobs = ats.fetch_personio("acme", "Acme")
+    assert jobs == []
+
+
+_SUCCESSFACTORS_XML = """<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:g="http://base.google.com/ns/1.0"><channel><title>Acme</title>
+<item>
+<title>ML Engineer (Paris)</title>
+<description><![CDATA[<p>Build stuff</p>]]></description>
+<link>https://job.acme.com/job/1</link>
+<guid>1</guid>
+<g:id>1</g:id>
+<g:employer>Acme Corp</g:employer>
+<g:location>Paris, France, FR</g:location>
+<pubDate>Tue, 01 Sep 2026 00:00:00 GMT</pubDate>
+</item>
+<item>
+<title>Other Role</title>
+<description><![CDATA[<p>d</p>]]></description>
+<link>https://job.acme.com/job/2</link>
+<guid>2</guid>
+<g:id>2</g:id>
+<g:employer>Acme Corp</g:employer>
+<g:location>Berlin, Germany, DE</g:location>
+</item>
+</channel></rss>"""
+
+
+def test_successfactors_rss_namespace_parse_and_france_filter(monkeypatch):
+    monkeypatch.setattr(ats.httpx, "Client", lambda *a, **k: _XmlClient(_SUCCESSFACTORS_XML))
+    jobs = ats.fetch_successfactors("job.acme.com", "Acme")
+    assert len(jobs) == 1
+    assert jobs[0].source == "successfactors" and jobs[0].external_id == "1"
+    assert jobs[0].company == "Acme Corp"
+    assert jobs[0].location == "Paris, France, FR"
+    assert jobs[0].posted_at   # parsed from pubDate
+    assert "Build stuff" in jobs[0].description

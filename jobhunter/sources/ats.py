@@ -1,23 +1,32 @@
-"""Company ATS boards — public JSON, no auth.
+"""Company ATS boards — public JSON/XML, no auth.
 
 Most "company career pages" are really a hosted ATS underneath, and several expose
-a public board API. Pulling those directly is how we reach postings that only live
+a public board feed. Pulling those directly is how we reach postings that only live
 on a company's own site (not on WTTJ/LinkedIn). Supported: Greenhouse, Lever, Ashby,
-SmartRecruiters, Recruitee, Workable. All global, so we filter to France at source.
-(Teamtailor is intentionally omitted — its API requires a per-tenant token with no
-public discovery path. Workday *is* supported, but via sources/workday.py and a
-different companies.yaml shape, since it needs a (tenant, wd_host, site) triple
-rather than one token -- see fetch_all below.)
+SmartRecruiters, Recruitee, Workable, Teamtailor, Personio, SuccessFactors. All
+global, so we filter to France at source. (Workday *is* supported, but via
+sources/workday.py and a different companies.yaml shape, since it needs a (tenant,
+wd_host, site) triple rather than one token -- see fetch_all below.)
+
+Teamtailor/Personio use a guessable per-company slug, same as the JSON fetchers
+above (token = the slug). SuccessFactors' token is different: the full recruiting-
+marketing hostname (e.g. "job.schindler.com"), not a slug -- it isn't derivable
+from a company name, so it has to be found by hand per company, and (unlike
+Teamtailor/Personio) it's never added to ats_discovery.py's slug-guessing probe.
 """
 from __future__ import annotations
 
 import html
 import re
 import time
+from email.utils import parsedate_to_datetime
+from xml.etree import ElementTree
 
 import httpx
 
 from ..models import Job
+
+_GOOGLE_NS = {"g": "http://base.google.com/ns/1.0"}
 
 THROTTLE_SECONDS = 0.3
 _UA = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"}
@@ -210,6 +219,125 @@ def fetch_workable(token: str, company: str, country_only: bool = True) -> list[
     return jobs
 
 
+def fetch_teamtailor(token: str, company: str, country_only: bool = True) -> list[Job]:
+    """One request per company -- confirmed live the feed has no `next_url`/cursor
+    at all, so this is the whole board every time. If a response ever returns
+    exactly 100 items, warn: a low-confidence report claims Teamtailor caps this
+    feed at 100 with no way to page further, and the largest real company found
+    during testing (71 jobs) wasn't big enough to confirm or rule that out."""
+    url = f"https://{token}.teamtailor.com/jobs.json"
+    jobs: list[Job] = []
+    with httpx.Client(timeout=20, headers=_UA) as c:
+        resp = c.get(url)
+        resp.raise_for_status()
+        items = resp.json().get("items", [])
+        if len(items) == 100:
+            print(f"  ats warn: {company} (teamtailor): got exactly 100 items -- "
+                  f"possible undocumented cap, verify manually")
+        for item in items:
+            jp = item.get("_jobposting") or {}
+            places = jp.get("jobLocation") or []
+            location_parts = []
+            countries = []
+            for place in places:
+                addr = (place or {}).get("address") or {}
+                location_parts.append(", ".join(filter(None, [
+                    addr.get("addressLocality"), addr.get("addressRegion"), addr.get("addressCountry"),
+                ])))
+                if addr.get("addressCountry"):
+                    countries.append(addr["addressCountry"])
+            location = "; ".join(filter(None, location_parts))
+            if country_only and "FR" not in countries and not _is_france(location):
+                continue
+            employer = (jp.get("hiringOrganization") or {}).get("name", "")
+            jobs.append(Job(
+                source="teamtailor",
+                external_id=str(item.get("id", "")),
+                title=(item.get("title") or "").strip(),
+                company=company or employer,
+                location=location,
+                url=item.get("url", "") or "",
+                description=_strip_html(jp.get("description", "") or "")[:5000],
+                posted_at=jp.get("datePosted", "") or item.get("date_published", "") or "",
+            ))
+    return jobs
+
+
+def fetch_personio(token: str, company: str, country_only: bool = True) -> list[Job]:
+    """The XML feed is an opt-in setting each Personio customer enables themselves
+    -- a 404 means "not turned on for this company," not a fetch failure, so it's
+    swallowed quietly rather than raised (confirmed live: 4 of 5 real companies
+    tried had it on, 1 didn't). The feed has no apply-URL field, so one is built
+    from the known job page pattern instead."""
+    url = f"https://{token}.jobs.personio.com/xml?language=en"
+    jobs: list[Job] = []
+    with httpx.Client(timeout=20, headers=_UA) as c:
+        resp = c.get(url)
+        if resp.status_code == 404:
+            return []
+        resp.raise_for_status()
+        root = ElementTree.fromstring(resp.text)
+        for pos in root.findall("position"):
+            offices = [pos.findtext("office", "") or ""]
+            offices += [o.text or "" for o in pos.findall("additionalOffices/office")]
+            location = ", ".join(filter(None, offices))
+            if country_only and not _is_france(location):
+                continue
+            desc = " ".join((d.findtext("value") or "") for d in pos.findall("jobDescriptions/jobDescription"))
+            pid = pos.findtext("id", "") or ""
+            jobs.append(Job(
+                source="personio",
+                external_id=pid,
+                title=(pos.findtext("name") or "").strip(),
+                company=company,
+                location=location,
+                url=f"https://{token}.jobs.personio.com/job/{pid}",
+                description=_strip_html(desc)[:5000],
+                contract_type=pos.findtext("employmentType", "") or "",
+                posted_at=pos.findtext("createdAt", "") or "",
+            ))
+    return jobs
+
+
+def fetch_successfactors(token: str, company: str, country_only: bool = True) -> list[Job]:
+    """`token` is the full recruiting-marketing hostname (e.g. "job.schindler.com"),
+    not a guessable slug -- found by hand per company, same as Workday's tenant/
+    wd_host/site. RSS 2.0 with the Google Merchant namespace; confirmed live most
+    tenants omit `pubDate` (carrying only g:expiration_date instead), so posted_at
+    is left blank rather than guessed from that -- would be misleading."""
+    url = f"https://{token}/sitemal.xml"
+    jobs: list[Job] = []
+    with httpx.Client(timeout=20, headers=_UA) as c:
+        resp = c.get(url)
+        resp.raise_for_status()
+        root = ElementTree.fromstring(resp.text)
+        for item in root.findall(".//item"):
+            title = (item.findtext("title") or "").strip()
+            location = item.findtext("g:location", namespaces=_GOOGLE_NS) or title
+            if country_only and not _is_france(location):
+                continue
+            gid = item.findtext("g:id", namespaces=_GOOGLE_NS)
+            guid = item.findtext("guid")
+            employer = item.findtext("g:employer", namespaces=_GOOGLE_NS) or company
+            posted_at = item.findtext("pubDate") or ""
+            if posted_at:
+                try:
+                    posted_at = parsedate_to_datetime(posted_at).isoformat()
+                except (TypeError, ValueError):
+                    posted_at = ""
+            jobs.append(Job(
+                source="successfactors",
+                external_id=(gid or guid or item.findtext("link") or "").strip(),
+                title=title,
+                company=employer,
+                location=item.findtext("g:location", namespaces=_GOOGLE_NS) or "",
+                url=item.findtext("link", "") or "",
+                description=_strip_html(item.findtext("description", "") or "")[:5000],
+                posted_at=posted_at,
+            ))
+    return jobs
+
+
 FETCHERS = {
     "greenhouse": fetch_greenhouse,
     "lever": fetch_lever,
@@ -217,6 +345,9 @@ FETCHERS = {
     "smartrecruiters": fetch_smartrecruiters,
     "recruitee": fetch_recruitee,
     "workable": fetch_workable,
+    "teamtailor": fetch_teamtailor,
+    "personio": fetch_personio,
+    "successfactors": fetch_successfactors,
 }
 SUPPORTED_ATS = tuple(FETCHERS)
 

@@ -2,9 +2,10 @@ from jobhunter.sources import ats_discovery
 
 
 class Resp:
-    def __init__(self, status=200, json_data=None):
+    def __init__(self, status=200, json_data=None, text=""):
         self.status_code = status
         self._json = json_data
+        self.text = text
 
     def json(self):
         if self._json is None:
@@ -82,3 +83,33 @@ def test_probe_tries_multiple_slug_variants_before_giving_up():
     hit = ats_discovery.probe("Acme Corp", client=client)
 
     assert hit is not None and "acmecorp" in hit
+
+
+def test_probe_finds_teamtailor_board_with_france_posting():
+    url = "https://acme-corp.teamtailor.com/jobs.json"
+    client = Client({url: Resp(200, {"items": [
+        {"_jobposting": {"jobLocation": [{"address": {"addressLocality": "Paris", "addressCountry": "FR"}}]}},
+    ]})})
+
+    hit = ats_discovery.probe("Acme Corp", client=client)
+
+    assert hit is not None and "teamtailor" in hit
+
+
+def test_probe_finds_personio_xml_board_with_france_posting():
+    url = "https://acme-corp.jobs.personio.com/xml?language=en"
+    xml = "<workzag-jobs><position><office>Paris, France</office></position></workzag-jobs>"
+    client = Client({url: Resp(200, text=xml)})
+
+    hit = ats_discovery.probe("Acme Corp", client=client)
+
+    assert hit is not None and "personio" in hit
+
+
+def test_probe_skips_personio_board_with_malformed_xml():
+    url = "https://acme-corp.jobs.personio.com/xml?language=en"
+    client = Client({url: Resp(200, text="not valid xml <<<")})
+
+    hit = ats_discovery.probe("Acme Corp", client=client)
+
+    assert hit is None

@@ -17,6 +17,7 @@ from __future__ import annotations
 import re
 import time
 import unicodedata
+from xml.etree import ElementTree
 
 import httpx
 
@@ -24,20 +25,27 @@ from .ats import _UA, _is_france
 
 THROTTLE_SECONDS = 0.3
 
-# (ats_type, url_template, response -> list of postings)
+# (ats_type, url_template, format ("json"/"xml"), response -> list of postings)
+# SuccessFactors is deliberately absent: its token is a full hostname, not a
+# guessable slug (see ats.py's docstring), so probing would essentially never
+# hit -- it stays a manually-added, manually-researched source only.
 _CHECKS = [
     ("greenhouse", "https://boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true",
-     lambda d: d.get("jobs", [])),
+     "json", lambda d: d.get("jobs", [])),
     ("lever", "https://api.lever.co/v0/postings/{token}?mode=json",
-     lambda d: d if isinstance(d, list) else []),
+     "json", lambda d: d if isinstance(d, list) else []),
     ("ashby", "https://api.ashbyhq.com/posting-api/job-board/{token}",
-     lambda d: d.get("jobs", [])),
+     "json", lambda d: d.get("jobs", [])),
     ("smartrecruiters", "https://api.smartrecruiters.com/v1/companies/{token}/postings?limit=100",
-     lambda d: d.get("content", [])),
+     "json", lambda d: d.get("content", [])),
     ("recruitee", "https://{token}.recruitee.com/api/offers/",
-     lambda d: d.get("offers", [])),
+     "json", lambda d: d.get("offers", [])),
     ("workable", "https://apply.workable.com/api/v1/widget/accounts/{token}?details=true",
-     lambda d: d.get("jobs", [])),
+     "json", lambda d: d.get("jobs", [])),
+    ("teamtailor", "https://{token}.teamtailor.com/jobs.json",
+     "json", lambda d: d.get("items", [])),
+    ("personio", "https://{token}.jobs.personio.com/xml?language=en",
+     "xml", lambda root: root.findall("position")),
 ]
 
 
@@ -56,7 +64,20 @@ def _slugs(name: str) -> list[str]:
     return seen
 
 
-def _postings_location(ats_type: str, posting: dict) -> str:
+def _postings_location(ats_type: str, posting) -> str:
+    if ats_type == "personio":
+        offices = [posting.findtext("office", "") or ""]
+        offices += [o.text or "" for o in posting.findall("additionalOffices/office")]
+        return ", ".join(filter(None, offices))
+    if ats_type == "teamtailor":
+        jp = posting.get("_jobposting") or {}
+        parts = []
+        for place in jp.get("jobLocation") or []:
+            addr = (place or {}).get("address") or {}
+            parts.append(", ".join(filter(None, [
+                addr.get("addressLocality"), addr.get("addressRegion"), addr.get("addressCountry"),
+            ])))
+        return "; ".join(filter(None, parts))
     if ats_type == "lever":
         cats = posting.get("categories") or {}
         return cats.get("location", "") or ", ".join(cats.get("allLocations", []) or [])
@@ -82,7 +103,7 @@ def probe(company: str, client: httpx.Client | None = None) -> str | None:
     client = client or httpx.Client(timeout=10, headers=_UA)
     try:
         for token in _slugs(company):
-            for ats_type, template, extract in _CHECKS:
+            for ats_type, template, fmt, extract in _CHECKS:
                 try:
                     resp = client.get(template.format(token=token))
                 except httpx.HTTPError:
@@ -91,8 +112,8 @@ def probe(company: str, client: httpx.Client | None = None) -> str | None:
                 if resp.status_code != 200:
                     continue
                 try:
-                    data = resp.json()
-                except ValueError:
+                    data = resp.json() if fmt == "json" else ElementTree.fromstring(resp.text)
+                except (ValueError, ElementTree.ParseError):
                     continue
                 postings = extract(data)
                 if not postings:
