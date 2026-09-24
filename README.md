@@ -68,8 +68,9 @@ your own keyword/company filter rules any time with `jobhunter rules add`. See
 
 ## Features
 - **Fetch** from Welcome to the Jungle (public Algolia backend), company ATS
-  boards (Greenhouse, Lever, Ashby, SmartRecruiters, Recruitee, Workable — most
-  company career pages are one of these underneath), LinkedIn (public guest
+  boards (Greenhouse, Lever, Ashby, SmartRecruiters, Recruitee, Workable,
+  Teamtailor, Personio, SuccessFactors — most company career pages are one of
+  these underneath), LinkedIn (public guest
   search, read-only, no login, multiple query/location searches per run),
   France Travail (official government API — needs a free key, see
   *Configuration* below), and HelloWork (page-1-only, no login), filtered to

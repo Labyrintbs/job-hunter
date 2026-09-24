@@ -1,7 +1,13 @@
-# Company ATS boards to pull directly (public JSON, France-filtered at source).
-# ats: greenhouse | lever | ashby | smartrecruiters | recruitee | workable
-# token = the board slug in the ATS URL. Run `jobhunter discover` to auto-detect
-# the ATS for companies already in your DB and propose additions here.
+# Company ATS boards to pull directly (public JSON/XML, France-filtered at source).
+# ats: greenhouse | lever | ashby | smartrecruiters | recruitee | workable | teamtailor | personio | successfactors
+# token = the board slug in the ATS URL (for teamtailor/personio too -- same
+# guessable-slug shape). Run `jobhunter discover` to auto-detect the ATS for
+# companies already in your DB and propose additions here.
+#
+# ats: successfactors is different: token is the FULL recruiting-marketing
+# hostname (e.g. "job.schindler.com"), not a slug -- it isn't derivable from the
+# company name, so find it by hand (check the company's real career site) rather
+# than guessing "companyname.successfactors.com" style, which will just 404.
 #
 # ats: workday is a different shape -- no single token, instead {tenant, wd_host, site,
 # locale?}, read off the company's own career page URL (or its HTML source), e.g.
@@ -80,3 +86,6 @@ companies:
   - { name: Eiffage, ats: workday, tenant: eiffage, wd_host: wd3, site: Eiffage_Careers, locale: fr-FR }
   - { name: Pernod Ricard, ats: workday, tenant: pernodricard, wd_host: wd3, site: pernod-ricard }
   - { name: Decathlon, ats: greenhouse, token: decathlontechnologyen }
+  - { name: Dolead, ats: teamtailor, token: dolead }
+  - { name: Deskbird, ats: personio, token: deskbird }
+  - { name: Schindler, ats: successfactors, token: job.schindler.com }
