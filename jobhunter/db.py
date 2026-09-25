@@ -410,10 +410,16 @@ def _norm_city(location: str) -> str:
     ("Paris - 75"), which without stripping would normalize to "paris 75" and never
     match another source's bare "paris" for the same city. It also sometimes folds
     the arrondissement into the city name itself ("Paris 12e - 75", "Paris 1er - 75"),
-    which needs stripping too or it normalizes to "paris 12e" and still never matches."""
+    which needs stripping too or it normalizes to "paris 12e" and still never matches.
+    France Travail puts its department code on the OTHER side instead ("31 - Blagnac",
+    "75 - Paris 1er Arrondissement") -- verified live: without stripping that leading
+    code, "31 - Blagnac" normalizes to "31 blagnac" and never matches LinkedIn's bare
+    "Blagnac" for the same posting (job #1904 vs #1862, same company/title, silently
+    not deduped)."""
     city = (location or "").split(",")[0]
+    city = re.sub(r"^\d{2,3}\s*-\s*", "", city)
     city = re.sub(r"\s*-\s*\d+\s*$", "", city)
-    city = re.sub(r"\s+\d+(?:er|e)\s*$", "", city, flags=re.IGNORECASE)
+    city = re.sub(r"\s+\d+(?:er|e)\s*(?:arrondissement)?\s*$", "", city, flags=re.IGNORECASE)
     return _normalize(city)
 
 
@@ -458,6 +464,19 @@ def find_possible_duplicates(conn: sqlite3.Connection, title_ratio: float = 0.80
       byte-for-byte same string after only removing gender/contract boilerplate,
       but the same posting cross-listed on HelloWork/LinkedIn/WTTJ with only
       punctuation differences does.
+
+      A content-overlap signal (Jaccard similarity of description word-shingles) was
+      tried here too, to catch cases like job #720 vs #1904 where a title word gets
+      dropped by one source ("Engineer - LLM - RAG" vs "AI Engineer - LLM / RAG").
+      Rejected after live validation against this DB's full dataset (not just the
+      already-confirmed sample): companies frequently reuse one JD template across
+      multiple genuinely distinct, simultaneously-open roles (e.g. CANAL+ posting
+      the identical "AI Product Manager" template for separate Africa-ops/Finance/
+      Content reqs, scoring 0.92-0.96 against each other; a real case scored a
+      *perfect* 1.0 between two admittedly-different AI engineering roles). No
+      threshold separates that from a real duplicate -- content overlap fails for
+      the same structural reason a title fuzzy-ratio does, just at higher scores.
+      Real cases like #720/#1904 are handled as one-off manual checks instead.
     Deliberately NOT used to auto-merge -- surfaces candidates for a human to judge.
     Uses only the stdlib (difflib) -- no embeddings needed at this scale (a few
     hundred rows)."""

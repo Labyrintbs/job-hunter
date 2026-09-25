@@ -146,6 +146,42 @@ def test_cross_source_content_dedup_hellowork_arrondissement_location(tmp_db):
         assert jid1 == jid2
 
 
+def test_cross_source_content_dedup_francetravail_leading_department_code(tmp_db):
+    # Regression: France Travail puts its department code on the OPPOSITE side
+    # from HelloWork ("31 - Blagnac" vs HelloWork's "Paris - 75") -- this used to
+    # normalize to "31 blagnac" and never match LinkedIn's bare "Blagnac", so a
+    # posting fetched from both sources silently produced two rows instead of one
+    # (observed live: job #1904 francetravail vs #1862 linkedin, same company/title).
+    linkedin = Job(source="linkedin", external_id="l1", title="AI Engineer - LLM / RAG (H/F)",
+                   company="STEP UP", location="Blagnac, Occitanie, France",
+                   url="https://linkedin.example/l1")
+    francetravail = Job(source="francetravail", external_id="f1", title="AI Engineer - LLM / RAG (H/F)",
+                        company="STEP UP", location="31 - Blagnac",
+                        url="https://francetravail.example/f1")
+    with db.connect() as conn:
+        jid1, new1 = db.upsert_job(conn, linkedin, 60, "r")
+        jid2, new2 = db.upsert_job(conn, francetravail, 65, "r2")
+        assert new1 is True and new2 is False
+        assert jid1 == jid2
+
+
+def test_cross_source_content_dedup_francetravail_arrondissement_location(tmp_db):
+    # France Travail also folds the arrondissement in, but with the word spelled
+    # out after the department code ("75 - Paris 1er Arrondissement") rather than
+    # HelloWork's compact "Paris 1er - 75".
+    wttj = Job(source="wttj", external_id="w1", title="Senior AI Engineer",
+              company="Converteo", location="Paris, Île-de-France, France",
+              url="https://wttj.example/w1")
+    francetravail = Job(source="francetravail", external_id="f1", title="Senior AI Engineer",
+                        company="Converteo", location="75 - Paris 1er Arrondissement",
+                        url="https://francetravail.example/f1")
+    with db.connect() as conn:
+        jid1, new1 = db.upsert_job(conn, wttj, 60, "r")
+        jid2, new2 = db.upsert_job(conn, francetravail, 65, "r2")
+        assert new1 is True and new2 is False
+        assert jid1 == jid2
+
+
 def test_find_possible_duplicates_flags_exact_title_at_same_company(tmp_db):
     # The same posting cross-listed at the exact same employer (e.g. HelloWork vs
     # LinkedIn), differing only by punctuation/boilerplate -- an EXACT match on the
