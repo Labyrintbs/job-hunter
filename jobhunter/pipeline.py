@@ -85,6 +85,12 @@ def _fetch_hellowork(config: dict) -> list:
     return jobs
 
 
+def _fetch_ats(config: dict) -> list:
+    wd = config.get("workday") or {}
+    queries = wd.get("queries") or [config["query"]]
+    return ats.fetch_all(load_companies(), workday_queries=queries)
+
+
 def _fetch_arbeitnow(config: dict) -> list:
     an = config.get("arbeitnow") or {}
     if not an.get("enabled"):
@@ -121,7 +127,7 @@ def _gather(config: dict, force: bool = False) -> list:
     explicit on-demand "check now" that should bypass all cadence gating."""
     sources = [
         ("wttj", lambda: _fetch_wttj(config)),
-        ("ats", lambda: ats.fetch_all(load_companies())),
+        ("ats", lambda: _fetch_ats(config)),
         ("linkedin", lambda: _fetch_linkedin(config)),
         ("francetravail", lambda: _fetch_francetravail(config)),
         ("hellowork", lambda: _fetch_hellowork(config)),
@@ -460,12 +466,15 @@ def backfill_workday(force: bool = False) -> dict:
         if not force and not _is_due(conn, "workday_backfill", config):
             return {"skipped": "not due yet"}
 
+    wd = config.get("workday") or {}
+    queries = wd.get("queries") or [config["query"]]
     companies = [c for c in load_companies() if (c.get("ats") or "").lower() == "workday"]
     jobs: list = []
     for co in companies:
         try:
             jobs += workday.fetch(co["tenant"], co["wd_host"], co["site"], co.get("name", ""),
                                   locale=co.get("locale", "en-US"),
+                                  queries=queries,
                                   pages_per_query=bf.get("pages_per_query", 15))
         except Exception as exc:
             print(f"  backfill_workday warn: {co.get('name')}: {exc}")

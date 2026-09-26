@@ -346,10 +346,12 @@ FETCHERS = {
 SUPPORTED_ATS = tuple(FETCHERS)
 
 
-def fetch_all(companies: list[dict]) -> list[Job]:
+def fetch_all(companies: list[dict], workday_queries: list[str] | None = None) -> list[Job]:
     """companies: list of {name, ats, token} where ats is one of SUPPORTED_ATS, or for
     ats='workday' a {name, ats, tenant, wd_host, site, locale?} entry instead (Workday
-    has no single global token -- see sources/workday.py)."""
+    has no single global token -- see sources/workday.py). workday_queries is passed
+    straight through to workday.fetch (falls back to its own DEFAULT_QUERIES if not
+    given here)."""
     from . import workday  # local import: workday.py imports helpers from this module
 
     out: list[Job] = []
@@ -360,7 +362,8 @@ def fetch_all(companies: list[dict]) -> list[Job]:
         try:
             if ats == "workday":
                 out.extend(workday.fetch(co["tenant"], co["wd_host"], co["site"], name,
-                                         locale=co.get("locale", "en-US")))
+                                         locale=co.get("locale", "en-US"),
+                                         queries=workday_queries))
             else:
                 fetcher = FETCHERS.get(ats)
                 if not fetcher:

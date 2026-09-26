@@ -415,6 +415,29 @@ linkedin_backfill:
   fetch_interval_hours: 168
   wide_recent_hours: 720        # 30 days, vs. the regular poll's 168 (7 days)
 
+# Workday-hosted company boards (config/companies.yaml entries with ats: workday) --
+# Workday's search API only returns postings matching one of these phrases (unlike
+# Greenhouse/Lever's full-board fetch), so a category missing here is invisible no
+# matter how many real postings exist. Confirmed live: Valeo's board returned zero
+# computer-vision postings before "computer vision" was added here -- the previous
+# hardcoded list (jobhunter/sources/workday.py's DEFAULT_QUERIES, kept only as a
+# fallback if this is unset) never asked for it. Fetch cadence itself still follows
+# `ats.fetch_interval_hours` below -- Workday rides the same per-company-board
+# cadence, not its own.
+workday:
+  queries:
+    - "machine learning"
+    - "deep learning"
+    - "data scientist"
+    - "algorithm engineer"
+    - "artificial intelligence"
+    - "computer vision"
+    - "nlp"
+    - "llm"
+    - "generative ai"
+    - "ai product manager"
+    - "technical product manager"
+
 # Company ATS boards (config/companies.yaml) -- no query/location block needed here,
 # just a fetch cadence. Career pages change slowly (a handful of new roles a week),
 # so checking hourly like LinkedIn/WTTJ would be pure waste.

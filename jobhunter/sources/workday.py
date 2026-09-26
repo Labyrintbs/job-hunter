@@ -21,6 +21,8 @@ from .ats import THROTTLE_SECONDS, _UA, _is_france, _strip_html
 
 PAGE_SIZE = 20
 
+# Fallback only -- production always passes config/search.yaml's workday.queries
+# instead (see pipeline.py), which also covers computer vision/NLP/LLM/PM.
 DEFAULT_QUERIES = ["machine learning", "data scientist", "artificial intelligence",
                    "deep learning", "algorithm engineer"]
 

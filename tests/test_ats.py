@@ -154,8 +154,9 @@ def test_fetch_all_dispatches_workday_with_its_own_shape(monkeypatch):
     ats.fetch_all([
         {"name": "Renault", "ats": "workday", "tenant": "alliancewd", "wd_host": "wd3",
          "site": "renault-group-careers", "locale": "fr-FR"},
-    ])
-    assert calls == [("alliancewd", "wd3", "renault-group-careers", "Renault", {"locale": "fr-FR"})]
+    ], workday_queries=["machine learning", "computer vision"])
+    assert calls == [("alliancewd", "wd3", "renault-group-careers", "Renault",
+                       {"locale": "fr-FR", "queries": ["machine learning", "computer vision"]})]
 
 
 def test_fetch_all_tolerates_malformed_workday_entry(monkeypatch):
