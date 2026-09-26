@@ -23,8 +23,8 @@ def _job_terms(job: Job) -> set[str]:
     return snippet_bank.terms_in(f"{job.title} {job.description}")
 
 
-# Caps mirror templates/cv_tailoring_workflow.md's Step 2 ("what to cut"): 2
-# Professional Experience entries, 3 Projects & Research entries by default.
+# This automated path's own default caps -- the workflow doc's Step 2 ("what to
+# cut") leaves the actual count to per-JD judgment, it doesn't fix a number.
 MAX_EXPERIENCES = 2
 MAX_PROJECTS = 3
 

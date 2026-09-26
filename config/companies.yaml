@@ -9,10 +9,9 @@
 # company name, so find it by hand (check the company's real career site) rather
 # than guessing "companyname.successfactors.com" style, which will just 404.
 #
-# ats: workday is a different shape -- no single token, instead {tenant, wd_host, site,
-# locale?}, read off the company's own career page URL (or its HTML source), e.g.
-# "valeo.wd3.myworkdayjobs.com/en-EN/valeo_jobs" -> tenant: valeo, wd_host: wd3,
-# site: valeo_jobs. See jobhunter/sources/workday.py.
+# ats: workday is a different shape -- no single token, instead {tenant, wd_host,
+# site, locale?}. See jobhunter/sources/workday.py's docstring for how to read
+# these off a company's career page URL.
 companies:
   - { name: Dataiku, ats: greenhouse, token: dataiku }
   - { name: Shift Technology, ats: greenhouse, token: shifttechnology }

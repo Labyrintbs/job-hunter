@@ -466,17 +466,9 @@ def find_possible_duplicates(conn: sqlite3.Connection, title_ratio: float = 0.80
       punctuation differences does.
 
       A content-overlap signal (Jaccard similarity of description word-shingles) was
-      tried here too, to catch cases like job #720 vs #1904 where a title word gets
-      dropped by one source ("Engineer - LLM - RAG" vs "AI Engineer - LLM / RAG").
-      Rejected after live validation against this DB's full dataset (not just the
-      already-confirmed sample): companies frequently reuse one JD template across
-      multiple genuinely distinct, simultaneously-open roles (e.g. CANAL+ posting
-      the identical "AI Product Manager" template for separate Africa-ops/Finance/
-      Content reqs, scoring 0.92-0.96 against each other; a real case scored a
-      *perfect* 1.0 between two admittedly-different AI engineering roles). No
-      threshold separates that from a real duplicate -- content overlap fails for
-      the same structural reason a title fuzzy-ratio does, just at higher scores.
-      Real cases like #720/#1904 are handled as one-off manual checks instead.
+      tried and rejected instead -- companies reuse one JD template across genuinely
+      distinct simultaneously-open roles often enough that no threshold separates
+      that from a real duplicate (see git history for the investigation).
     Deliberately NOT used to auto-merge -- surfaces candidates for a human to judge.
     Uses only the stdlib (difflib) -- no embeddings needed at this scale (a few
     hundred rows)."""

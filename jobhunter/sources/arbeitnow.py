@@ -2,17 +2,10 @@
 
 Real pan-European coverage (Berlin, London, Paris, Munich, Hamburg, ... -- verified
 live, not Germany-only despite the name), and each record already ships its full
-job description, unlike LinkedIn's guest search (title/company/location only).
-
-No server-side keyword search exists (confirmed against the docs and live) -- this
-paginates the whole feed and leaves relevance filtering to match.py's screen(), the
-same way ats.py/hellowork.py already do for sources without a query param.
-
-The API's own `remote=true` query param does NOT actually filter (verified live:
-identical results with or without it) -- never pass it. Each job record's own
-`remote` boolean field is trustworthy though (employer-declared via their own
-"Remote" tag, same category of signal as wttj's `remote:fulltime` facet, not a
-search-side promise) -- fetch() tags the location from that field.
+job description, unlike LinkedIn's guest search (title/company/location only). No
+server-side keyword search exists -- this paginates the whole feed and leaves
+relevance filtering to match.py's screen(), the same way ats.py/hellowork.py
+already do for sources without a query param.
 """
 from __future__ import annotations
 
@@ -43,6 +36,10 @@ def _posted_at(created_at) -> str:
 
 
 def _to_job(item: dict) -> Job:
+    # The API's `remote=true` query param does NOT filter (verified live: identical
+    # results with or without it) -- never pass it. Each record's own `remote`
+    # boolean is trustworthy though (employer-declared, like wttj's remote:fulltime
+    # facet), so location is tagged from that field instead.
     location = (item.get("location") or "").strip()
     if item.get("remote") and "remote" not in location.lower():
         location = f"{location} - Remote" if location else "Remote"

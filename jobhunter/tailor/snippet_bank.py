@@ -15,9 +15,9 @@ invocation missing its (still-commented) argument braces -- which is exactly
 what broke compilation before this fix.
 
 engine.py selects a capped, relevance-ranked subset of projects/experiences/
-skill categories (mirroring templates/cv_tailoring_workflow.md's rules: 2
-experiences, 3 projects, reverse-chronological display order by default) rather
-than just reordering everything, see MAX_EXPERIENCES/MAX_PROJECTS there.
+skill categories (reverse-chronological display order by default, per
+templates/cv_tailoring_workflow.md) rather than just reordering everything --
+see MAX_EXPERIENCES/MAX_PROJECTS there for the actual caps.
 """
 from __future__ import annotations
 
