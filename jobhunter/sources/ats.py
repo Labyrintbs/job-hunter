@@ -3,16 +3,11 @@
 Most "company career pages" are really a hosted ATS underneath, and several expose
 a public board feed. Pulling those directly is how we reach postings that only live
 on a company's own site (not on WTTJ/LinkedIn). Supported: Greenhouse, Lever, Ashby,
-SmartRecruiters, Recruitee, Workable, Teamtailor, Personio, SuccessFactors. All
-global, so we filter to France at source. (Workday *is* supported, but via
-sources/workday.py and a different companies.yaml shape, since it needs a (tenant,
-wd_host, site) triple rather than one token -- see fetch_all below.)
+SmartRecruiters, Recruitee, Workable, Teamtailor, Personio, SuccessFactors, and
+Workday (a different shape -- see sources/workday.py). All global, so we filter to
+France at source.
 
-Teamtailor/Personio use a guessable per-company slug, same as the JSON fetchers
-above (token = the slug). SuccessFactors' token is different: the full recruiting-
-marketing hostname (e.g. "job.schindler.com"), not a slug -- it isn't derivable
-from a company name, so it has to be found by hand per company, and (unlike
-Teamtailor/Personio) it's never added to ats_discovery.py's slug-guessing probe.
+Per-platform token format and quirks: see config/companies.yaml's header comment.
 """
 from __future__ import annotations
 
@@ -300,11 +295,10 @@ def fetch_personio(token: str, company: str, country_only: bool = True) -> list[
 
 
 def fetch_successfactors(token: str, company: str, country_only: bool = True) -> list[Job]:
-    """`token` is the full recruiting-marketing hostname (e.g. "job.schindler.com"),
-    not a guessable slug -- found by hand per company, same as Workday's tenant/
-    wd_host/site. RSS 2.0 with the Google Merchant namespace; confirmed live most
-    tenants omit `pubDate` (carrying only g:expiration_date instead), so posted_at
-    is left blank rather than guessed from that -- would be misleading."""
+    """`token` format: see config/companies.yaml's header. RSS 2.0 with the Google
+    Merchant namespace; confirmed live most tenants omit `pubDate` (carrying only
+    g:expiration_date instead), so posted_at is left blank rather than guessed
+    from that -- would be misleading."""
     url = f"https://{token}/sitemal.xml"
     jobs: list[Job] = []
     with httpx.Client(timeout=20, headers=_UA) as c:
