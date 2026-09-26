@@ -19,6 +19,7 @@ import urllib.parse
 
 import httpx
 
+from .. import fetch_diag
 from ..models import Job
 
 SEARCH_URL = "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search"
@@ -98,12 +99,21 @@ def _fetch_one(client: httpx.Client, query: str, location: str, max_pages: int,
             if attempt < max_retries:
                 time.sleep(backoff_base * 2 ** attempt)
         if resp.status_code != 200 or not resp.text.strip():
+            fetch_diag.track("linkedin", "page_fetch_stopped",
+                              detail=f"{query!r}@{location!r} page={page} status={resp.status_code}")
             break  # rate-limited past retries, or exhausted
         cards = _CARD_RE.findall(resp.text)
         if not cards:
             break
-        jobs.extend(j for j in (_parse_card(c) for c in cards) if j)
+        parsed = [_parse_card(c) for c in cards]
+        n_malformed = sum(1 for p in parsed if p is None)
+        if n_malformed:
+            fetch_diag.track("linkedin", "malformed_card",
+                              detail=f"{n_malformed} of {len(cards)} cards, {query!r}@{location!r}")
+        jobs.extend(p for p in parsed if p)
         time.sleep(THROTTLE_SECONDS)
+    else:
+        fetch_diag.track("linkedin", "pagination_cap_hit", detail=f"{query!r}@{location!r} max_pages={max_pages}")
     return jobs
 
 

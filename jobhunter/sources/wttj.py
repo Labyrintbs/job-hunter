@@ -13,6 +13,7 @@ import time
 
 import httpx
 
+from .. import fetch_diag
 from ..models import Job
 
 APP_ID = "CSEKHVMS53"
@@ -77,6 +78,7 @@ def fetch(
 ) -> list[Job]:
     jobs: list[Job] = []
     page = 0
+    result: dict = {}
     with httpx.Client(timeout=20.0) as client:
         while len(jobs) < max_hits:
             body: dict[str, object] = {
@@ -104,4 +106,7 @@ def fetch(
             if page >= result.get("nbPages", 1):
                 break
             time.sleep(THROTTLE_SECONDS)
+    if len(jobs) >= max_hits and page < result.get("nbPages", 1):
+        fetch_diag.track("wttj", "pagination_cap_hit",
+                          detail=f"{query!r}: nbHits={result.get('nbHits')} max_hits={max_hits}")
     return jobs[:max_hits]

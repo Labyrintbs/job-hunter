@@ -5,7 +5,7 @@ import shutil
 import time
 from datetime import datetime, timezone
 
-from . import db, enrich, jd_store, match
+from . import db, enrich, fetch_diag, jd_store, match
 from .apply import cover_letter
 from .config import DATA_DIR, load_companies, load_search_config
 from .llm import dedup as llm_dedup
@@ -135,7 +135,7 @@ def _gather(config: dict, force: bool = False) -> list:
     ]
     jobs: list = []
     counts: dict[str, object] = {}
-    with db.connect() as conn:
+    with db.connect() as conn, fetch_diag.run_tracking() as tracker:
         for name, fn in sources:
             if not force and not _is_due(conn, name, config):
                 interval = config[name]["fetch_interval_hours"]
@@ -151,6 +151,7 @@ def _gather(config: dict, force: bool = False) -> list:
             counts[name] = len(got)
             jobs += got
             db.record_source_fetch(conn, name, len(got))
+        tracker.flush(conn)
     print(f"  fetched by source: {counts}")
     return jobs
 
@@ -411,10 +412,12 @@ def backfill_arbeitnow(force: bool = False) -> dict:
         if not force and not _is_due(conn, "arbeitnow_backfill", config):
             return {"skipped": "not due yet"}
 
-    jobs, reached_end, rate_limited = arbeitnow.fetch_deep(max_pages=bf.get("max_pages", 100))
+    with fetch_diag.run_tracking() as tracker:
+        jobs, reached_end, rate_limited = arbeitnow.fetch_deep(max_pages=bf.get("max_pages", 100))
     with db.connect() as conn:
         kept = _persist_jobs(conn, config, jobs)
         db.record_source_fetch(conn, "arbeitnow_backfill", len(jobs))
+        tracker.flush(conn)
     _log_backfill(f"arbeitnow: {len(jobs)} jobs fetched, {len(kept)} kept, "
                   f"reached_end={reached_end}, rate_limited={rate_limited}")
     return {"fetched": len(jobs), "kept": len(kept), "reached_end": reached_end,
@@ -442,12 +445,14 @@ def backfill_wttj(force: bool = False) -> dict:
     queries = wt.get("queries") or [config["query"]]
     country = (config.get("countries") or ["France"])[0]
     jobs: list = []
-    for q in queries:
-        jobs += wttj.fetch(query=q, max_hits=bf.get("max_hits", 1100), country=country)
+    with fetch_diag.run_tracking() as tracker:
+        for q in queries:
+            jobs += wttj.fetch(query=q, max_hits=bf.get("max_hits", 1100), country=country)
 
     with db.connect() as conn:
         kept = _persist_jobs(conn, config, jobs)
         db.record_source_fetch(conn, "wttj_backfill", len(jobs))
+        tracker.flush(conn)
     _log_backfill(f"wttj: {len(jobs)} jobs fetched across {len(queries)} queries, {len(kept)} kept")
     return {"fetched": len(jobs), "kept": len(kept)}
 
@@ -470,18 +475,20 @@ def backfill_workday(force: bool = False) -> dict:
     queries = wd.get("queries") or [config["query"]]
     companies = [c for c in load_companies() if (c.get("ats") or "").lower() == "workday"]
     jobs: list = []
-    for co in companies:
-        try:
-            jobs += workday.fetch(co["tenant"], co["wd_host"], co["site"], co.get("name", ""),
-                                  locale=co.get("locale", "en-US"),
-                                  queries=queries,
-                                  pages_per_query=bf.get("pages_per_query", 15))
-        except Exception as exc:
-            print(f"  backfill_workday warn: {co.get('name')}: {exc}")
+    with fetch_diag.run_tracking() as tracker:
+        for co in companies:
+            try:
+                jobs += workday.fetch(co["tenant"], co["wd_host"], co["site"], co.get("name", ""),
+                                      locale=co.get("locale", "en-US"),
+                                      queries=queries,
+                                      pages_per_query=bf.get("pages_per_query", 15))
+            except Exception as exc:
+                print(f"  backfill_workday warn: {co.get('name')}: {exc}")
 
     with db.connect() as conn:
         kept = _persist_jobs(conn, config, jobs)
         db.record_source_fetch(conn, "workday_backfill", len(jobs))
+        tracker.flush(conn)
     _log_backfill(f"workday: {len(jobs)} jobs fetched across {len(companies)} companies, {len(kept)} kept")
     return {"fetched": len(jobs), "kept": len(kept)}
 
@@ -525,15 +532,17 @@ def backfill_francetravail(force: bool = False) -> dict:
     jobs: list = []
     next_cursor = cursor
     reached_end = True
-    for q in queries:
-        q_jobs, next_cursor, q_reached_end = francetravail.fetch_before(
-            q, departements, cursor, window_days=window_days)
-        jobs += q_jobs
-        reached_end = reached_end and q_reached_end
+    with fetch_diag.run_tracking() as tracker:
+        for q in queries:
+            q_jobs, next_cursor, q_reached_end = francetravail.fetch_before(
+                q, departements, cursor, window_days=window_days)
+            jobs += q_jobs
+            reached_end = reached_end and q_reached_end
 
     with db.connect() as conn:
         kept = _persist_jobs(conn, config, jobs)
         db.record_backfill_progress(conn, "francetravail_backfill", next_cursor, reached_end, len(jobs))
+        tracker.flush(conn)
     _log_backfill(f"francetravail: {len(jobs)} jobs fetched across {len(queries)} queries, "
                   f"{len(kept)} kept, window_ending={cursor or 'now'}, reached_end={reached_end}")
     return {"fetched": len(jobs), "kept": len(kept), "reached_end": reached_end}
@@ -558,18 +567,20 @@ def backfill_linkedin_wide(force: bool = False) -> dict:
             return {"skipped": "not due yet"}
 
     queries = li.get("queries") or [config["query"]]
-    jobs = linkedin.fetch(
-        queries=queries,
-        locations=li.get("locations") or ["Paris, France"],
-        max_pages=li.get("max_pages", 5),
-        recent_hours=bf.get("wide_recent_hours", 720),
-        max_retries=li.get("max_retries", 3),
-        backoff_base=li.get("backoff_seconds", 2.0),
-    )
+    with fetch_diag.run_tracking() as tracker:
+        jobs = linkedin.fetch(
+            queries=queries,
+            locations=li.get("locations") or ["Paris, France"],
+            max_pages=li.get("max_pages", 5),
+            recent_hours=bf.get("wide_recent_hours", 720),
+            max_retries=li.get("max_retries", 3),
+            backoff_base=li.get("backoff_seconds", 2.0),
+        )
 
     with db.connect() as conn:
         kept = _persist_jobs(conn, config, jobs)
         db.record_source_fetch(conn, "linkedin_backfill", len(jobs))
+        tracker.flush(conn)
     _log_backfill(f"linkedin_wide: {len(jobs)} jobs fetched, {len(kept)} kept")
     return {"fetched": len(jobs), "kept": len(kept)}
 
