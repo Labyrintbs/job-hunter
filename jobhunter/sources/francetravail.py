@@ -19,6 +19,7 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 
+from .. import fetch_diag
 from ..models import Job
 
 TOKEN_URL = "https://entreprise.francetravail.fr/connexion/oauth2/access_token?realm=/partenaire"
@@ -100,6 +101,7 @@ def _search(query: str, departements: str | None, max_results: int,
     client_id = os.environ.get("FRANCE_TRAVAIL_CLIENT_ID")
     client_secret = os.environ.get("FRANCE_TRAVAIL_CLIENT_SECRET")
     if not (client_id and client_secret):
+        fetch_diag.track("francetravail", "credentials_missing", detail=query)
         return []  # not registered yet -- silently contribute nothing
 
     token = _get_token(client_id, client_secret)
@@ -128,6 +130,9 @@ def _search(query: str, departements: str | None, max_results: int,
                     if oid not in seen_ids:
                         seen_ids.add(oid)
                         jobs.append(_to_job(o))
+                if len(jobs) >= max_results and len(results) == PAGE_SIZE:
+                    fetch_diag.track("francetravail", "pagination_cap_hit",
+                                      detail=f"{query!r} batch={batch} max_results={max_results}")
                 start += PAGE_SIZE
                 time.sleep(THROTTLE_SECONDS)
                 if len(results) < PAGE_SIZE:

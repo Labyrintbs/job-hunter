@@ -1,3 +1,4 @@
+from jobhunter import fetch_diag
 from jobhunter.sources import ats
 
 
@@ -54,6 +55,17 @@ def test_ashby_france_filter_and_fields(monkeypatch):
     assert len(jobs) == 1
     assert jobs[0].source == "ashby" and jobs[0].title == "ML Engineer"
     assert "ML role" in jobs[0].description and jobs[0].url == "http://a/1"
+
+
+def test_ashby_tracks_non_france_drop(monkeypatch):
+    _patch(monkeypatch, {"jobs": [
+        {"id": "a2", "title": "Other", "location": "New York, USA",
+         "address": {"postalAddress": {"addressCountry": "USA"}}},
+    ]})
+    with fetch_diag.run_tracking() as t:
+        ats.fetch_ashby("acme", "Acme")
+    assert t.counts[("ashby", "Acme", "non_france")] == 1
+    assert t.samples[("ashby", "Acme", "non_france")] == ["New York, USA"]
 
 
 def test_smartrecruiters_france_filter(monkeypatch):

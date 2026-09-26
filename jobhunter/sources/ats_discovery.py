@@ -21,6 +21,7 @@ from xml.etree import ElementTree
 
 import httpx
 
+from .. import fetch_diag
 from .ats import _UA, _is_france
 
 THROTTLE_SECONDS = 0.3
@@ -106,14 +107,18 @@ def probe(company: str, client: httpx.Client | None = None) -> str | None:
             for ats_type, template, fmt, extract in _CHECKS:
                 try:
                     resp = client.get(template.format(token=token))
-                except httpx.HTTPError:
+                except httpx.HTTPError as exc:
+                    fetch_diag.track("ats_discovery", "probe_error", detail=f"{ats_type}/{token}: {exc}",
+                                      company=company)
                     continue
                 time.sleep(THROTTLE_SECONDS)
                 if resp.status_code != 200:
                     continue
                 try:
                     data = resp.json() if fmt == "json" else ElementTree.fromstring(resp.text)
-                except (ValueError, ElementTree.ParseError):
+                except (ValueError, ElementTree.ParseError) as exc:
+                    fetch_diag.track("ats_discovery", "probe_error", detail=f"{ats_type}/{token}: {exc}",
+                                      company=company)
                     continue
                 postings = extract(data)
                 if not postings:

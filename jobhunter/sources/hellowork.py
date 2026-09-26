@@ -20,6 +20,7 @@ import urllib.parse
 
 import httpx
 
+from .. import fetch_diag
 from ..models import Job
 
 SEARCH_URL = "https://www.hellowork.com/fr-fr/emploi/recherche.html"
@@ -64,6 +65,13 @@ def fetch(query: str, location: str = "Paris") -> list[Job]:
     url = f"{SEARCH_URL}?{urllib.parse.urlencode(params)}"
     resp = httpx.get(url, headers=_HEADERS, timeout=20)
     if resp.status_code != 200:
+        fetch_diag.track("hellowork", "page_fetch_failed",
+                          detail=f"{query!r}@{location!r} status={resp.status_code}")
         return []
     cards = resp.text.split(_CARD_SPLIT)[1:]  # [0] is everything before the first card
-    return [j for j in (_parse_card(c) for c in cards) if j]
+    parsed = [_parse_card(c) for c in cards]
+    n_malformed = sum(1 for p in parsed if p is None)
+    if n_malformed:
+        fetch_diag.track("hellowork", "malformed_card",
+                          detail=f"{n_malformed} of {len(cards)} cards, {query!r}@{location!r}")
+    return [p for p in parsed if p]

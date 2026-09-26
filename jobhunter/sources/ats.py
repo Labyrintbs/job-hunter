@@ -19,6 +19,7 @@ from xml.etree import ElementTree
 
 import httpx
 
+from .. import fetch_diag
 from ..models import Job
 
 _GOOGLE_NS = {"g": "http://base.google.com/ns/1.0"}
@@ -60,6 +61,7 @@ def fetch_greenhouse(token: str, company: str, country_only: bool = True) -> lis
         for j in resp.json().get("jobs", []):
             location = (j.get("location") or {}).get("name", "")
             if country_only and not _is_france(location):
+                fetch_diag.track("greenhouse", "non_france", detail=location, company=company)
                 continue
             jobs.append(Job(
                 source="greenhouse",
@@ -85,6 +87,7 @@ def fetch_lever(token: str, company: str, country_only: bool = True) -> list[Job
             cats = p.get("categories") or {}
             location = cats.get("location", "") or ", ".join(cats.get("allLocations", []) or [])
             if country_only and not _is_france(location, p.get("country", "")):
+                fetch_diag.track("lever", "non_france", detail=location, company=company)
                 continue
             desc = " ".join(filter(None, [p.get("descriptionPlain"), p.get("additionalPlain")]))
             jobs.append(Job(
@@ -110,6 +113,7 @@ def fetch_ashby(token: str, company: str, country_only: bool = True) -> list[Job
             location = j.get("location", "") or ""
             country = (((j.get("address") or {}).get("postalAddress") or {}).get("addressCountry", "")) or ""
             if country_only and not _is_france(location, country):
+                fetch_diag.track("ashby", "non_france", detail=location, company=company)
                 continue
             jobs.append(Job(
                 source="ashby",
@@ -149,6 +153,7 @@ def fetch_smartrecruiters(token: str, company: str, country_only: bool = True) -
                 loc = p.get("location") or {}
                 location = ", ".join(filter(None, [loc.get("city"), loc.get("region"), loc.get("country")]))
                 if country_only and not _is_france(location, loc.get("country", "")):
+                    fetch_diag.track("smartrecruiters", "non_france", detail=location, company=company)
                     continue
                 pid = p.get("id")
                 jobs.append(Job(
@@ -163,6 +168,9 @@ def fetch_smartrecruiters(token: str, company: str, country_only: bool = True) -
             offset += _SMARTRECRUITERS_PAGE_SIZE
             if offset >= data.get("totalFound", 0):
                 break
+        else:
+            fetch_diag.track("smartrecruiters", "pagination_cap_hit",
+                              detail=f"totalFound={data.get('totalFound')}", company=company)
     return jobs
 
 
@@ -175,6 +183,7 @@ def fetch_recruitee(token: str, company: str, country_only: bool = True) -> list
         for o in resp.json().get("offers", []):
             location = ", ".join(filter(None, [o.get("city"), o.get("country")])) or o.get("location", "")
             if country_only and not _is_france(location, o.get("country_code", "")):
+                fetch_diag.track("recruitee", "non_france", detail=location, company=company)
                 continue
             jobs.append(Job(
                 source="recruitee",
@@ -199,6 +208,7 @@ def fetch_workable(token: str, company: str, country_only: bool = True) -> list[
         for j in resp.json().get("jobs", []):
             location = ", ".join(filter(None, [j.get("city"), j.get("country")])) or j.get("location", "")
             if country_only and not _is_france(location, j.get("country", "")):
+                fetch_diag.track("workable", "non_france", detail=location, company=company)
                 continue
             jobs.append(Job(
                 source="workable",
@@ -243,6 +253,7 @@ def fetch_teamtailor(token: str, company: str, country_only: bool = True) -> lis
                     countries.append(addr["addressCountry"])
             location = "; ".join(filter(None, location_parts))
             if country_only and "FR" not in countries and not _is_france(location):
+                fetch_diag.track("teamtailor", "non_france", detail=location, company=company)
                 continue
             employer = (jp.get("hiringOrganization") or {}).get("name", "")
             jobs.append(Job(
@@ -277,6 +288,7 @@ def fetch_personio(token: str, company: str, country_only: bool = True) -> list[
             offices += [o.text or "" for o in pos.findall("additionalOffices/office")]
             location = ", ".join(filter(None, offices))
             if country_only and not _is_france(location):
+                fetch_diag.track("personio", "non_france", detail=location, company=company)
                 continue
             desc = " ".join((d.findtext("value") or "") for d in pos.findall("jobDescriptions/jobDescription"))
             pid = pos.findtext("id", "") or ""
@@ -309,6 +321,7 @@ def fetch_successfactors(token: str, company: str, country_only: bool = True) ->
             title = (item.findtext("title") or "").strip()
             location = item.findtext("g:location", namespaces=_GOOGLE_NS) or title
             if country_only and not _is_france(location):
+                fetch_diag.track("successfactors", "non_france", detail=location, company=company)
                 continue
             gid = item.findtext("g:id", namespaces=_GOOGLE_NS)
             guid = item.findtext("guid")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 from . import db, export as export_mod, jd_store, learn, market_trend, schedule
@@ -133,6 +134,10 @@ def main(argv: list[str] | None = None) -> int:
     p_profile.add_argument("action", choices=["show", "update"], default="show", nargs="?")
 
     sub.add_parser("metrics", help="screening calibration (false-negative rate, etc.)")
+
+    p_fetch_diag = sub.add_parser("fetch-diag", help="recent fetch-phase drop/degradation counts "
+                                   "(non-France misses, pagination caps hit, malformed records, ...)")
+    p_fetch_diag.add_argument("--hours", type=int, default=24)
 
     p_export = sub.add_parser("export", help="export analytics views (CSV/JSON) for Grafana/Metabase")
     p_export.add_argument("--view", default="all", choices=["all", *db.VIEW_NAMES])
@@ -456,6 +461,22 @@ def main(argv: list[str] | None = None) -> int:
         print(f"preference profile:        {'set' if prof else 'none'}")
         if m["false_negative_rate"] >= 0.3:
             print("\n⚠ screen may be too aggressive — review the Filtered bucket / seniority.max_years.")
+        return 0
+
+    if args.command == "fetch-diag":
+        db.init_db()
+        with db.connect() as conn:
+            rows = db.recent_fetch_drops(conn, args.hours)
+        if not rows:
+            print(f"no fetch drops recorded in the last {args.hours}h")
+            return 0
+        print(f"fetch drops, last {args.hours}h:")
+        for r in rows:
+            samples = json.loads(r["samples"] or "[]")
+            company = f" [{r['company']}]" if r["company"] else ""
+            print(f"  {r['occurred_at']}  {r['source']:15s}{company:20s} {r['reason']:20s} x{r['count']}")
+            for s in samples:
+                print(f"      e.g. {s}")
         return 0
 
     if args.command == "cv":

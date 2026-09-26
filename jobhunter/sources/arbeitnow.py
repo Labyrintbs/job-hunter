@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 
 import httpx
 
+from .. import fetch_diag
 from ..models import Job
 
 API_URL = "https://www.arbeitnow.com/api/job-board-api"
@@ -86,13 +87,22 @@ def _walk(max_pages: int, max_retries: int = 3,
             items = body.get("data") or []
             if not items:
                 return jobs, True, False
-            jobs.extend(_to_job(item) for item in items if item.get("slug"))
+            for item in items:
+                if not item.get("slug"):
+                    fetch_diag.track("arbeitnow", "malformed_record",
+                                      detail=str(item.get("url") or item.get("title") or ""))
+                    continue
+                jobs.append(_to_job(item))
             url = (body.get("links") or {}).get("next")
     return jobs, url is None, False
 
 
 def fetch(max_pages: int = 5) -> list[Job]:
-    jobs, _, _ = _walk(max_pages)
+    jobs, reached_end, rate_limited = _walk(max_pages)
+    if rate_limited:
+        fetch_diag.track("arbeitnow", "rate_limited", detail=f"max_pages={max_pages}")
+    elif not reached_end:
+        fetch_diag.track("arbeitnow", "pagination_cap_hit", detail=f"max_pages={max_pages}")
     return jobs
 
 

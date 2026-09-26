@@ -1,3 +1,4 @@
+from jobhunter import fetch_diag
 from jobhunter.sources import ats, workday
 
 
@@ -119,6 +120,48 @@ def test_fetch_survives_detail_endpoint_failure(monkeypatch):
 
 def test_is_france_shared_with_other_ats_sources():
     assert workday._is_france is ats._is_france
+
+
+def test_fetch_tracks_pagination_cap_hit_when_total_exceeds_pages_fetched(monkeypatch):
+    # 3 pages of 1 posting each, "total": 1000 -- pages_per_query=3 exhausts without
+    # ever reaching offset >= total, so real postings are left unfetched.
+    pages = [{"total": 1000, "jobPostings": [
+        {"title": "AI Engineer", "externalPath": f"/job/Paris/AI-Engineer_JR{i}",
+         "locationsText": "Paris", "postedOn": "Posted Today"},
+    ]} for i in range(3)]
+    _patch(monkeypatch, pages, detail_payloads={})
+
+    with fetch_diag.run_tracking() as t:
+        workday.fetch("acme", "wd3", "AcmeSite", "Acme", queries=["ai"], pages_per_query=3)
+
+    assert t.counts[("workday", "Acme", "pagination_cap_hit")] == 1
+
+
+def test_fetch_tracks_detail_fetch_failure(monkeypatch):
+    class _RaisingClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def post(self, url, json=None):
+            return Resp({"total": 1, "jobPostings": [
+                {"title": "ML Engineer", "externalPath": "/job/Paris/ML-Engineer_JR1",
+                 "locationsText": "Paris", "postedOn": "Posted Today"},
+            ]})
+
+        def get(self, url):
+            raise workday.httpx.HTTPError("boom")
+
+    monkeypatch.setattr(workday.httpx, "Client", lambda *a, **k: _RaisingClient())
+    monkeypatch.setattr(workday.time, "sleep", lambda *_: None)
+
+    with fetch_diag.run_tracking() as t:
+        jobs = workday.fetch("acme", "wd3", "AcmeSite", "Acme", queries=["ml"], pages_per_query=1)
+
+    assert len(jobs) == 1 and jobs[0].description == ""   # job still kept, just degraded
+    assert t.counts[("workday", "Acme", "detail_fetch_failed")] == 1
 
 
 def test_fetch_falls_back_to_bulletfields_when_locationstext_is_empty(monkeypatch):

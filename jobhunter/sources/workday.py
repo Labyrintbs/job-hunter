@@ -16,6 +16,7 @@ import time
 
 import httpx
 
+from .. import fetch_diag
 from ..models import Job
 from .ats import THROTTLE_SECONDS, _UA, _is_france, _strip_html
 
@@ -37,6 +38,7 @@ def fetch(tenant: str, wd_host: str, site: str, company: str, locale: str = "en-
     with httpx.Client(timeout=20, headers=_UA) as c:
         for q in queries:
             offset = 0
+            data: dict = {}
             for _ in range(pages_per_query):
                 resp = c.post(search_url, json={"appliedFacets": {}, "limit": PAGE_SIZE,
                                                  "offset": offset, "searchText": q})
@@ -59,6 +61,7 @@ def fetch(tenant: str, wd_host: str, site: str, company: str, locale: str = "en-
                         bullets = p.get("bulletFields") or [""]
                         location = bullets[0] or ""
                     if not _is_france(location):
+                        fetch_diag.track("workday", "non_france", detail=location, company=company)
                         continue
                     description, req_id = "", ""
                     try:
@@ -67,8 +70,8 @@ def fetch(tenant: str, wd_host: str, site: str, company: str, locale: str = "en-
                         info = detail.json().get("jobPostingInfo", {})
                         description = _strip_html(info.get("jobDescription", ""))[:5000]
                         req_id = info.get("jobReqId", "") or ""
-                    except httpx.HTTPError:
-                        pass
+                    except httpx.HTTPError as exc:
+                        fetch_diag.track("workday", "detail_fetch_failed", detail=str(exc), company=company)
                     jobs.append(Job(
                         source="workday",
                         external_id=req_id or path,
@@ -83,4 +86,7 @@ def fetch(tenant: str, wd_host: str, site: str, company: str, locale: str = "en-
                 offset += PAGE_SIZE
                 if offset >= data.get("total", 0):
                     break
+            else:
+                fetch_diag.track("workday", "pagination_cap_hit",
+                                  detail=f"{q!r}: total={data.get('total')}", company=company)
     return jobs

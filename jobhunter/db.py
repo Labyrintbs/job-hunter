@@ -161,6 +161,18 @@ CREATE TABLE IF NOT EXISTS fetch_runs (
     new_europe_remote INTEGER DEFAULT 0
 );
 
+-- Fetch-phase drop/degradation counters (see jobhunter/fetch_diag.py) --
+-- makes otherwise-silent skips visible without persisting every dropped job.
+CREATE TABLE IF NOT EXISTS fetch_drops (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    occurred_at TEXT DEFAULT (datetime('now')),
+    source      TEXT NOT NULL,          -- e.g. 'workday', 'ashby', 'linkedin'
+    company     TEXT NOT NULL DEFAULT '',
+    reason      TEXT NOT NULL,          -- e.g. 'non_france', 'pagination_cap_hit'
+    count       INTEGER NOT NULL,
+    samples     TEXT DEFAULT '[]'       -- JSON list of up to 3 short examples
+);
+
 -- Daily open-postings count per (scope, category) from France Travail's official
 -- Content-Range total, categorized by its own domaine/ROME taxonomy -- a market-
 -- demand signal, independent of the daily job-search config/pipeline.
@@ -207,6 +219,10 @@ CREATE VIEW v_score_seniority_mix AS
            SUM(CASE WHEN score<40 THEN 1 ELSE 0 END) AS n_score_lt40
     FROM jobs GROUP BY seniority;
 
+DROP VIEW IF EXISTS v_fetch_drops;
+CREATE VIEW v_fetch_drops AS
+    SELECT * FROM fetch_drops ORDER BY occurred_at DESC;
+
 DROP VIEW IF EXISTS v_market_trend;
 CREATE VIEW v_market_trend AS
     SELECT snapshot_date AS day, scope, category, total_count,
@@ -218,7 +234,7 @@ CREATE VIEW v_market_trend AS
 """
 
 VIEW_NAMES = ["v_new_jobs_by_day", "v_market_by_run", "v_top_companies", "v_score_seniority_mix",
-              "v_market_trend"]
+              "v_market_trend", "v_fetch_drops"]
 
 
 def get_connection(db_path: Path | None = None) -> sqlite3.Connection:
@@ -1239,6 +1255,28 @@ def record_source_fetch(conn: sqlite3.Connection, source: str, count: int) -> No
              last_attempted_at = datetime('now'), last_count = excluded.last_count""",
         (source, count),
     )
+
+
+def record_fetch_drops(conn: sqlite3.Connection,
+                        rows: list[tuple[str, str, str, int, list[str]]]) -> None:
+    """One row per distinct (source, company, reason) from a fetch_diag flush --
+    see jobhunter/fetch_diag.py. `samples` is JSON-encoded here so callers can
+    just pass a plain list of short strings."""
+    import json
+    conn.executemany(
+        "INSERT INTO fetch_drops (source, company, reason, count, samples) VALUES (?,?,?,?,?)",
+        [(source, company, reason, count, json.dumps(samples))
+         for source, company, reason, count, samples in rows],
+    )
+
+
+def recent_fetch_drops(conn: sqlite3.Connection, hours: int = 24) -> list[sqlite3.Row]:
+    return conn.execute(
+        """SELECT * FROM fetch_drops
+           WHERE occurred_at >= datetime('now', ?)
+           ORDER BY occurred_at DESC""",
+        (f"-{hours} hours",),
+    ).fetchall()
 
 
 def record_backfill_progress(conn: sqlite3.Connection, source: str, cursor: str | None,

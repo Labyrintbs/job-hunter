@@ -1,3 +1,4 @@
+from jobhunter import fetch_diag
 from jobhunter.sources import arbeitnow
 
 
@@ -120,9 +121,34 @@ def test_fetch_skips_items_without_a_slug(monkeypatch):
     client = _Client([page])
     monkeypatch.setattr(arbeitnow.httpx, "Client", lambda *a, **k: client)
 
-    jobs = arbeitnow.fetch(max_pages=5)
+    with fetch_diag.run_tracking() as t:
+        jobs = arbeitnow.fetch(max_pages=5)
 
     assert [j.external_id for j in jobs] == ["a"]
+    assert t.counts[("arbeitnow", "", "malformed_record")] == 1
+
+
+def test_fetch_tracks_pagination_cap_hit_when_more_pages_remain(monkeypatch):
+    monkeypatch.setattr(arbeitnow.time, "sleep", lambda *_: None)
+    page = {"data": [_item(slug="a")], "links": {"next": "https://www.arbeitnow.com/api/job-board-api?page=2"}}
+    client = _Client([page, page])
+    monkeypatch.setattr(arbeitnow.httpx, "Client", lambda *a, **k: client)
+
+    with fetch_diag.run_tracking() as t:
+        arbeitnow.fetch(max_pages=2)
+
+    assert t.counts[("arbeitnow", "", "pagination_cap_hit")] == 1
+
+
+def test_fetch_tracks_rate_limited_when_walk_gives_up(monkeypatch):
+    monkeypatch.setattr(arbeitnow.time, "sleep", lambda *_: None)
+    client = _Client([_Resp(None, 429), _Resp(None, 429), _Resp(None, 429), _Resp(None, 429)])
+    monkeypatch.setattr(arbeitnow.httpx, "Client", lambda *a, **k: client)
+
+    with fetch_diag.run_tracking() as t:
+        arbeitnow.fetch(max_pages=5)
+
+    assert t.counts[("arbeitnow", "", "rate_limited")] == 1
 
 
 def test_walk_retries_429_with_backoff_then_succeeds(monkeypatch):
