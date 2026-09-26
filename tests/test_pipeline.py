@@ -9,7 +9,7 @@ def test_gather_survives_a_source_exception(tmp_db, config, monkeypatch):
     """A WTTJ (or any source) failure must not crash the whole run -- previously
     only ats/linkedin were wrapped in try/except; wttj wasn't."""
     monkeypatch.setattr(pipeline.wttj, "fetch", lambda **k: (_ for _ in ()).throw(RuntimeError("boom")))
-    monkeypatch.setattr(pipeline.ats, "fetch_all", lambda companies: [])
+    monkeypatch.setattr(pipeline.ats, "fetch_all", lambda companies, workday_queries=None: [])
     monkeypatch.setattr(pipeline, "load_companies", lambda: [])
     monkeypatch.setattr(pipeline, "_fetch_linkedin", lambda cfg: [])
     monkeypatch.setattr(pipeline, "_fetch_francetravail", lambda cfg: [])
@@ -23,7 +23,7 @@ def test_gather_survives_a_source_exception(tmp_db, config, monkeypatch):
 def test_gather_collects_every_source(tmp_db, config, monkeypatch):
     make = lambda src, i: Job(source=src, external_id=str(i), title="ML Engineer", company="Acme")
     monkeypatch.setattr(pipeline.wttj, "fetch", lambda **k: [make("wttj", 1)])
-    monkeypatch.setattr(pipeline.ats, "fetch_all", lambda companies: [make("ats", 2)])
+    monkeypatch.setattr(pipeline.ats, "fetch_all", lambda companies, workday_queries=None: [make("ats", 2)])
     monkeypatch.setattr(pipeline, "load_companies", lambda: [])
     monkeypatch.setattr(pipeline, "_fetch_linkedin", lambda cfg: [make("linkedin", 3)])
     monkeypatch.setattr(pipeline, "_fetch_francetravail", lambda cfg: [make("francetravail", 4)])
@@ -37,7 +37,7 @@ def test_gather_collects_every_source(tmp_db, config, monkeypatch):
 
 def _stub_all_sources_except_hellowork(monkeypatch, called):
     monkeypatch.setattr(pipeline.wttj, "fetch", lambda **k: [])
-    monkeypatch.setattr(pipeline.ats, "fetch_all", lambda companies: [])
+    monkeypatch.setattr(pipeline.ats, "fetch_all", lambda companies, workday_queries=None: [])
     monkeypatch.setattr(pipeline, "load_companies", lambda: [])
     monkeypatch.setattr(pipeline, "_fetch_linkedin", lambda cfg: [])
     monkeypatch.setattr(pipeline, "_fetch_francetravail", lambda cfg: [])
