@@ -8,6 +8,7 @@ role_keywords:
   - ml engineer
   - deep learning
   - data scientist
+  - data engineer
   - computer vision
   - nlp
   - mlops
@@ -20,6 +21,31 @@ role_keywords:
   - generative ai
   - llm
   - algorithm engineer
+  - prompt engineer
+  - ai researcher
+  - ml platform engineer
+
+# French-language equivalents -- most FR postings use the English terms above,
+# but these titles show up untranslated often enough to be worth matching too.
+  - ingénieur ia
+  - ingenieur ia
+  - ingénieur machine learning
+  - ingenieur machine learning
+  - ingénieur en intelligence artificielle
+  - ingenieur en intelligence artificielle
+  - chercheur en ia
+  - chercheur en intelligence artificielle
+  - ingénieur données
+  - ingenieur donnees
+  - vision par ordinateur
+  - apprentissage profond
+  - traitement du langage naturel
+  - traitement automatique du langage
+  - ia générative
+  - intelligence artificielle générative
+  - ingénieur algorithmes
+  - ingénieur en algorithmique
+  - ingénieur de recherche
 
 # AI/Technical Product Manager roles -- a second acceptable target alongside ML
 # engineering (see jobhunter/llm/judge.py's SYSTEM prompt for how these are judged).
