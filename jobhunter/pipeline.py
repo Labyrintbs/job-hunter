@@ -212,18 +212,25 @@ def _persist_jobs(conn, config: dict, jobs: list) -> list[tuple]:
     backfilled job is still blockable by a rule added after it was posted."""
     config = {**config, "_active_rules": [dict(r) for r in db.active_rules(conn)]}
     results = []
-    for job in jobs:
-        s = match.screen(job, config)
-        if not s.keep:
-            continue
-        tier = match.geo_tier(job.location, config)
-        jid, is_new = db.upsert_job(
-            conn, job, s.score, s.reasons,
-            filtered=s.filtered, filter_reason=s.filter_reason,
-            seniority=s.seniority, min_years=s.min_years, geo_tier=tier,
-            role_category=s.role_category,
-        )
-        results.append((job, s, tier, jid, is_new))
+    # Own tracker, flushed here: by the time this runs, any tracker opened by the
+    # fetch step (_gather/backfill_*) has already closed -- see fetch_drops rows
+    # with reason=not_ml_relevant/excluded to catch role_keywords/exclude_terms gaps.
+    with fetch_diag.run_tracking() as tracker:
+        for job in jobs:
+            s = match.screen(job, config)
+            if not s.keep:
+                reason = "not_ml_relevant" if s.filter_reason == "not ML-relevant" else "excluded"
+                fetch_diag.track(job.source, reason, detail=job.title, company=job.company)
+                continue
+            tier = match.geo_tier(job.location, config)
+            jid, is_new = db.upsert_job(
+                conn, job, s.score, s.reasons,
+                filtered=s.filtered, filter_reason=s.filter_reason,
+                seniority=s.seniority, min_years=s.min_years, geo_tier=tier,
+                role_category=s.role_category,
+            )
+            results.append((job, s, tier, jid, is_new))
+        tracker.flush(conn)
     return results
 
 
