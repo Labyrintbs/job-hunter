@@ -12,11 +12,10 @@ from . import db
 from .config import load_search_config
 from .sources import francetravail
 
-# domaine=M18 is France Travail's own aggregate for the whole "Systemes
-# d'information et de telecommunication" domain; the codeROME entries are a
-# representative slice of it (verified live, real counts at design time:
-# M1805=383, M1811=490, M1889=215, M1827=318, M1856=227) -- not the personal
-# job-search query list, which stays in config["francetravail"]["queries"].
+# domaine=M18 is France Travail's aggregate for the whole IT/telecom domain;
+# codeROME entries are a representative slice (counts at design time: M1805=383,
+# M1811=490, M1889=215, M1827=318, M1856=227) -- not the job-search query list in
+# config["francetravail"]["queries"].
 DEFAULT_CATEGORIES = [
     {"label": "Whole IT/CS market", "param": "domaine", "code": "M18"},
     {"label": "Software development", "param": "codeROME", "code": "M1805"},

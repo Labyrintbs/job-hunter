@@ -130,9 +130,9 @@ def fetch_ashby(token: str, company: str, country_only: bool = True) -> list[Job
 
 
 _SMARTRECRUITERS_PAGE_SIZE = 100
-# Safety ceiling, not an expected real depth -- confirmed live that Veolia (2,941
-# open postings) and Sopra Steria (2,014) both exceed one page under the old
-# limit=100/no-pagination code, silently dropping >95% of their postings.
+# Safety ceiling, not an expected real depth -- large employers (e.g. Veolia,
+# Sopra Steria) exceeded one page under the old limit=100/no-pagination code,
+# silently dropping most of their postings.
 _SMARTRECRUITERS_MAX_PAGES = 50
 
 
@@ -225,11 +225,10 @@ def fetch_workable(token: str, company: str, country_only: bool = True) -> list[
 
 
 def fetch_teamtailor(token: str, company: str, country_only: bool = True) -> list[Job]:
-    """One request per company -- confirmed live the feed has no `next_url`/cursor
-    at all, so this is the whole board every time. If a response ever returns
-    exactly 100 items, warn: a low-confidence report claims Teamtailor caps this
-    feed at 100 with no way to page further, and the largest real company found
-    during testing (71 jobs) wasn't big enough to confirm or rule that out."""
+    """One request per company -- the feed has no `next_url`/cursor, so this is
+    the whole board every time. A low-confidence report claims a 100-item cap
+    with no way to page further; exactly 100 items triggers a manual-check
+    warning rather than trusting either claim."""
     url = f"https://{token}.teamtailor.com/jobs.json"
     jobs: list[Job] = []
     with httpx.Client(timeout=20, headers=_UA) as c:
@@ -270,11 +269,9 @@ def fetch_teamtailor(token: str, company: str, country_only: bool = True) -> lis
 
 
 def fetch_personio(token: str, company: str, country_only: bool = True) -> list[Job]:
-    """The XML feed is an opt-in setting each Personio customer enables themselves
-    -- a 404 means "not turned on for this company," not a fetch failure, so it's
-    swallowed quietly rather than raised (confirmed live: 4 of 5 real companies
-    tried had it on, 1 didn't). The feed has no apply-URL field, so one is built
-    from the known job page pattern instead."""
+    """The XML feed is an opt-in Personio setting -- a 404 means "not turned on
+    for this company," not a fetch failure, so it's swallowed quietly. No
+    apply-URL field, so one is built from the known job page pattern instead."""
     url = f"https://{token}.jobs.personio.com/xml?language=en"
     jobs: list[Job] = []
     with httpx.Client(timeout=20, headers=_UA) as c:
@@ -308,7 +305,7 @@ def fetch_personio(token: str, company: str, country_only: bool = True) -> list[
 
 def fetch_successfactors(token: str, company: str, country_only: bool = True) -> list[Job]:
     """`token` format: see config/companies.yaml's header. RSS 2.0 with the Google
-    Merchant namespace; confirmed live most tenants omit `pubDate` (carrying only
+    Merchant namespace; most tenants omit `pubDate` (carrying only
     g:expiration_date instead), so posted_at is left blank rather than guessed
     from that -- would be misleading."""
     url = f"https://{token}/sitemal.xml"

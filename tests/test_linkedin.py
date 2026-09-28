@@ -47,13 +47,9 @@ CARD_WITHOUT_MATCHING_LINK = """
 
 
 def test_parse_card_falls_back_to_canonical_url_when_link_regex_misses():
-    # Regression: observed live in production -- a valid numeric id parses fine
-    # via _URN_RE but _LINK_RE (which requires the class attribute before href
-    # within the same tag) doesn't match every card variant, e.g. href-before-
-    # class attribute order as in this fixture. Previously this left job.url
-    # empty, which the dashboard renders as an unclickable title with no way
-    # to reach the real posting. LinkedIn's canonical /jobs/view/{id}/ URL
-    # works from the id alone (verified live) and is used as a fallback.
+    # Regression: see _job_url's docstring. This fixture has href before the
+    # class attribute, which _LINK_RE misses; previously left job.url empty,
+    # which the dashboard renders as an unclickable title.
     jobs = [j for j in (linkedin._parse_card(c) for c in linkedin._CARD_RE.findall(CARD_WITHOUT_MATCHING_LINK)) if j]
     assert len(jobs) == 1
     assert jobs[0].external_id == "4468070547"

@@ -58,13 +58,9 @@ def test_upsert_refreshes_score_and_geo_tier_before_enrichment(tmp_db):
 
 
 def test_upsert_does_not_clobber_screening_after_enrichment(tmp_db):
-    # Regression: pipeline.enrich_one() confirms LinkedIn's real remote status from
-    # the full JD text and bumps geo_tier/score accordingly -- but recent_hours means
-    # the same posting keeps resurfacing in later fetches for up to 7 days. A routine
-    # re-fetch only ever has the raw, un-tagged location (LinkedIn never tags remote
-    # at fetch time), so recomputing score/geo_tier from it on every pass silently
-    # reverted the enrichment-confirmed values back to the thinner pre-enrichment
-    # ones -- verified live against a real production row (job #1403).
+    # Regression: a routine re-fetch's thinner, un-tagged location was silently
+    # reverting enrichment-confirmed values (see upsert_job's docstring) -- found
+    # in real production data (job #1403).
     with db.connect() as conn:
         jid, _ = db.upsert_job(conn, J("1", url="http://x/1"), 37, "geo: outside France",
                                geo_tier="outside")
@@ -114,9 +110,7 @@ def test_cross_source_dedup_backfills_missing_url_but_never_overwrites(tmp_db):
 
 
 def test_cross_source_content_dedup_hellowork_department_code_location(tmp_db):
-    # HelloWork has no comma in its location field at all -- it appends a trailing
-    # department code instead ("Paris - 75"), which used to normalize to "paris 75"
-    # and never match another source's bare "Paris" for the same city.
+    # See db._norm_city's docstring for HelloWork's "Paris - 75" format.
     wttj = Job(source="wttj", external_id="w1", title="Machine Learning Engineer",
                company="Doctolib", location="Paris", url="https://wttj.example/w1")
     hellowork = Job(source="hellowork", external_id="h1", title="Machine Learning Engineer",
@@ -129,10 +123,7 @@ def test_cross_source_content_dedup_hellowork_department_code_location(tmp_db):
 
 
 def test_cross_source_content_dedup_hellowork_arrondissement_location(tmp_db):
-    # HelloWork sometimes folds the arrondissement into the city name itself
-    # ("Paris 12e - 75", "Paris 1er - 75") rather than just appending a department
-    # code -- this used to normalize to "paris 12e" and never match another
-    # source's bare "Paris" for the same city.
+    # See db._norm_city's docstring for HelloWork's arrondissement-folding case.
     wttj = Job(source="wttj", external_id="w1", title="Senior AI Engineer",
                company="Converteo", location="Paris, Île-de-France, France",
                url="https://wttj.example/w1")
@@ -147,11 +138,7 @@ def test_cross_source_content_dedup_hellowork_arrondissement_location(tmp_db):
 
 
 def test_cross_source_content_dedup_francetravail_leading_department_code(tmp_db):
-    # Regression: France Travail puts its department code on the OPPOSITE side
-    # from HelloWork ("31 - Blagnac" vs HelloWork's "Paris - 75") -- this used to
-    # normalize to "31 blagnac" and never match LinkedIn's bare "Blagnac", so a
-    # posting fetched from both sources silently produced two rows instead of one
-    # (observed live: job #1904 francetravail vs #1862 linkedin, same company/title).
+    # Regression: see db._norm_city's docstring (job #1904 vs #1862).
     linkedin = Job(source="linkedin", external_id="l1", title="AI Engineer - LLM / RAG (H/F)",
                    company="STEP UP", location="Blagnac, Occitanie, France",
                    url="https://linkedin.example/l1")
@@ -166,9 +153,7 @@ def test_cross_source_content_dedup_francetravail_leading_department_code(tmp_db
 
 
 def test_cross_source_content_dedup_francetravail_arrondissement_location(tmp_db):
-    # France Travail also folds the arrondissement in, but with the word spelled
-    # out after the department code ("75 - Paris 1er Arrondissement") rather than
-    # HelloWork's compact "Paris 1er - 75".
+    # See db._norm_city's docstring for France Travail's spelled-out-arrondissement case.
     wttj = Job(source="wttj", external_id="w1", title="Senior AI Engineer",
               company="Converteo", location="Paris, Île-de-France, France",
               url="https://wttj.example/w1")
@@ -183,11 +168,8 @@ def test_cross_source_content_dedup_francetravail_arrondissement_location(tmp_db
 
 
 def test_find_possible_duplicates_flags_exact_title_at_same_company(tmp_db):
-    # The same posting cross-listed at the exact same employer (e.g. HelloWork vs
-    # LinkedIn), differing only by punctuation/boilerplate -- an EXACT match on the
-    # de-junked title is required (not just a high ratio) so this stays safe: see
-    # test_find_possible_duplicates_excludes_exact_same_company for the case (a
-    # genuinely different role at the same company) this must NOT flag.
+    # See find_possible_duplicates' docstring for why an EXACT title match is
+    # required at the same employer, not just a high ratio.
     with db.connect() as conn:
         a, _ = db.upsert_job(conn, J("1", title="Senior AI Engineer H/F - CDI",
                                      company="Converteo", loc="Paris, Île-de-France, France"), 60, "r")
@@ -239,11 +221,8 @@ def test_find_possible_duplicates_ignores_generic_title_at_unrelated_company(tmp
 
 
 def test_find_possible_duplicates_excludes_exact_same_company(tmp_db):
-    # Two similarly-worded titles at the EXACT same employer are far more often two
-    # genuinely different open roles (different squad/level/specialization) than a
-    # stray duplicate -- title-ratio alone can't reliably tell these apart (verified
-    # against this project's real data), so the company axis must require a
-    # related-but-different name, not just any match.
+    # See find_possible_duplicates' docstring -- title-ratio alone can't reliably
+    # tell two different roles at the same employer from a duplicate.
     with db.connect() as conn:
         db.upsert_job(conn, J("1", title="Senior Data Scientist I",
                               company="Rockerbox", loc="Paris"), 60, "r")

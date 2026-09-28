@@ -64,9 +64,7 @@ def test_generate_json_falls_back_to_extraction_if_schema_output_isnt_clean(monk
 
 
 def test_cli_env_prepends_paths_node_lives_under(monkeypatch):
-    # macOS cron's default PATH is just /usr/bin:/bin -- `claude` itself is found via
-    # _CLI_FALLBACKS, but its own SessionEnd hook shells out to `node`, which lives
-    # under /usr/local/bin or /opt/homebrew/bin, neither on cron's PATH.
+    # See provider._CLI_EXTRA_PATHS for why these need to be prepended under cron.
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
     env = provider._cli_env()
     for p in provider._CLI_EXTRA_PATHS:

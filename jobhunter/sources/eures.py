@@ -1,17 +1,15 @@
 """EURES (official EU job mobility portal) -- public JSON API, no auth.
 
-Reverse-engineered (no official published docs), but confirmed live: no API
-key, no referer check, robots.txt doesn't mention /eures at all -- same risk
-profile as this repo's WTTJ integration. Its own terms reportedly restrict
-programmatic use to recognised EURES partner organisations; nothing
-technically enforces that.
+Reverse-engineered (no official docs), but confirmed live: no API key, no
+referer check, robots.txt doesn't mention /eures -- same risk profile as this
+repo's WTTJ integration. Its terms reportedly restrict programmatic use to
+recognised EURES partners; nothing technically enforces that.
 
 `locationCodes: ["fr"]` is an exact server-side country filter (like WTTJ's
 Algolia facet), not a text heuristic. Confirmed live NOT recency-sorted (a
-July posting appeared in a September search's top 20) -- neither this
-fetcher nor the deeper weekly backfill (see pipeline.backfill_eures) can
-guarantee catching every new posting; no sort-override param was found
-(3 guesses all rejected with HTTP 400).
+July posting appeared in a September top 20) -- neither this fetcher nor the
+deeper weekly backfill (see pipeline.backfill_eures) can guarantee catching
+every new posting; no sort-override param exists.
 """
 from __future__ import annotations
 
@@ -27,7 +25,7 @@ from .ats import _UA, _strip_html
 SEARCH_URL = "https://europa.eu/eures/api/jv-searchengine/public/jv-search/search"
 DETAIL_URL = "https://europa.eu/eures/portal/jv-se/jv-details/{id}?lang=fr"
 THROTTLE_SECONDS = 0.3
-PAGE_SIZE = 50   # confirmed live: the API rejects resultsPerPage > 50 (HTTP 400)
+PAGE_SIZE = 50   # the API rejects resultsPerPage > 50 (HTTP 400)
 
 # Eurostat NUTS3 codes for the 8 Île-de-France departments -- match.geo_tier()
 # only recognizes IDF via place names (paris/ile-de-france/named suburbs),

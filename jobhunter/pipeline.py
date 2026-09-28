@@ -206,15 +206,10 @@ def _gather(config: dict, force: bool = False) -> list:
 
 
 def _persist_jobs(conn, config: dict, jobs: list) -> list[tuple]:
-    """Screen and upsert each job. Injects config['_active_rules'] itself
-    (reads db.active_rules(conn)) rather than trusting the caller to -- match.screen
-    depends on it for manual filter-rule enforcement, and a backfilled job must
-    still be blockable by an existing company/keyword rule just like any other
-    job. Returns one (job, screen_result, geo_tier, job_id, is_new) tuple per
-    job that passed screening (s.keep=True) -- shared by run_fetch (which adds
-    tier/rule-hit tracking and fetch_runs logging on top) and every backfill_*
-    function (which doesn't, since a backfill discovery isn't a 'new posting
-    this run' for market-trend purposes -- see v_market_by_run)."""
+    """Screen and upsert each job; returns one (job, screen_result, geo_tier,
+    job_id, is_new) tuple per job that passed screening (s.keep). Reads
+    config['_active_rules'] itself rather than trusting the caller, so a
+    backfilled job is still blockable by a rule added after it was posted."""
     config = {**config, "_active_rules": [dict(r) for r in db.active_rules(conn)]}
     results = []
     for job in jobs:
@@ -475,12 +470,10 @@ def backfill_arbeitnow(force: bool = False) -> dict:
 
 def backfill_wttj(force: bool = False) -> dict:
     """Weekly deep walk per configured wttj query: wttj.fetch(query=q,
-    max_hits=1100, country='France') -- confirmed live this reaches Algolia's
-    own real per-query ceiling (max observed reachable: 1,020) on every
-    configured query, so no cursor/resume is needed -- a full walk always
-    covers everything reachable. Single due-check ('wttj_backfill') covers
-    all queries in one run. Persists via _persist_jobs, never writes to
-    fetch_runs."""
+    max_hits=1100, country='France') reaches Algolia's own per-query ceiling
+    on every configured query, so no cursor/resume is needed -- a full walk
+    always covers everything reachable. Persists via _persist_jobs, never
+    writes to fetch_runs."""
     config = load_search_config()
     bf = config.get("wttj_backfill") or {}
     if not bf.get("enabled", True):
@@ -539,9 +532,8 @@ def backfill_eures(force: bool = False) -> dict:
 
 def backfill_workday(force: bool = False) -> dict:
     """Weekly deep walk per companies.yaml entry with ats: workday:
-    workday.fetch(..., pages_per_query=15) -- confirmed live this covers the
-    real observed max (Airbus/'machine learning' = 186) with headroom, so
-    (like wttj) no cursor/resume is needed. Keyed 'workday_backfill'."""
+    workday.fetch(..., pages_per_query=15) covers the real observed max with
+    headroom, so (like wttj) no cursor/resume is needed. Keyed 'workday_backfill'."""
     config = load_search_config()
     bf = config.get("workday_backfill") or {}
     if not bf.get("enabled", True):
@@ -769,11 +761,9 @@ def enrich_one(job_id: int) -> dict:
                                 url=url, description=text)
     config = load_search_config()
     location = row["location"] or ""
-    # Confirm remote from the real JD text once it lands, for sources whose search-side
-    # remote filter isn't trustworthy on its own (verified for LinkedIn's f_WT -- see
-    # match.detect_remote_from_text's docstring). Only acts when the location string
-    # doesn't already say remote -- wttj already tags this at fetch time from its own
-    # verified facet, so this is a no-op there.
+    # Confirm remote from the JD text for sources whose search-side remote filter
+    # isn't trustworthy (see match.detect_remote_from_text). Only acts when location
+    # doesn't already say remote -- wttj already tags this at fetch time.
     if not match.detect_remote_from_text(location) and match.detect_remote_from_text(text):
         location = f"{location} - Remote" if location else "Remote"
     with db.connect() as conn:

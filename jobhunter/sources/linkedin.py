@@ -47,15 +47,11 @@ def _text(m: re.Match | None) -> str:
 
 
 def _job_url(card: str, job_id: str) -> str:
-    """The card's own scraped href when the regex finds it (has the real slug,
-    nicer for a human to click); otherwise LinkedIn's canonical /jobs/view/{id}/
-    -- verified live to resolve to the same posting from the id alone. _LINK_RE
-    occasionally misses (~0.7% of postings, observed in production: valid
-    numeric id parsed via _URN_RE but no matching href) likely because it
-    requires the class attribute to appear before href within the same tag,
-    which isn't guaranteed for every card variant -- rather than leave those
-    jobs with no clickable link at all, fall back to the id-based URL, which
-    only needs _URN_RE to have matched."""
+    """The card's own scraped href when the regex finds it (has the real slug);
+    else LinkedIn's canonical /jobs/view/{id}/, which resolves the same posting
+    from the id alone. _LINK_RE occasionally misses -- it requires the class
+    attribute before href in the same tag, not guaranteed for every card variant
+    -- so fall back rather than leave the job with no clickable link."""
     m = _LINK_RE.search(card)
     if m:
         return m.group(1)

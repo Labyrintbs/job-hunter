@@ -23,14 +23,8 @@ def test_strip_html():
 
 
 def test_strip_html_does_not_leak_stimulus_action_attribute_values():
-    # Regression test for the actual bug behind job 220/221/... getting stuck
-    # unenriched forever (see process_backlog): Stimulus's `data-action` syntax
-    # embeds a literal "->" inside the attribute value (e.g.
-    # "click->toggle#add"), which contains a ">" character. A naive
-    # `<[^>]+>` tag-strip regex ends the "tag" at that embedded ">" and leaks
-    # everything after it -- including the real closing ">" -- into the
-    # extracted text. html.parser.HTMLParser tokenizes attributes correctly
-    # and must not have this problem.
+    # Regression: see _strip_html's docstring -- Stimulus's data-action embeds a
+    # literal "->" that a naive tag-strip regex mistakes for the tag's end.
     html_fragment = (
         '<div data-controller="atc" data-action="click->toggle#add '
         'analytics#push">'
@@ -45,12 +39,8 @@ def test_strip_html_does_not_leak_stimulus_action_attribute_values():
 
 
 def test_strip_html_drops_cookie_banner_text():
-    # Regression: large French corporate career sites (e.g. groupecreditagricole.jobs)
-    # render a GDPR cookie-consent banner as real page text ahead of the job body. A
-    # verbose banner can consume the entire _MAX_CHARS budget before the real posting
-    # is ever reached, leaving the "description" as 100% cookie-policy boilerplate
-    # (confirmed on job 512 -- an actual 6-10yr-experience posting that got scored as
-    # junior-friendly because the years requirement never made it into the text).
+    # Regression: see the _COOKIE_BANNER_RE comment in enrich.py -- confirmed on
+    # job 512, whose experience requirement never made it into the scored text.
     html_fragment = (
         "<div>GESTION DES COOKIES Le site utilise des cookies sur ce site : certains "
         "cookies sont indispensables au bon fonctionnement. Nous vous invitons à faire "
@@ -63,10 +53,8 @@ def test_strip_html_drops_cookie_banner_text():
 
 
 def test_generic_enrichment_scopes_to_main_tag_skipping_nav_and_cookie_chrome(monkeypatch):
-    # Regression: header/nav/cookie-banner chrome ahead of <main> can be large enough
-    # (confirmed on groupecreditagricole.jobs: ~7000 chars of nav menu alone) to push
-    # the real "Description du poste" -- including the years-of-experience line --
-    # past _MAX_CHARS before it's ever reached, even after the cookie-word filter.
+    # Regression: see the _MAIN_TAG_RE comment in enrich.py -- nav/cookie chrome
+    # ahead of <main> can push real content past _MAX_CHARS.
     page = (
         "<html><body>"
         "<div>GESTION DES COOKIES nous utilisons des cookies essentiels et facultatifs...</div>"
@@ -93,10 +81,8 @@ def test_generic_enrichment_falls_back_to_full_page_without_main_tag():
 
 
 def test_generic_enrichment_extracts_real_content_despite_stimulus_attributes():
-    # End-to-end version of the regression above: a page with several
-    # Stimulus-controlled widgets (enough data-action attributes to have
-    # tripped the old leak bug well past _LEAK_MARKER_THRESHOLD) around a real
-    # job description must still enrich successfully.
+    # End-to-end version of the regression above: several Stimulus widgets (past
+    # _LEAK_MARKER_THRESHOLD) around a real job description must still enrich.
     widget = (
         '<div data-controller="toggle" data-action="click->toggle#add mouseover->toggle#expand">x</div>'
         '<div data-controller="toggle" data-action="click->toggle#remove mouseover->toggle#collapse">x</div>'
@@ -163,11 +149,8 @@ def test_looks_delisted_flags_takedown_notice():
 
 
 def test_generic_enrichment_returns_none_for_delisted_posting():
-    # A delisted HelloWork posting still returns 200 with real page chrome and a
-    # correct <title> (from the URL slug), but the body is a takedown notice plus
-    # an unrelated "similar postings" carousel -- job 220 in the real incident.
-    # That carousel text is clean enough to pass every other check, so it must be
-    # caught explicitly rather than stored as this job's description.
+    # Regression: see the _DELISTED_RE comment in enrich.py -- job 220 in the
+    # real incident.
     delisted_html = (
         "<html><body><h1>Machine Learning Engineer H/F</h1>"
         "<p>Team.is n'est plus disponible</p>"
@@ -180,11 +163,9 @@ def test_generic_enrichment_returns_none_for_delisted_posting():
 
 
 def test_generic_enrichment_returns_none_when_page_is_mostly_scraped_chrome():
-    # _strip_html no longer leaks attribute values (see the regression tests
-    # above), so this exercises _looks_like_scraped_chrome's remaining
-    # defense-in-depth role: if leak-marker tokens genuinely appear as visible
-    # text (whatever the cause), the page is still rejected rather than stored
-    # as if it were a real posting.
+    # _strip_html no longer leaks attribute values (see tests above), so this
+    # exercises _looks_like_scraped_chrome's defense-in-depth role instead: leak-
+    # marker tokens genuinely appearing as visible text still get rejected.
     garbage_html = (
         "<span>analytics#push</span><span>input-checker#uncheck</span>"
         "<span>toggle#expand</span><span>toggle#collapse</span>"

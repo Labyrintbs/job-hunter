@@ -32,8 +32,8 @@ IDF_DEPARTEMENTS = "75,92,93,94,77,78,91,95"
 PAGE_SIZE = 50
 THROTTLE_SECONDS = 0.3
 # The API rejects a "departement" filter with more than 5 values (HTTP 400: "Le
-# nombre de departements maximum autorise pour la recherche est de 5") -- verified
-# live. IDF alone is already 8, so any real departements list needs batching.
+# nombre de departements maximum autorise pour la recherche est de 5"). IDF alone
+# is already 8, so any real departements list needs batching.
 MAX_DEPARTEMENTS_PER_REQUEST = 5
 
 _token_cache: dict[str, tuple[str, float]] = {}

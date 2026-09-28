@@ -15,12 +15,9 @@ import httpx
 
 _LI_DETAIL_URL = "https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/{id}"
 _LI_MARKUP_RE = re.compile(r'show-more-less-html__markup[^>]*>(.*?)</div>', re.S)
-# Header/nav/cookie-banner chrome sits before the real content on most pages, and
-# together can be large enough to eat the whole _MAX_CHARS budget -- confirmed on
-# groupecreditagricole.jobs, where "Description du poste" only started appearing
-# past character 7000 and got truncated before the years-of-experience line. Modern
-# semantic HTML often wraps the actual page content in <main>; scope extraction to
-# it when present so header/nav/cookie-banner chrome never counts against the budget.
+# Header/nav/cookie chrome ahead of the real content can eat the whole _MAX_CHARS
+# budget (seen on groupecreditagricole.jobs, real content past char 7000) -- scope
+# to <main> when present so that chrome never counts against the budget.
 _MAIN_TAG_RE = re.compile(r"<main\b[^>]*>(.*?)</main\s*>", re.S | re.I)
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -30,11 +27,9 @@ _HEADERS = {
 }
 _MAX_CHARS = 16000
 
-# Kept as a defense-in-depth safety net against future extraction regressions on
-# sites with Stimulus/Turbo-style widget markup (data-controller/data-action,
-# analytics hooks) -- the actual leak this was built for turned out to be a bug in
-# _strip_html itself (see below), now fixed at the source, so a real posting
-# should never trip this anymore.
+# The original leak was a _strip_html bug, now fixed at the source (see below) --
+# kept as a defense-in-depth net for future extraction regressions on
+# Stimulus/Turbo-style widget markup.
 _LEAK_MARKER_RE = re.compile(
     r"data-(?:controller|action)=|analytics#push|->\w+#|\w+#(?:push|toggle|add|remove|uncheck|expand|collapse)\b"
 )
@@ -45,14 +40,9 @@ def _looks_like_scraped_chrome(text: str) -> bool:
     return len(_LEAK_MARKER_RE.findall(text)) >= _LEAK_MARKER_THRESHOLD
 
 
-# A delisted posting still returns HTTP 200 with a normal-looking page (real nav
-# chrome, real page title from the URL slug) -- but the body says the listing was
-# taken down, followed by an unrelated "similar postings" carousel. Once
-# _strip_html stopped leaking site chrome into "real-looking" text (see above),
-# that carousel became clean enough prose to pass every other check and get
-# stored as if it were this job's actual description -- confirmed on HelloWork
-# job 220 ("Team.is n'est plus disponible"). Catching the takedown notice keeps
-# that noise out of scoring/judging.
+# A delisted posting returns HTTP 200 with real chrome plus a takedown notice
+# followed by a "similar postings" carousel clean enough to pass every other
+# check (seen on HelloWork job 220) -- catch the notice explicitly.
 _DELISTED_RE = re.compile(r"n'est plus disponible|no longer available", re.IGNORECASE)
 
 
@@ -60,14 +50,9 @@ def _looks_delisted(text: str) -> bool:
     return bool(_DELISTED_RE.search(text))
 
 
-# Cookie-consent banners (common on large French corporate career sites) render as
-# real page text ahead of the job body in the HTML, so their bulk can consume the
-# entire _MAX_CHARS budget before any actual content is reached -- confirmed on
-# groupecreditagricole.jobs, whose scraped "description" was 100% cookie-policy
-# boilerplate (GDPR notice, per-cookie purpose/expiry table), truncated at exactly
-# _MAX_CHARS with the real posting never appearing. Job descriptions essentially
-# never mention cookies, so dropping any text node containing the word is a cheap,
-# low-risk filter -- applied at collection time so it doesn't eat the char budget.
+# Cookie-consent banners can consume the whole _MAX_CHARS budget before the real
+# job body is reached (seen on groupecreditagricole.jobs, a 100% boilerplate
+# result). Job descriptions never mention cookies, so drop any text node with it.
 _COOKIE_BANNER_RE = re.compile(r"\bcookies?\b", re.IGNORECASE)
 
 
@@ -95,14 +80,10 @@ class _TextExtractor(HTMLParser):
 def _strip_html(s: str) -> str:
     """Visible text only, via a real tokenizer rather than a regex.
 
-    A naive `<[^>]+>` tag-strip regex breaks on Stimulus's `data-action`
-    syntax (e.g. `data-action="click->toggle#add"`) -- the `->` contains a
-    literal `>`, so `[^>]+` ends the "tag" early and everything after it up
-    to the real closing `>` leaks into the extracted text as if it were
-    visible prose. This is exactly the "scraped chrome" contamination
-    _looks_like_scraped_chrome was built to detect after the fact; using
-    html.parser.HTMLParser (which tokenizes attributes correctly) avoids the
-    leak at the source instead."""
+    A naive `<[^>]+>` regex breaks on Stimulus's `data-action="click->toggle#add"`
+    syntax: the embedded `->` ends the "tag" early and leaks everything up to the
+    real `>` into the text. html.parser.HTMLParser tokenizes attributes correctly
+    and avoids the leak."""
     parser = _TextExtractor()
     parser.feed(s)
     parser.close()

@@ -26,12 +26,9 @@ STATUSES = [
 
 EVENT_TYPES = ("created", "status", "filtered", "label")
 
-# A job whose description can't be fetched (delisted, source blocking us, etc.)
-# would otherwise be retried by process_backlog forever, since the pending-
-# enrichment queries always pull the *oldest* unfetched jobs first -- a handful of
-# permanently-broken postings would then wedge the whole backlog, starving every
-# newer job of a turn. Giving up after this many failed attempts lets the queue
-# move on.
+# The pending-enrichment queries always pull the *oldest* unfetched jobs first,
+# so a permanently-broken posting (delisted, source blocking us) would retry
+# forever and starve newer jobs -- give up after this many attempts instead.
 MAX_ENRICH_ATTEMPTS = 3
 
 SCHEMA = """
@@ -240,12 +237,9 @@ VIEW_NAMES = ["v_new_jobs_by_day", "v_market_by_run", "v_top_companies", "v_scor
 def get_connection(db_path: Path | None = None) -> sqlite3.Connection:
     db_path = db_path or DB_PATH
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    # timeout=30: with 3 launchd jobs now all hourly (daily/watchdog/process, see
-    # the per-source cadence work), plus the always-on dashboard, overlapping writers
-    # are no longer rare -- the sqlite3 default 5s busy-wait was observed to produce
-    # real "database is locked" failures on the very first hourly tick after all
-    # three jobs started firing at the same minute. WAL mode additionally lets readers
-    # (the dashboard) proceed without waiting on a writer at all.
+    # timeout=30: several hourly launchd jobs plus the always-on dashboard write
+    # concurrently, and the sqlite3 default 5s busy-wait produced real "database
+    # is locked" failures. WAL also lets the dashboard read without blocking.
     conn = sqlite3.connect(db_path, timeout=30.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
@@ -378,12 +372,10 @@ def _backfill_job_events(conn: sqlite3.Connection) -> None:
 
 
 def init_db(db_path: Path | None = None) -> None:
-    # executescript() auto-commits before each statement rather than running the
-    # whole SCHEMA as one transaction, so two processes calling init_db() at the
-    # same moment can interleave their DROP VIEW/CREATE VIEW pairs and crash with
-    # "view already exists". Every CLI invocation (fetch/process/watchdog) calls
-    # this on startup, and now that all three run hourly they genuinely overlap --
-    # a cross-process lock serializes schema init so that can't happen.
+    # executescript() auto-commits per statement rather than as one transaction,
+    # so two concurrent init_db() calls (every CLI invocation runs this on
+    # startup) can interleave DROP/CREATE VIEW pairs and crash -- a cross-process
+    # lock serializes schema init instead.
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     lock_path = DATA_DIR / ".init_db.lock"
     with open(lock_path, "w") as lock_file:
@@ -418,20 +410,18 @@ def _normalize(s: str) -> str:
 
 
 def _norm_city(location: str) -> str:
-    """Just the city, normalized. Sources format the full location wildly differently
-    for the same posting -- WTTJ: "Paris, Ile-de-France, France", an ATS board: "Paris",
-    LinkedIn: "Paris, Île-de-France" -- so matching the full string never lines up across
-    sources. The city (first comma-separated segment) is the one part they share.
-    HelloWork has no comma at all -- it appends a trailing department code instead
-    ("Paris - 75"), which without stripping would normalize to "paris 75" and never
-    match another source's bare "paris" for the same city. It also sometimes folds
-    the arrondissement into the city name itself ("Paris 12e - 75", "Paris 1er - 75"),
-    which needs stripping too or it normalizes to "paris 12e" and still never matches.
-    France Travail puts its department code on the OTHER side instead ("31 - Blagnac",
-    "75 - Paris 1er Arrondissement") -- verified live: without stripping that leading
-    code, "31 - Blagnac" normalizes to "31 blagnac" and never matches LinkedIn's bare
-    "Blagnac" for the same posting (job #1904 vs #1862, same company/title, silently
-    not deduped)."""
+    """Just the city, normalized. Sources format location differently for the same
+    posting -- WTTJ: "Paris, Ile-de-France, France", an ATS board: "Paris",
+    LinkedIn: "Paris, Île-de-France" -- so only the first comma-separated segment
+    is safe to compare.
+
+    HelloWork has no comma -- it appends a trailing department code instead
+    ("Paris - 75") and sometimes folds the arrondissement into the city name
+    ("Paris 12e - 75"); both need stripping or they never match another source's
+    bare "Paris". France Travail puts its department code on the OTHER side
+    ("31 - Blagnac", "75 - Paris 1er Arrondissement") -- without stripping that
+    leading code, "31 - Blagnac" never matched LinkedIn's bare "Blagnac" for the
+    same posting (job #1904 vs #1862)."""
     city = (location or "").split(",")[0]
     city = re.sub(r"^\d{2,3}\s*-\s*", "", city)
     city = re.sub(r"\s*-\s*\d+\s*$", "", city)
@@ -465,29 +455,23 @@ def _companies_related(a: str, b: str) -> bool:
 
 def find_possible_duplicates(conn: sqlite3.Connection, title_ratio: float = 0.80) -> list[dict]:
     """Non-destructive 'maybe the same posting' detector: same city + near-identical
-    title (after stripping boilerplate), gated by a company check that depends on
-    whether the two companies are identical or merely related:
-    - Related-but-not-identical (e.g. HelloWork's "Ubisoft" vs LinkedIn's "Ubisoft
-      Paris Studio" for the same posting): a fuzzy title ratio >= title_ratio is
-      required, since a parent/subsidiary pair alone isn't strong enough evidence.
-    - Exactly identical company: a fuzzy ratio is NOT safe here -- a near-identical
-      title is far more often two genuinely different open roles at the same employer
-      (different squad, seniority level, specialization) than a stray duplicate,
-      confirmed by measuring real false positives at ratios 0.80-0.955 (Doctrine's
-      "Squad Scribe" vs "Squad Distribute", Datadog's "Research Engineer" vs
-      "Research Scientist", etc). An EXACT match on the de-junked title is required
-      instead -- two genuinely different roles essentially never normalize to the
-      byte-for-byte same string after only removing gender/contract boilerplate,
-      but the same posting cross-listed on HelloWork/LinkedIn/WTTJ with only
-      punctuation differences does.
+    title, gated differently depending on whether the two companies are identical
+    or merely related:
+    - Related-but-different company (e.g. HelloWork's "Ubisoft" vs LinkedIn's
+      "Ubisoft Paris Studio"): requires a fuzzy title ratio >= title_ratio.
+    - Identical company: a fuzzy ratio is unsafe here -- a near-identical title is
+      more often two genuinely different roles at the same employer than a
+      duplicate (real false positives measured at ratio 0.80-0.955, e.g.
+      Doctrine's "Squad Scribe" vs "Squad Distribute"). Requires an EXACT match
+      on the de-junked title instead.
 
-      A content-overlap signal (Jaccard similarity of description word-shingles) was
-      tried and rejected instead -- companies reuse one JD template across genuinely
-      distinct simultaneously-open roles often enough that no threshold separates
-      that from a real duplicate (see git history for the investigation).
-    Deliberately NOT used to auto-merge -- surfaces candidates for a human to judge.
-    Uses only the stdlib (difflib) -- no embeddings needed at this scale (a few
-    hundred rows)."""
+    A content-overlap signal (description word-shingle Jaccard) was tried and
+    rejected: companies reuse one JD template across genuinely distinct openings
+    often enough that no threshold tells that apart from a real duplicate (see
+    git history).
+
+    Surfaces candidates for a human to judge, never auto-merges. Uses only
+    difflib -- no embeddings needed at this scale."""
     rows = conn.execute("SELECT id, company, title, location FROM jobs").fetchall()
     by_city: dict[str, list[tuple[int, str, str]]] = defaultdict(list)
     for r in rows:

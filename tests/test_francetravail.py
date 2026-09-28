@@ -97,10 +97,9 @@ def test_fetch_paginates_until_short_page(monkeypatch):
 
 
 def test_fetch_batches_departements_and_dedups_across_batches(monkeypatch):
-    # The API rejects more than 5 departements per request (verified live), so a
-    # real departements list (e.g. IDF's 8) must be split into batches -- and the
-    # same offer can legitimately appear in more than one department's results
-    # (multi-site postings), so results must be deduped by id across batches.
+    # MAX_DEPARTEMENTS_PER_REQUEST forces IDF's 8 departments into batches, and the
+    # same offer can legitimately appear in more than one (multi-site postings),
+    # so results must be deduped by id across batches.
     ft._token_cache.clear()
     monkeypatch.setenv("FRANCE_TRAVAIL_CLIENT_ID", "cid")
     monkeypatch.setenv("FRANCE_TRAVAIL_CLIENT_SECRET", "csecret")

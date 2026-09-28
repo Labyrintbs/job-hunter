@@ -1,15 +1,13 @@
 """lesjeudis.com -- plain server-rendered HTML listing + per-job schema.org
 JobPosting JSON-LD, no API, no key.
 
-Confirmed live: robots.txt broadly permissive (`Allow: /`), blocks only
-account/dashboard paths -- job listings untouched. Search is
-`/emploi/<slugified-query>?page=N` (its documented `/jobs?search=` URL now
-301-redirects here); ~20 job links per page, real pagination confirmed
-(distinct link sets page to page).
+robots.txt is broadly permissive (`Allow: /`), blocking only account/dashboard
+paths. Search is `/emploi/<slugified-query>?page=N` (its documented
+`/jobs?search=` URL now redirects here), with real pagination (distinct link
+sets page to page).
 
 Same real-depth-but-not-recency-sorted shape as Free-Work -- capped at
-max_detail_fetches per run, same "stay a polite visitor" reasoning, no
-backfill for this source (see pipeline.py).
+max_detail_fetches per run, no backfill for this source (see pipeline.py).
 """
 from __future__ import annotations
 

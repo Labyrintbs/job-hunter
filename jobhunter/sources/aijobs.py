@@ -7,10 +7,9 @@ usually points at the real originating ATS posting rather than this site's
 own thin page, so it's stored as the job's url -- a strictly better
 enrichment target.
 
-Confirmed live genuinely recency-sorted (unlike eures/free_work/lesjeudis),
-and current real volume for this project's target queries is small enough
-that max_hits comfortably covers everything that exists -- no backfill
-needed here.
+Genuinely recency-sorted (unlike eures/free_work/lesjeudis), and volume for
+this project's target queries is small enough that max_hits comfortably
+covers everything that exists -- no backfill needed here.
 """
 from __future__ import annotations
 

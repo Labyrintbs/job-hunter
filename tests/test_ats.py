@@ -96,9 +96,8 @@ class _SmartRecruitersClient:
 
 
 def test_smartrecruiters_paginates_past_one_page(monkeypatch):
-    # Regression: Veolia (2,941 open postings) and Sopra Steria (2,014) both
-    # exceeded the old hardcoded limit=100/no-pagination fetch, silently
-    # dropping >95% of their postings -- confirmed live.
+    # Regression: see ats.py's _SMARTRECRUITERS_MAX_PAGES comment -- large
+    # boards exceeded the old single-page fetch.
     page1 = {"content": [{"id": "s1", "name": "A", "location": {"country": "fr"}}], "totalFound": 150}
     page2 = {"content": [{"id": "s2", "name": "B", "location": {"country": "fr"}}], "totalFound": 150}
     client = _SmartRecruitersClient([page1, page2])
@@ -250,7 +249,7 @@ def test_personio_xml_parse_and_france_filter(monkeypatch):
 
 def test_personio_404_means_feed_not_enabled(monkeypatch):
     # The XML feed is opt-in per Personio customer -- a 404 is the normal "not
-    # turned on" state, confirmed live, not a fetch error.
+    # turned on" state, not a fetch error.
     monkeypatch.setattr(ats.httpx, "Client", lambda *a, **k: _XmlClient("", status_code=404))
     jobs = ats.fetch_personio("acme", "Acme")
     assert jobs == []

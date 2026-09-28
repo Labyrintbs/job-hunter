@@ -43,11 +43,9 @@ _CITIZENSHIP_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Consulting/staffing/forward-deployed tells, high-precision phrases only (a bare "mission"
-# or "conseil" is too common in unrelated boilerplate -- these are the phrasings that
-# actually discriminated ESN/forward-deployed postings from product-company ones in
-# practice). Soft signal (score penalty), not a hard filter: some consultancies have
-# genuinely strong technical roles, this is a flag for review, not an auto-reject.
+# High-precision phrases only (a bare "mission"/"conseil" is too common in unrelated
+# boilerplate) -- soft signal (score penalty), not a hard filter, since some
+# consultancies have genuinely strong technical roles.
 CLIENT_FACING_TERMS = [
     "pre-sales", "presales", "pre sales", "avant-vente",
     "forward deployed", "forward-deployed",
@@ -62,11 +60,9 @@ CLIENT_FACING_TERMS = [
 def has_citizenship_requirement(text: str) -> bool:
     return bool(_CITIZENSHIP_RE.search(text))
 
-# A years-of-experience requirement, only when tied to an experience/expérience context
-# (so "founded 8 years ago" is not read as "requires 8 years"). The trailing-context
-# branch also accepts a small set of work verbs (not just "experience" itself) so
-# phrasing like "4+ years working on large-scale ML codebases" still parses — a real
-# posting that silently evaded the seniority gate before this was added.
+# Only counts when tied to an experience context (so "founded 8 years ago" isn't
+# read as "requires 8 years"). Also accepts work verbs beyond "experience" itself
+# so "4+ years working on large-scale ML codebases" parses too.
 _EXP_YEARS_RE = re.compile(
     r"(?:(\d{1,2})\s*\+?\s*(?:-|–|to|à|au)?\s*\d{0,2}\s*"
     r"(?:years?|yrs?|ans|années?|annees?)[^.\n]{0,40}?"

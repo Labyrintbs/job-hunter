@@ -26,11 +26,9 @@ _CLI_FALLBACKS = [
     Path("/usr/local/bin/claude"),
 ]
 
-# macOS cron/launchd's default PATH is just /usr/bin:/bin -- it never sees
-# /usr/local/bin or /opt/homebrew/bin, so `claude`'s own SessionEnd hook (which
-# shells out to `node`) fails with "node: command not found" and takes the whole
-# CLI call down with it, even though `claude` itself was found via _CLI_FALLBACKS
-# above.
+# macOS cron/launchd's default PATH never includes these, so `claude`'s own
+# SessionEnd hook (which shells out to `node`) fails with "node: command not
+# found" even after `claude` itself was found via _CLI_FALLBACKS above.
 _CLI_EXTRA_PATHS = ["/usr/local/bin", "/opt/homebrew/bin"]
 
 

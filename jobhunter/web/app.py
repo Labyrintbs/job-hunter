@@ -44,11 +44,9 @@ def dashboard(request: Request, status: str | None = None, min_score: int = 0,
                                 filtered=None, dismissed=None, interested=True,
                                 staleness_days=days, exclude_statuses=exclude, sort=sort)
         else:
-            # explicitly picking a status (e.g. the "unavailable" pill), the stale pill,
-            # or the stuck-enrichment pill should show every matching job regardless of
-            # filtered/dismissed/interested labels -- otherwise the count badge
-            # (status_counts / n_stale / n_stuck, all computed without those
-            # restrictions) doesn't match what's shown.
+            # Explicitly picking a status/stale/stuck pill should show every matching
+            # job regardless of filtered/dismissed/interested -- otherwise the count
+            # badges (computed without those restrictions) wouldn't match what's shown.
             bypass = bool(status) or bool(stale) or bool(stuck)
             jobs = db.list_jobs(conn, status=status or None, min_score=min_score,
                                 filtered=None if bypass else filtered,

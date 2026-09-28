@@ -1,17 +1,15 @@
 """Free-Work (free-work.com) -- plain server-rendered HTML listing + per-job
 schema.org JobPosting JSON-LD, no API, no key.
 
-Confirmed live: robots.txt only disallows /login, /logout, /fw-deals -- job
-pages untouched. Listing pages are genuinely server-rendered (no JS needed),
-16 links/page, real pagination. Each job's detail page carries a complete
-JobPosting block including salary -- rare among French-language sources.
+robots.txt only disallows /login, /logout, /fw-deals -- job pages untouched.
+Listing pages are server-rendered (no JS needed) with real pagination. Each
+job's detail page carries a complete JobPosting block including salary --
+rare among French-language sources.
 
-Real per-query depth exceeds a shallow poll (100+ postings for a common
-query), but ranking isn't strictly recency-sorted either, so (like
-HelloWork) a deeper periodic walk wouldn't reliably buy freshness -- capped
-at max_detail_fetches per run instead, matching the "stay a polite visitor"
-policy of the France-focused reference scraper this endpoint was found in.
-No backfill for this source (see pipeline.py).
+Real per-query depth exceeds a shallow poll, but ranking isn't recency-sorted
+either, so (like HelloWork) a deeper periodic walk wouldn't reliably buy
+freshness -- capped at max_detail_fetches per run instead. No backfill for
+this source (see pipeline.py).
 """
 from __future__ import annotations
 
@@ -47,11 +45,9 @@ def _contract_type(jp: dict) -> str:
     types = jp.get("employmentType") or []
     if isinstance(types, str):
         types = [types]
-    # match.py's exclude_terms looks for "freelance"/"indépendant"/"portage
-    # salarial" in title+contract_type text -- this site's freelance/mission
-    # postings carry the English schema.org value "CONTRACTOR" instead, which
-    # wouldn't match any of those, so normalize it to a term the existing
-    # filter already recognizes rather than adding a parallel check.
+    # This site's freelance/mission postings carry schema.org's "CONTRACTOR" value,
+    # which match.py's exclude_terms ("freelance"/"indépendant"/etc) wouldn't match --
+    # normalize it to a term the existing filter already recognizes.
     if any(t in ("CONTRACTOR", "TEMPORARY") for t in types):
         return "freelance"
     return ", ".join(types)
