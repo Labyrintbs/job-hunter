@@ -377,17 +377,89 @@ arbeitnow:
   max_pages: 10   # 250 jobs/page; modest relevant-hit density (general job board,
                   # not ML-specific) but real, free, and legitimate additional EU spread
 
+# EURES (official EU job mobility portal) -- reverse-engineered public API, no
+# key. locationCodes=["fr"] is an exact server-side country filter, not a text
+# heuristic. Confirmed live NOT recency-sorted (a July posting turned up in a
+# September search's top 20), and per-query volume is huge (15,200 for "data
+# scientist" alone) against this shallow poll -- see eures_backfill below for
+# the deeper weekly sweep. Neither this poll nor that backfill can guarantee
+# catching every new posting given the non-recency ranking.
+eures:
+  enabled: true
+  fetch_interval_hours: 6
+  queries:
+    - "machine learning engineer"
+    - "deep learning engineer"
+    - "nlp engineer"
+    - "computer vision engineer"
+    - "ai engineer"
+    - "llm engineer"
+    - "data scientist"
+    - "algorithm engineer"
+    - "AI product manager"
+    - "technical product manager"
+    - "chef de produit IA"
+  max_hits: 200
+
+# artificialintelligencejobs.co -- niche AI/ML-focused public API, no key.
+# Confirmed live genuinely recency-sorted, and current real volume for these
+# queries is small enough that max_hits already covers everything that
+# exists -- no backfill needed for this one.
+aijobs:
+  enabled: true
+  fetch_interval_hours: 12
+  queries:
+    - "machine learning engineer"
+    - "deep learning engineer"
+    - "computer vision engineer"
+    - "ai engineer"
+    - "llm engineer"
+    - "data scientist"
+  max_hits: 100
+
+# Free-Work (free-work.com) -- French tech/IT board, plain server-rendered
+# HTML + a full schema.org JobPosting per job (the only French-language
+# source tested that gives salary in structured form). Real depth exceeds
+# max_detail_fetches, but ranking isn't recency-sorted either, so (like
+# HelloWork) a deeper periodic walk wouldn't reliably buy freshness -- no
+# backfill, capped as a polite visitor instead.
+free_work:
+  enabled: true
+  fetch_interval_hours: 12
+  queries:
+    - "machine learning engineer"
+    - "deep learning engineer"
+    - "computer vision engineer"
+    - "ai engineer"
+    - "llm engineer"
+    - "data scientist"
+  max_detail_fetches: 45
+
+# lesjeudis.com -- historic French tech job board, same plain-HTML +
+# JobPosting-JSON-LD shape as Free-Work, same no-backfill reasoning.
+lesjeudis:
+  enabled: true
+  fetch_interval_hours: 12
+  queries:
+    - "machine learning engineer"
+    - "deep learning engineer"
+    - "computer vision engineer"
+    - "ai engineer"
+    - "llm engineer"
+    - "data scientist"
+  max_detail_fetches: 45
+
 # Deep sweep (`jobhunter backfill`) -- separate from the regular polls above, which
 # always restart at position 0/page 1 and are capped shallow for freshness+cost.
-# Split across Saturday (arbeitnow, wttj) and Sunday (workday, francetravail,
+# Split across Saturday (arbeitnow, wttj, eures) and Sunday (workday, francetravail,
 # linkedin_wide) -- see pipeline.BACKFILL_GROUPS -- rather than one big sweep, and
-# most companies don't post over the weekend anyway. arbeitnow/wttj/workday walk
-# fully every run (no cursor -- a saved page/offset number doesn't survive a week
-# of new postings inserting at the front, confirmed live for arbeitnow's feed);
+# most companies don't post over the weekend anyway. arbeitnow/wttj/workday/eures
+# walk fully every run (no cursor -- a saved page/offset number doesn't survive a
+# week of new postings inserting at the front, confirmed live for arbeitnow's feed);
 # dedup (upsert_job) makes the resulting overlap harmless. francetravail is the
 # exception: its minCreationDate/maxCreationDate window is calendar-anchored, so a
 # saved cursor safely resumes across weeks, and sweeping it unboundedly every week
-# would be impolite for a national authenticated API (unlike the two free ones).
+# would be impolite for a national authenticated API (unlike the free ones).
 arbeitnow_backfill:
   enabled: true
   fetch_interval_hours: 168    # once a week
@@ -414,6 +486,14 @@ linkedin_backfill:
   enabled: true
   fetch_interval_hours: 168
   wide_recent_hours: 720        # 30 days, vs. the regular poll's 168 (7 days)
+
+eures_backfill:
+  enabled: true
+  fetch_interval_hours: 168
+  max_hits: 2000                 # moderate multiple, not a claim of near-complete
+                                  # coverage -- no recency-sort override exists (see
+                                  # eures: above), so this buys more raw coverage of
+                                  # the pool, not a freshness guarantee
 
 # Workday-hosted company boards (config/companies.yaml entries with ats: workday) --
 # Workday's search API only returns postings matching one of these phrases (unlike

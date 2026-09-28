@@ -15,6 +15,10 @@ def test_gather_survives_a_source_exception(tmp_db, config, monkeypatch):
     monkeypatch.setattr(pipeline, "_fetch_francetravail", lambda cfg: [])
     monkeypatch.setattr(pipeline, "_fetch_hellowork", lambda cfg: [])
     monkeypatch.setattr(pipeline, "_fetch_arbeitnow", lambda cfg: [])
+    monkeypatch.setattr(pipeline, "_fetch_eures", lambda cfg: [])
+    monkeypatch.setattr(pipeline, "_fetch_aijobs", lambda cfg: [])
+    monkeypatch.setattr(pipeline, "_fetch_free_work", lambda cfg: [])
+    monkeypatch.setattr(pipeline, "_fetch_lesjeudis", lambda cfg: [])
 
     jobs = pipeline._gather(config)   # must not raise
     assert jobs == []
@@ -29,10 +33,15 @@ def test_gather_collects_every_source(tmp_db, config, monkeypatch):
     monkeypatch.setattr(pipeline, "_fetch_francetravail", lambda cfg: [make("francetravail", 4)])
     monkeypatch.setattr(pipeline, "_fetch_hellowork", lambda cfg: [make("hellowork", 5)])
     monkeypatch.setattr(pipeline, "_fetch_arbeitnow", lambda cfg: [make("arbeitnow", 6)])
+    monkeypatch.setattr(pipeline, "_fetch_eures", lambda cfg: [make("eures", 7)])
+    monkeypatch.setattr(pipeline, "_fetch_aijobs", lambda cfg: [make("aijobs", 8)])
+    monkeypatch.setattr(pipeline, "_fetch_free_work", lambda cfg: [make("free_work", 9)])
+    monkeypatch.setattr(pipeline, "_fetch_lesjeudis", lambda cfg: [make("lesjeudis", 10)])
 
     jobs = pipeline._gather(config)
     assert {j.source for j in jobs} == {"wttj", "ats", "linkedin", "francetravail",
-                                         "hellowork", "arbeitnow"}
+                                         "hellowork", "arbeitnow", "eures", "aijobs",
+                                         "free_work", "lesjeudis"}
 
 
 def _stub_all_sources_except_hellowork(monkeypatch, called):
@@ -43,6 +52,10 @@ def _stub_all_sources_except_hellowork(monkeypatch, called):
     monkeypatch.setattr(pipeline, "_fetch_francetravail", lambda cfg: [])
     monkeypatch.setattr(pipeline, "_fetch_hellowork", lambda cfg: called.append(1) or [])
     monkeypatch.setattr(pipeline, "_fetch_arbeitnow", lambda cfg: [])
+    monkeypatch.setattr(pipeline, "_fetch_eures", lambda cfg: [])
+    monkeypatch.setattr(pipeline, "_fetch_aijobs", lambda cfg: [])
+    monkeypatch.setattr(pipeline, "_fetch_free_work", lambda cfg: [])
+    monkeypatch.setattr(pipeline, "_fetch_lesjeudis", lambda cfg: [])
 
 
 def test_gather_skips_a_source_whose_interval_has_not_elapsed(tmp_db, config, monkeypatch):
@@ -192,6 +205,99 @@ def test_fetch_arbeitnow_disabled_returns_nothing(monkeypatch):
     cfg = {"arbeitnow": {"enabled": False}}
     jobs = pipeline._fetch_arbeitnow(cfg)
     assert jobs == []
+    assert called == []
+
+
+def test_fetch_eures_loops_over_configured_queries(monkeypatch):
+    calls = []
+
+    def fake_fetch(query, max_hits):
+        calls.append((query, max_hits))
+        return [Job(source="eures", external_id=query, title=query, company="Acme")]
+
+    monkeypatch.setattr(pipeline.eures, "fetch", fake_fetch)
+    cfg = {"query": "machine learning engineer",
+           "eures": {"enabled": True, "max_hits": 50,
+                     "queries": ["machine learning engineer", "nlp engineer"]}}
+    jobs = pipeline._fetch_eures(cfg)
+    assert calls == [("machine learning engineer", 50), ("nlp engineer", 50)]
+    assert len(jobs) == 2
+
+
+def test_fetch_eures_disabled_returns_nothing(monkeypatch):
+    called = []
+    monkeypatch.setattr(pipeline.eures, "fetch", lambda **k: called.append(1) or [])
+    cfg = {"eures": {"enabled": False}}
+    assert pipeline._fetch_eures(cfg) == []
+    assert called == []
+
+
+def test_fetch_aijobs_loops_over_configured_queries(monkeypatch):
+    calls = []
+
+    def fake_fetch(query, max_hits):
+        calls.append((query, max_hits))
+        return [Job(source="aijobs", external_id=query, title=query, company="Acme")]
+
+    monkeypatch.setattr(pipeline.aijobs, "fetch", fake_fetch)
+    cfg = {"query": "machine learning engineer",
+           "aijobs": {"enabled": True, "max_hits": 30, "queries": ["ai engineer"]}}
+    jobs = pipeline._fetch_aijobs(cfg)
+    assert calls == [("ai engineer", 30)]
+    assert len(jobs) == 1
+
+
+def test_fetch_aijobs_disabled_returns_nothing(monkeypatch):
+    called = []
+    monkeypatch.setattr(pipeline.aijobs, "fetch", lambda **k: called.append(1) or [])
+    cfg = {"aijobs": {"enabled": False}}
+    assert pipeline._fetch_aijobs(cfg) == []
+    assert called == []
+
+
+def test_fetch_free_work_loops_over_configured_queries(monkeypatch):
+    calls = []
+
+    def fake_fetch(query, max_detail_fetches):
+        calls.append((query, max_detail_fetches))
+        return [Job(source="free_work", external_id=query, title=query, company="Acme")]
+
+    monkeypatch.setattr(pipeline.free_work, "fetch", fake_fetch)
+    cfg = {"query": "machine learning engineer",
+           "free_work": {"enabled": True, "max_detail_fetches": 20, "queries": ["data scientist"]}}
+    jobs = pipeline._fetch_free_work(cfg)
+    assert calls == [("data scientist", 20)]
+    assert len(jobs) == 1
+
+
+def test_fetch_free_work_disabled_returns_nothing(monkeypatch):
+    called = []
+    monkeypatch.setattr(pipeline.free_work, "fetch", lambda **k: called.append(1) or [])
+    cfg = {"free_work": {"enabled": False}}
+    assert pipeline._fetch_free_work(cfg) == []
+    assert called == []
+
+
+def test_fetch_lesjeudis_loops_over_configured_queries(monkeypatch):
+    calls = []
+
+    def fake_fetch(query, max_detail_fetches):
+        calls.append((query, max_detail_fetches))
+        return [Job(source="lesjeudis", external_id=query, title=query, company="Acme")]
+
+    monkeypatch.setattr(pipeline.lesjeudis, "fetch", fake_fetch)
+    cfg = {"query": "machine learning engineer",
+           "lesjeudis": {"enabled": True, "max_detail_fetches": 20, "queries": ["data scientist"]}}
+    jobs = pipeline._fetch_lesjeudis(cfg)
+    assert calls == [("data scientist", 20)]
+    assert len(jobs) == 1
+
+
+def test_fetch_lesjeudis_disabled_returns_nothing(monkeypatch):
+    called = []
+    monkeypatch.setattr(pipeline.lesjeudis, "fetch", lambda **k: called.append(1) or [])
+    cfg = {"lesjeudis": {"enabled": False}}
+    assert pipeline._fetch_lesjeudis(cfg) == []
     assert called == []
 
 
@@ -1118,7 +1224,7 @@ def test_run_backfill_saturday_runs_only_its_group(monkeypatch):
     calls = []
     _stub_all_backfills(monkeypatch, calls)
     pipeline.run_backfill(day="saturday")
-    assert set(calls) == {"arbeitnow", "wttj"}
+    assert set(calls) == {"arbeitnow", "wttj", "eures"}
 
 
 def test_run_backfill_sunday_runs_only_its_group(monkeypatch):

@@ -79,7 +79,7 @@ def _parse_card(card: str) -> Job | None:
 
 def _fetch_one(client: httpx.Client, query: str, location: str, max_pages: int,
                 recent_hours: int, max_retries: int, backoff_base: float,
-                workplace_type: str | None = None) -> list[Job]:
+                workplace_type: str | None = None) -> list[Job]:  # LinkedIn's f_WT param, e.g. "2"=remote -- see fetch()'s docstring
     jobs: list[Job] = []
     for page in range(max_pages):
         params = {
@@ -120,21 +120,15 @@ def _fetch_one(client: httpx.Client, query: str, location: str, max_pages: int,
 def fetch(queries: list[str], locations: list[str], max_pages: int = 5,
           recent_hours: int = 168, max_retries: int = 3,
           backoff_base: float = 2.0, workplace_type: str | None = None) -> list[Job]:
-    """One request per (query, location) pair's page. A 429 retries just that page
-    with exponential backoff instead of abandoning the whole fetch; any other
-    non-200/empty response or exhausted results only breaks that pair's pagination,
-    so one bad combo doesn't cost the others. Cross-pair duplicates are harmless --
-    external_id is stable regardless of which search surfaced the posting, and
-    db.py's dedup collapses them.
+    """One request per (query, location) pair's page; a 429 retries just that page,
+    any other failure only breaks that pair's own pagination. Cross-pair duplicates
+    are harmless -- db.py's dedup collapses them.
 
-    workplace_type passes LinkedIn's own f_WT filter (e.g. "2" = remote) as a coarse
-    noise-reducing pre-filter ONLY -- verified live that it lets non-remote postings
-    through (a job explicitly marked "Hybrid" on its own page came back under f_WT=2),
-    so it is NOT trusted as a remote signal and jobs are returned with their real,
-    untouched location text. Confirming genuine remote status happens later, once the
-    full JD text is available -- see match.detect_remote_from_text and
-    pipeline.enrich_one. Same approach JobSpy (a maintained multi-site scraper) uses
-    for the same reason."""
+    workplace_type is LinkedIn's own f_WT filter, used only as a coarse pre-filter,
+    not a trusted remote signal (confirmed live: it lets non-remote postings
+    through) -- location is returned untouched, and genuine remote status is
+    confirmed later from full JD text (see match.detect_remote_from_text,
+    pipeline.enrich_one)."""
     jobs: list[Job] = []
     with httpx.Client(timeout=20, headers=_HEADERS) as client:
         for query in queries:

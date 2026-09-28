@@ -12,7 +12,8 @@ from .llm import dedup as llm_dedup
 from .llm import judge as llm_judge
 from .llm import provider
 from .notify import dispatch as notify_dispatch
-from .sources import arbeitnow, ats, ats_discovery, francetravail, hellowork, linkedin, workday, wttj
+from .sources import (aijobs, arbeitnow, ats, ats_discovery, eures, francetravail, free_work,
+                       hellowork, lesjeudis, linkedin, workday, wttj)
 from .tailor import engine as cv_engine
 
 
@@ -98,6 +99,50 @@ def _fetch_arbeitnow(config: dict) -> list:
     return arbeitnow.fetch(max_pages=an.get("max_pages", 5))
 
 
+def _fetch_eures(config: dict) -> list:
+    eu = config.get("eures") or {}
+    if not eu.get("enabled"):
+        return []
+    queries = eu.get("queries") or [config["query"]]
+    jobs: list = []
+    for q in queries:
+        jobs += eures.fetch(q, max_hits=eu.get("max_hits", 200))
+    return jobs
+
+
+def _fetch_aijobs(config: dict) -> list:
+    aj = config.get("aijobs") or {}
+    if not aj.get("enabled"):
+        return []
+    queries = aj.get("queries") or [config["query"]]
+    jobs: list = []
+    for q in queries:
+        jobs += aijobs.fetch(q, max_hits=aj.get("max_hits", 100))
+    return jobs
+
+
+def _fetch_free_work(config: dict) -> list:
+    fwc = config.get("free_work") or {}
+    if not fwc.get("enabled"):
+        return []
+    queries = fwc.get("queries") or [config["query"]]
+    jobs: list = []
+    for q in queries:
+        jobs += free_work.fetch(q, max_detail_fetches=fwc.get("max_detail_fetches", 45))
+    return jobs
+
+
+def _fetch_lesjeudis(config: dict) -> list:
+    lj = config.get("lesjeudis") or {}
+    if not lj.get("enabled"):
+        return []
+    queries = lj.get("queries") or [config["query"]]
+    jobs: list = []
+    for q in queries:
+        jobs += lesjeudis.fetch(q, max_detail_fetches=lj.get("max_detail_fetches", 45))
+    return jobs
+
+
 def _hours_since(timestamp: str) -> float:
     from datetime import datetime, timezone
     then = datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
@@ -132,6 +177,10 @@ def _gather(config: dict, force: bool = False) -> list:
         ("francetravail", lambda: _fetch_francetravail(config)),
         ("hellowork", lambda: _fetch_hellowork(config)),
         ("arbeitnow", lambda: _fetch_arbeitnow(config)),
+        ("eures", lambda: _fetch_eures(config)),
+        ("aijobs", lambda: _fetch_aijobs(config)),
+        ("free_work", lambda: _fetch_free_work(config)),
+        ("lesjeudis", lambda: _fetch_lesjeudis(config)),
     ]
     jobs: list = []
     counts: dict[str, object] = {}
@@ -385,7 +434,7 @@ def _log_backfill(line: str) -> None:
 
 
 BACKFILL_GROUPS = {
-    "saturday": ("arbeitnow", "wttj"),
+    "saturday": ("arbeitnow", "wttj", "eures"),
     "sunday": ("workday", "francetravail", "linkedin_wide"),
 }
 
@@ -454,6 +503,37 @@ def backfill_wttj(force: bool = False) -> dict:
         db.record_source_fetch(conn, "wttj_backfill", len(jobs))
         tracker.flush(conn)
     _log_backfill(f"wttj: {len(jobs)} jobs fetched across {len(queries)} queries, {len(kept)} kept")
+    return {"fetched": len(jobs), "kept": len(kept)}
+
+
+def backfill_eures(force: bool = False) -> dict:
+    """Weekly deep walk per configured eures query, mirroring backfill_wttj.
+    Unlike wttj, EURES's own ranking is confirmed NOT recency-sorted (see
+    eures.py's docstring) and no sort-override param was found -- this buys
+    more raw coverage of the pool (max_hits=2000 vs. the regular poll's 200),
+    not a freshness guarantee. Persists via _persist_jobs, never writes to
+    fetch_runs."""
+    config = load_search_config()
+    bf = config.get("eures_backfill") or {}
+    if not bf.get("enabled", True):
+        return {"skipped": "disabled"}
+    db.init_db()
+    with db.connect() as conn:
+        if not force and not _is_due(conn, "eures_backfill", config):
+            return {"skipped": "not due yet"}
+
+    eu = config.get("eures") or {}
+    queries = eu.get("queries") or [config["query"]]
+    jobs: list = []
+    with fetch_diag.run_tracking() as tracker:
+        for q in queries:
+            jobs += eures.fetch(q, max_hits=bf.get("max_hits", 2000))
+
+    with db.connect() as conn:
+        kept = _persist_jobs(conn, config, jobs)
+        db.record_source_fetch(conn, "eures_backfill", len(jobs))
+        tracker.flush(conn)
+    _log_backfill(f"eures: {len(jobs)} jobs fetched across {len(queries)} queries, {len(kept)} kept")
     return {"fetched": len(jobs), "kept": len(kept)}
 
 
@@ -588,6 +668,7 @@ def backfill_linkedin_wide(force: bool = False) -> dict:
 _BACKFILL_FUNCS = {
     "arbeitnow": backfill_arbeitnow,
     "wttj": backfill_wttj,
+    "eures": backfill_eures,
     "workday": backfill_workday,
     "francetravail": backfill_francetravail,
     "linkedin_wide": backfill_linkedin_wide,
@@ -596,9 +677,9 @@ _BACKFILL_FUNCS = {
 
 def run_backfill(force: bool = False, day: str | None = None) -> dict:
     """Umbrella called by `jobhunter backfill` and the twice-weekly LaunchAgent.
-    Splits the 5 streams across Saturday/Sunday (BACKFILL_GROUPS) rather than
+    Splits the 6 streams across Saturday/Sunday (BACKFILL_GROUPS) rather than
     running everything in one sitting -- roughly balances request volume per
-    day (arbeitnow+wttj vs. workday+francetravail+linkedin_wide), and most
+    day (arbeitnow+wttj+eures vs. workday+francetravail+linkedin_wide), and most
     companies don't post over the weekend anyway, so nothing timely is being
     delayed by spreading it out. `day` defaults to today's real weekday name
     (so a cron-triggered call auto-picks the right group); force=True ignores
