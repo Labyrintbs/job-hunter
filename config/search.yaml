@@ -1,93 +1,13 @@
 # Search configuration for a Paris junior ML-engineer hunt (CDI/CDD, no internships).
 query: "machine learning engineer"
 
-# Title must contain one of these for a job to count as ML-relevant. Gates out
-# non-ML roles from company ATS boards (whose boilerplate mentions "machine learning").
-role_keywords:
-  - machine learning
-  - ml engineer
-  - deep learning
-  - data scientist
-  - data engineer
-  - computer vision
-  - nlp
-  - mlops
-  - ai engineer
-  - applied ai
-  - applied scientist
-  - research engineer
-  - research scientist
-  - genai
-  - generative ai
-  - llm
-  - algorithm engineer
-  - prompt engineer
-  - ai researcher
-  - ml platform engineer
-
-# French-language equivalents -- most FR postings use the English terms above,
-# but these titles show up untranslated often enough to be worth matching too.
-  - ingénieur ia
-  - ingenieur ia
-  - ingénieur machine learning
-  - ingenieur machine learning
-  - ingénieur en intelligence artificielle
-  - ingenieur en intelligence artificielle
-  - chercheur en ia
-  - chercheur en intelligence artificielle
-  - ingénieur données
-  - ingenieur donnees
-  - vision par ordinateur
-  - apprentissage profond
-  - traitement du langage naturel
-  - traitement automatique du langage
-  - ia générative
-  - intelligence artificielle générative
-  - ingénieur algorithmes
-  - ingénieur en algorithmique
-  - ingénieur de recherche
-
-# AI/Technical Product Manager roles -- a second acceptable target alongside ML
-# engineering (see jobhunter/llm/judge.py's SYSTEM prompt for how these are judged).
-# Deliberately compound phrases, not bare "product manager", so a generic PM
-# posting unrelated to AI/ML doesn't pass this gate.
-  - ai product manager
-  - product manager ai
-  - technical product manager
-  - ml product manager
-  - genai product manager
-  - product manager llm
-  - ai product owner
-  - technical product owner
-  - chef de produit ia
-  - chef de produit - ia
-
-# Extra keywords that boost a job's score if present in title/description.
-boost_keywords:
-  - machine learning
-  - deep learning
-  - ml engineer
-  - computer vision
-  - opencv
-  - segmentation
-  - object detection
-  - point cloud
-  - image processing
-  - medical imaging
-  - nlp
-  - mlops
-  - pytorch
-  - data scientist
-  - llm
-  - genai
-  - generative ai
-  - rag
-  - applied ai
-  - agentic
-
-# Buckets shown as the dashboard's Category column. Checked title-first, then
-# title+description, in this priority order (domain-specific before the ML/DL
-# catch-all) -- see jobhunter/match.py:classify_role.
+# Buckets used both to gate relevance (any term, anywhere -> is_relevant) and to
+# classify the dashboard's Category column (checked title-first, then
+# title+description, in this priority order -- domain-specific before the ML/DL
+# catch-all -- see jobhunter/match.py:classify_role/_category_matches). Also
+# scored: NLP/CV/PM (the categories real DB hit-rate shows are genuine domain
+# identifiers) via category_weights below; AI/ML-DL terms feed the separate
+# depth bonus instead, alongside general_keywords -- see match.py:score.
 role_categories:
   NLP:
     - nlp
@@ -98,6 +18,8 @@ role_categories:
     - nlu
     - chatbot
     - conversational ai
+    - traitement du langage naturel
+    - traitement automatique du langage
   CV:
     - computer vision
     - image processing
@@ -110,6 +32,13 @@ role_categories:
     - medical imaging
     - slam
     - 3d reconstruction
+    - segmentation
+    - détection d'objets
+    - segmentation d'image
+    - imagerie médicale
+    - nuage de points
+    - traitement d'image
+    - vision par ordinateur
   AI:
     - genai
     - generative ai
@@ -120,6 +49,18 @@ role_categories:
     - ai engineer
     - applied ai
     - artificial intelligence
+    - agentic
+    - prompt engineer
+    - ai researcher
+    - ingénieur ia
+    - ingenieur ia
+    - ingénieur en intelligence artificielle
+    - ingenieur en intelligence artificielle
+    - chercheur en ia
+    - chercheur en intelligence artificielle
+    - ia générative
+    - intelligence artificielle générative
+    - grands modèles de langage
   ML/DL:
     - machine learning
     - deep learning
@@ -129,6 +70,18 @@ role_categories:
     - applied scientist
     - research engineer
     - research scientist
+    - algorithm engineer
+    - data engineer
+    - ml platform engineer
+    - ingénieur machine learning
+    - ingenieur machine learning
+    - ingénieur données
+    - ingenieur donnees
+    - apprentissage profond
+    - apprentissage automatique
+    - ingénieur algorithmes
+    - ingénieur en algorithmique
+    - ingénieur de recherche
   PM:
     - ai product manager
     - product manager ai
@@ -140,6 +93,24 @@ role_categories:
     - technical product owner
     - chef de produit ia
     - chef de produit - ia
+
+# Cross-cutting tool/technique terms that don't identify one category (used
+# across NLP/CV/AI/ML-DL equally) -- pooled into score()'s depth bonus instead
+# of being arbitrarily assigned to a single category.
+general_keywords:
+  - pytorch
+
+# Per-category identity-tier score weight: title = category term found in the
+# job title, body = only found in the description. NLP/CV/PM only -- these are
+# the categories that behave like real domain identifiers in the DB (checked
+# fresh against these keyword lists, not stored/stale labels): NLP 16.0%
+# LLM-qualify rate, CV 8.8%, PM 1.0%. AI and ML/DL deliberately have no entry
+# here -- neither correlates with quality alone (see match.py:score's depth
+# bonus, and the commit message, for why they're pooled there instead).
+category_weights:
+  NLP: {title: 30, body: 15}
+  CV: {title: 20, body: 10}
+  PM: {title: 5, body: 2}
 
 # Geography (WTTJ facet uses country; location text is matched against these).
 countries: ["France"]

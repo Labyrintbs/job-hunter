@@ -179,18 +179,37 @@ def score(job: Job, config: dict) -> tuple[int, list[str]]:
     text = _text(job)
     pts = 0
 
-    matched = [k for k in config.get("boost_keywords", []) if k.lower() in text]
-    if matched:
-        pts += min(50, 12 * len(matched))
-        reasons.append(f"keywords: {', '.join(matched[:5])}")
+    # Identity tier: only NLP/CV/PM compete here -- real DB hit-rate shows these
+    # are genuine domain identifiers, unlike AI/ML-DL (see depth bonus below and
+    # the commit message). Credits whichever matches best (title beats body;
+    # among same-tier matches, the higher-weighted category wins) -- unlike
+    # classify_role(), which discards every category but one for its single
+    # display label, every match found here can contribute.
+    cats = config.get("role_categories") or {}
+    identity_cats = {c: cats[c] for c in ("NLP", "CV", "PM") if c in cats}
+    weights_cfg = config.get("category_weights") or {}
+    default_w = {"title": 15, "body": 8}
+    best_pts, best_reason = 0, None
+    for cat, where in _category_matches(job.title.lower(), text, identity_cats).items():
+        w = weights_cfg.get(cat, default_w)
+        achieved = w["title"] if where == "title" else w["body"]
+        if achieved > best_pts:
+            best_pts, best_reason = achieved, f"{cat} role in {where}"
+    pts += best_pts
+    if best_reason:
+        reasons.append(best_reason)
 
-    q = config.get("query", "").lower()
-    if q and q in job.title.lower():
-        pts += 25
-        reasons.append("query in title")
-    elif q and all(w in text for w in q.split()):
-        pts += 12
-        reasons.append("query terms present")
+    # Depth/breadth bonus: AI + ML/DL + general_keywords pooled together (not a
+    # per-category identity weight) -- real DB data shows neither AI nor ML/DL
+    # correlates with quality alone, but a job mentioning terms from *both*
+    # scores as well as a specific category. That's a breadth signal, not an
+    # identity one, so they're counted together here.
+    depth_terms = [t.lower() for c in ("AI", "ML/DL") for t in cats.get(c, [])]
+    depth_terms += [t.lower() for t in config.get("general_keywords", [])]
+    matched = [t for t in depth_terms if t in text]
+    if matched:
+        pts += min(30, 6 * len(matched))
+        reasons.append(f"keywords: {', '.join(matched[:5])}")
 
     geo_bonus, geo_reason = _geo_tier(job, config)
     pts += geo_bonus
@@ -258,11 +277,9 @@ def is_relevant(job: Job, config: dict) -> bool:
     """A job must be an ML role by its TITLE, not just be in Paris or mention ML
     in company boilerplate. Guards against non-ML roles from ATS boards."""
     title = job.title.lower()
-    role_kw = config.get("role_keywords") or config.get("boost_keywords", [])
-    if any(k.lower() in title for k in role_kw):
-        return True
-    q = config.get("query", "").lower()
-    return bool(q) and all(w in title for w in q.split())
+    cats = config.get("role_categories") or {}
+    role_kw = [t.lower() for terms in cats.values() for t in terms]
+    return any(k in title for k in role_kw)
 
 
 def _apply_rules(job: Job, config: dict) -> tuple[list[str], list[int]]:

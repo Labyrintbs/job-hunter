@@ -102,7 +102,7 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("rescreen-all", help="one-off catch-up: re-run rule-based screening for "
                                         "every stored job against the current config (e.g. "
-                                        "after a role_keywords/boost_keywords change)")
+                                        "after a role_categories/category_weights change)")
 
     p_rejudge_category = sub.add_parser("rejudge-category", help="one-off catch-up: rejudge "
                                         "every 'weak'-verdict job in a role_category (NLP/CV/"

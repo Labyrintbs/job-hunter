@@ -46,7 +46,7 @@ def test_ml_title_relevant(config):
 def test_algorithm_engineer_title_relevant(config):
     # Regression: a real posting (Beacon Biosignals, deep-learning/PyTorch work on
     # biosignal time series) was silently dropped pre-scoring because "algorithm
-    # engineer" wasn't in role_keywords -- a legitimate alternate title for ML/DL
+    # engineer" wasn't in role_categories -- a legitimate alternate title for ML/DL
     # roles, common in health-tech/biotech.
     assert is_relevant(J(title="Algorithm Engineer"), config) is True
 
@@ -79,6 +79,23 @@ def test_cv_synonym_keywords_boost_score(config):
                            desc="We train segmentation models using point cloud and medical imaging data."), config)
     without_signal = screen(J(title="Machine Learning Engineer", desc="We train models."), config)
     assert with_signal.score > without_signal.score
+
+
+def test_category_weight_differentiates_nlp_from_pm(config):
+    # Real DB hit-rate: NLP postings qualify far more often than PM ones (see
+    # commit message) -- category_weights should reflect that, not treat every
+    # role_categories entry as an equally-valid "same-weight" title match.
+    nlp = screen(J(title="NLP Engineer"), config).score
+    pm = screen(J(title="Technical Product Manager"), config).score
+    assert nlp > pm
+
+
+def test_general_keywords_boost_score(config):
+    with_pytorch = screen(J(title="Machine Learning Engineer",
+                            desc="We use pytorch for training."), config)
+    without_pytorch = screen(J(title="Machine Learning Engineer",
+                              desc="We use good practices for training."), config)
+    assert with_pytorch.score > without_pytorch.score
 
 
 def test_paris_ranks_above_other_france(config):

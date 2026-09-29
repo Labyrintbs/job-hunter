@@ -214,7 +214,7 @@ def _persist_jobs(conn, config: dict, jobs: list) -> list[tuple]:
     results = []
     # Own tracker, flushed here: by the time this runs, any tracker opened by the
     # fetch step (_gather/backfill_*) has already closed -- see fetch_drops rows
-    # with reason=not_ml_relevant/excluded to catch role_keywords/exclude_terms gaps.
+    # with reason=not_ml_relevant/excluded to catch role_categories/exclude_terms gaps.
     with fetch_diag.run_tracking() as tracker:
         for job in jobs:
             s = match.screen(job, config)
@@ -973,8 +973,8 @@ def rejudge_category(role_category: str, limit: int | None = None) -> dict:
     """One-off catch-up: rejudge every job in a role_category that's currently
     judged 'weak', for after a judge-prompt or scoring-config change that should
     apply retroactively (e.g. treating Computer Vision as a co-equal specialization
-    rather than an off-target domain, or expanding boost_keywords/role_categories
-    coverage via rescreen_all). Same unfilter-safety rule as rejudge_juniors --
+    rather than an off-target domain, or expanding role_categories coverage via
+    rescreen_all). Same unfilter-safety rule as rejudge_juniors --
     only unhides a job whose old filter_reason was solely stale weak-verdict/
     score-gate flags. Skips dismissed/interested jobs."""
     db.init_db()
@@ -983,8 +983,8 @@ def rejudge_category(role_category: str, limit: int | None = None) -> dict:
 
 def rescreen_all() -> dict:
     """Re-run rule-based screening for every stored job against the *current*
-    config -- for catching up after a role_keywords/boost_keywords/role_categories
-    change (e.g. expanding Computer Vision's keyword coverage) that should have
+    config -- for catching up after a role_categories/category_weights change
+    (e.g. expanding Computer Vision's keyword coverage) that should have
     applied retroactively. Jobs the LLM has already judged (llm_score set) keep
     their score/filtered status untouched -- the LLM verdict is the authoritative
     signal there (see judge_one/set_llm_filter), a rule-score refresh must never
