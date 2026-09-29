@@ -1,0 +1,157 @@
+# Every point value jobhunter/match.py's score()/screen()/_geo_tier() use, in
+# one place -- split out of search.yaml, which otherwise mixes fetch-source
+# config and filter *criteria* (which locations/languages/terms/companies
+# count at all) together with the numbers that score them. Loaded and merged
+# into the same config dict by jobhunter/config.py:load_search_config, so
+# every existing caller works unchanged regardless of which file a key lives in.
+
+# Buckets used both to gate relevance (any term, anywhere -> is_relevant) and to
+# classify the dashboard's Category column (checked title-first, then
+# title+description, in this priority order -- domain-specific before the ML/DL
+# catch-all -- see jobhunter/match.py:classify_role/_category_matches). Also
+# scored: NLP/CV/PM (the categories real DB hit-rate shows are genuine domain
+# identifiers) via category_weights below; AI/ML-DL terms feed the separate
+# depth bonus instead, alongside general_keywords -- see match.py:score.
+role_categories:
+  NLP:
+    - nlp
+    - natural language processing
+    - text mining
+    - named entity
+    - sentiment analysis
+    - nlu
+    - chatbot
+    - conversational ai
+    - traitement du langage naturel
+    - traitement automatique du langage
+  CV:
+    - computer vision
+    - image processing
+    - object detection
+    - image segmentation
+    - opencv
+    - visual recognition
+    - point cloud
+    - 3d vision
+    - medical imaging
+    - slam
+    - 3d reconstruction
+    - segmentation
+    - détection d'objets
+    - segmentation d'image
+    - imagerie médicale
+    - nuage de points
+    - traitement d'image
+    - vision par ordinateur
+  AI:
+    - genai
+    - generative ai
+    - llm
+    - large language model
+    - prompt engineering
+    - rag
+    - ai engineer
+    - applied ai
+    - artificial intelligence
+    - agentic
+    - prompt engineer
+    - ai researcher
+    - ingénieur ia
+    - ingenieur ia
+    - ingénieur en intelligence artificielle
+    - ingenieur en intelligence artificielle
+    - chercheur en ia
+    - chercheur en intelligence artificielle
+    - ia générative
+    - intelligence artificielle générative
+    - grands modèles de langage
+  ML/DL:
+    - machine learning
+    - deep learning
+    - ml engineer
+    - mlops
+    - data scientist
+    - applied scientist
+    - research engineer
+    - research scientist
+    - algorithm engineer
+    - data engineer
+    - ml platform engineer
+    - ingénieur machine learning
+    - ingenieur machine learning
+    - ingénieur données
+    - ingenieur donnees
+    - apprentissage profond
+    - apprentissage automatique
+    - ingénieur algorithmes
+    - ingénieur en algorithmique
+    - ingénieur de recherche
+  PM:
+    - ai product manager
+    - product manager ai
+    - technical product manager
+    - ml product manager
+    - genai product manager
+    - product manager llm
+    - ai product owner
+    - technical product owner
+    - chef de produit ia
+    - chef de produit - ia
+
+# Cross-cutting tool/technique terms that don't identify one category (used
+# across NLP/CV/AI/ML-DL equally) -- pooled into score()'s depth bonus instead
+# of being arbitrarily assigned to a single category.
+general_keywords:
+  - pytorch
+
+# Per-category identity-tier score weight: title = category term found in the
+# job title, body = only found in the description. NLP/CV/PM only -- these are
+# the categories that behave like real domain identifiers in the DB (checked
+# fresh against these keyword lists, not stored/stale labels): NLP 16.0%
+# LLM-qualify rate, CV 8.8%, PM 1.0%. AI and ML/DL deliberately have no entry
+# here -- neither correlates with quality alone (see the depth bonus below,
+# and the commit message, for why they're pooled there instead).
+category_weights:
+  NLP: {title: 30, body: 15}
+  CV: {title: 20, body: 10}
+  PM: {title: 5, body: 2}
+# Fallback for any category not listed above (shouldn't normally happen, since
+# NLP/CV/PM cover every identity-weighted category that currently exists).
+default_category_weight: {title: 15, body: 8}
+
+# Depth/breadth bonus: AI + ML/DL + general_keywords pooled together, points
+# per distinct matched term up to a cap -- see match.py:score for why these
+# two categories are scored this way instead of getting their own identity
+# weight (neither correlates with quality alone; both together do).
+depth_bonus_per_term: 6
+depth_bonus_cap: 30
+
+# Geography bonus/penalty (see match.py:_geo_tier). Paris/IDF ranks above a
+# named major city, which ranks above europe_remote, which ranks above
+# generic other-France mobility, which ranks above a fully unspecified
+# location -- outside France is the only penalty (negative).
+idf_bonus: 20
+major_city_bonus: 14
+europe_remote_bonus: 12       # no relocation, but real unresolved per-employer
+                               # legal/payroll uncertainty -- between
+                               # other_france_bonus and major_city_bonus.
+other_france_bonus: 10        # any other named French city -- always a real,
+                               # opportunistic part of the search, not gated
+                               # behind allow_remote_france.
+remote_france_bonus: 8        # only applied if search.yaml's allow_remote_france is true
+unspecified_geo_bonus: 5
+outside_france_penalty: -5
+
+# Language match/mismatch (see match.py:score).
+language_match_bonus: 5
+language_mismatch_penalty: -10
+
+# Soft signal penalties (see match.py:score) -- a senior/client-facing term
+# found anywhere in the full text (not just the title), unlike the hard
+# title-only seniority gate in screen().
+seniority_signal_penalty: -15
+client_facing_penalty: -15
+
+# Below this rule-based score (0-100) a job goes to the Filtered bucket, not
+# the main list (see match.py:screen).
+min_score: 20

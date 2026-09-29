@@ -158,20 +158,20 @@ def _geo_tier(job: Job, config: dict) -> tuple[int, str]:
     mobility."""
     tier = geo_tier(job.location, config)
     if tier == "idf":
-        return 20, f"geo: Paris/IDF ({job.location})"
+        return config.get("idf_bonus", 20), f"geo: Paris/IDF ({job.location})"
     if tier == "major_city":
         return config.get("major_city_bonus", 14), f"geo: major French city ({job.location})"
     if tier == "unknown":
-        return 5, "geo: unspecified"
+        return config.get("unspecified_geo_bonus", 5), "geo: unspecified"
     if tier == "europe_remote":
         bonus = config.get("europe_remote_bonus", 12) if config.get("allow_remote_europe", True) else 0
         return bonus, f"geo: remote at an EU-based employer -- verify visa/payroll eligibility yourself ({job.location})"
     if tier == "france":
         return config.get("other_france_bonus", 10), f"geo: other-France city, opportunistic ({job.location})"
     if tier == "remote":
-        bonus = 8 if config.get("allow_remote_france") else 0
+        bonus = config.get("remote_france_bonus", 8) if config.get("allow_remote_france") else 0
         return bonus, f"geo: remote/France mobility ({job.location})"
-    return -5, f"geo: outside France ({job.location})"
+    return config.get("outside_france_penalty", -5), f"geo: outside France ({job.location})"
 
 
 def score(job: Job, config: dict) -> tuple[int, list[str]]:
@@ -188,7 +188,7 @@ def score(job: Job, config: dict) -> tuple[int, list[str]]:
     cats = config.get("role_categories") or {}
     identity_cats = {c: cats[c] for c in ("NLP", "CV", "PM") if c in cats}
     weights_cfg = config.get("category_weights") or {}
-    default_w = {"title": 15, "body": 8}
+    default_w = config.get("default_category_weight") or {"title": 15, "body": 8}
     best_pts, best_reason = 0, None
     for cat, where in _category_matches(job.title.lower(), text, identity_cats).items():
         w = weights_cfg.get(cat, default_w)
@@ -208,7 +208,7 @@ def score(job: Job, config: dict) -> tuple[int, list[str]]:
     depth_terms += [t.lower() for t in config.get("general_keywords", [])]
     matched = [t for t in depth_terms if t in text]
     if matched:
-        pts += min(30, 6 * len(matched))
+        pts += min(config.get("depth_bonus_cap", 30), config.get("depth_bonus_per_term", 6) * len(matched))
         reasons.append(f"keywords: {', '.join(matched[:5])}")
 
     geo_bonus, geo_reason = _geo_tier(job, config)
@@ -217,19 +217,19 @@ def score(job: Job, config: dict) -> tuple[int, list[str]]:
 
     langs = [l.lower() for l in config.get("languages", [])]
     if not langs or not job.language or job.language.lower() in langs:
-        pts += 5
+        pts += config.get("language_match_bonus", 5)
     else:
-        pts -= 10
+        pts += config.get("language_mismatch_penalty", -10)
         reasons.append(f"language {job.language} off-target")
 
     senior_hit = next((t for t in SENIOR_TERMS if t in text), None)
     if senior_hit:
-        pts -= 15
+        pts += config.get("seniority_signal_penalty", -15)
         reasons.append(f"seniority signal '{senior_hit.strip()}'")
 
     client_hit = next((t for t in CLIENT_FACING_TERMS if t in text), None)
     if client_hit:
-        pts -= 15
+        pts += config.get("client_facing_penalty", -15)
         reasons.append(f"client-facing/consulting signal '{client_hit}'")
 
     return max(0, min(100, pts)), reasons

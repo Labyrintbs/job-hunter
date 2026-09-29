@@ -1,116 +1,11 @@
 # Search configuration for a Paris junior ML-engineer hunt (CDI/CDD, no internships).
 query: "machine learning engineer"
 
-# Buckets used both to gate relevance (any term, anywhere -> is_relevant) and to
-# classify the dashboard's Category column (checked title-first, then
-# title+description, in this priority order -- domain-specific before the ML/DL
-# catch-all -- see jobhunter/match.py:classify_role/_category_matches). Also
-# scored: NLP/CV/PM (the categories real DB hit-rate shows are genuine domain
-# identifiers) via category_weights below; AI/ML-DL terms feed the separate
-# depth bonus instead, alongside general_keywords -- see match.py:score.
-role_categories:
-  NLP:
-    - nlp
-    - natural language processing
-    - text mining
-    - named entity
-    - sentiment analysis
-    - nlu
-    - chatbot
-    - conversational ai
-    - traitement du langage naturel
-    - traitement automatique du langage
-  CV:
-    - computer vision
-    - image processing
-    - object detection
-    - image segmentation
-    - opencv
-    - visual recognition
-    - point cloud
-    - 3d vision
-    - medical imaging
-    - slam
-    - 3d reconstruction
-    - segmentation
-    - détection d'objets
-    - segmentation d'image
-    - imagerie médicale
-    - nuage de points
-    - traitement d'image
-    - vision par ordinateur
-  AI:
-    - genai
-    - generative ai
-    - llm
-    - large language model
-    - prompt engineering
-    - rag
-    - ai engineer
-    - applied ai
-    - artificial intelligence
-    - agentic
-    - prompt engineer
-    - ai researcher
-    - ingénieur ia
-    - ingenieur ia
-    - ingénieur en intelligence artificielle
-    - ingenieur en intelligence artificielle
-    - chercheur en ia
-    - chercheur en intelligence artificielle
-    - ia générative
-    - intelligence artificielle générative
-    - grands modèles de langage
-  ML/DL:
-    - machine learning
-    - deep learning
-    - ml engineer
-    - mlops
-    - data scientist
-    - applied scientist
-    - research engineer
-    - research scientist
-    - algorithm engineer
-    - data engineer
-    - ml platform engineer
-    - ingénieur machine learning
-    - ingenieur machine learning
-    - ingénieur données
-    - ingenieur donnees
-    - apprentissage profond
-    - apprentissage automatique
-    - ingénieur algorithmes
-    - ingénieur en algorithmique
-    - ingénieur de recherche
-  PM:
-    - ai product manager
-    - product manager ai
-    - technical product manager
-    - ml product manager
-    - genai product manager
-    - product manager llm
-    - ai product owner
-    - technical product owner
-    - chef de produit ia
-    - chef de produit - ia
-
-# Cross-cutting tool/technique terms that don't identify one category (used
-# across NLP/CV/AI/ML-DL equally) -- pooled into score()'s depth bonus instead
-# of being arbitrarily assigned to a single category.
-general_keywords:
-  - pytorch
-
-# Per-category identity-tier score weight: title = category term found in the
-# job title, body = only found in the description. NLP/CV/PM only -- these are
-# the categories that behave like real domain identifiers in the DB (checked
-# fresh against these keyword lists, not stored/stale labels): NLP 16.0%
-# LLM-qualify rate, CV 8.8%, PM 1.0%. AI and ML/DL deliberately have no entry
-# here -- neither correlates with quality alone (see match.py:score's depth
-# bonus, and the commit message, for why they're pooled there instead).
-category_weights:
-  NLP: {title: 30, body: 15}
-  CV: {title: 20, body: 10}
-  PM: {title: 5, body: 2}
+# role_categories/general_keywords/category_weights and every scoring point
+# value (geo/language/seniority/client-facing bonuses, min_score, depth bonus)
+# now live in config/scoring.yaml -- this file keeps fetch-source config and
+# filter *criteria* (which locations/languages/terms/companies count at all),
+# not the numbers that score them.
 
 # Geography (WTTJ facet uses country; location text is matched against these).
 countries: ["France"]
@@ -155,12 +50,6 @@ major_cities:
   - rennes
   - montpellier
   - strasbourg
-major_city_bonus: 14
-
-# Any other named French city (not IDF, not a major hub above) -- always a real,
-# opportunistic part of the search now, not gated behind allow_remote_france.
-# Below major_city_bonus so the curated hubs still win.
-other_france_bonus: 10
 
 # EU member states (excluding France) for "fully remote at an EU company,
 # candidate stays in France" postings, matched against WTTJ's offices.country
@@ -195,10 +84,6 @@ europe_countries:
   - Cyprus
 allow_remote_europe: true
 
-# No relocation at all, but real unresolved per-employer legal/payroll
-# uncertainty -- between other_france_bonus and major_city_bonus.
-europe_remote_bonus: 12
-
 # Languages to keep (matched loosely against posting language / content).
 languages: ["fr", "en"]
 
@@ -225,9 +110,6 @@ company_blocklist: []
 seniority:
   filter: true
   max_years: 3        # requires more than this many years -> Filtered
-
-# Below this rule-based score (0-100) a job goes to the Filtered bucket, not the main list.
-min_score: 20
 
 # A job not seen in this many days of fetching (relative to the latest fetch run) is
 # flagged stale/ghost — the posting has likely been taken down.
