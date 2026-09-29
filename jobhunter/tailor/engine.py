@@ -146,9 +146,10 @@ def _select_blocks(job: Job, parsed: ParsedCV, terms: set[str], feedback: str | 
             _fallback_select_skills(parsed.skills, terms))
 
 
-# Update when the target start date changes. Kept as one constant so it's
-# never silently dropped by a re-tailor (see templates/cv_tailoring_workflow.md).
-AVAILABILITY = "September 2026"
+# Update when the target start date changes (e.g. back to "from <Month Year>")
+# -- kept as one constant so it's never silently dropped by a re-tailor (see
+# templates/cv_tailoring_workflow.md).
+AVAILABILITY = "available immediately"
 
 
 def _tagline(role_category: str = "") -> str:
@@ -158,11 +159,11 @@ def _tagline(role_category: str = "") -> str:
     # templates/cv_base.tex's own heading line.
     if role_category == "PM":
         return (
-            f"{{Seeking a full-time AI/Technical Product Manager role (CDI/CDD) from "
+            f"{{Seeking an AI Product Manager role (CDI/CDD), "
             f"{AVAILABILITY} — Île-de-France, open to mobility}}"
         )
     return (
-        f"{{Seeking a full-time Machine Learning role (CDI/CDD) from {AVAILABILITY} — "
+        f"{{Seeking a Machine Learning role (CDI/CDD), {AVAILABILITY} — "
         f"Île-de-France, open to mobility}}"
     )
 
@@ -255,6 +256,10 @@ def compile_tex(tex: str, out_dir: Path, name: str = "cv",
                 )
                 return None
 
+        # A prior attempt (e.g. before a retry) may have left a failure log behind --
+        # clear it so success never leaves stale "needs a manual pass" evidence sitting
+        # next to a PDF that's actually fine.
+        (out_dir / f"{name}.compile.log").unlink(missing_ok=True)
         return pdf_path
 
 
@@ -321,7 +326,11 @@ def _retry_feedback(pdf: Path | None, out_dir: Path) -> str | None:
             return None  # not a page-count rejection -- a real compile error, retrying won't help
         pages = int(m.group(1))
         return (f"The previous attempt compiled to {pages} pages, it needs to be exactly 2. "
-                + ("Trim more bullets, or drop an entry." if pages > 2 else
+                + ("Trim bullets roughly evenly across the kept experience entries, or drop "
+                   "a whole entry/project, rather than cutting one entry's bullets down far "
+                   "more than the others -- an entry left with noticeably fewer bullets than "
+                   "its neighbors reads as sparse even when the total page count is right."
+                   if pages > 2 else
                    "You have room to keep more bullets, or add a project back."))
     ratio = _last_page_fill_ratio(pdf, 2)
     if ratio is not None and ratio < _MIN_LAST_PAGE_FILL_RATIO:

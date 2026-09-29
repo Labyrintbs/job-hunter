@@ -6,7 +6,7 @@ Normal use is a Claude Code session running inside the `job-hunter` repo, with a
 
 ## Context
 
-I'm Hongming Fang, finishing an MSc in Computer Science (Image specialization) at Sorbonne University in September 2026. I have a CTI-accredited French engineering degree from École Centrale de Pékin / Beihang University. I'm looking for a full-time CDI in ML/NLP/LLM engineering in Île-de-France, starting September 2026.
+I'm Hongming Fang, graduated with an MSc in Computer Science (Image specialization, Mention Très Bien) from Sorbonne University in September 2026. I have a CTI-accredited French engineering degree from École Centrale de Pékin / Beihang University. I'm looking for a full-time CDI in ML/NLP/LLM engineering in Île-de-France, available immediately.
 
 Visa constraint: I need a CDI with gross annual base salary above the Passeport Talent "salarié qualifié" threshold (€39,582 for 2026). This is a floor, not a target — market rate for junior ML roles in Paris is €45,000–55,000.
 
@@ -114,9 +114,9 @@ Work from the master version I attach. The master is deliberately over-long; tai
 - Say "production LLM" or "production baseline" rather than naming internal systems; specific open model names (Qwen3.5-4B) are fine and preferred.
 - Escape `%` as `\%` in LaTeX.
 - Header tagline is always one of exactly two fixed generic lines, never a per-job "targeting `<role>` at `<company>`" clause, no matter how well a title or company name would read there. Which one applies is decided by the job's `role_category` (see `jobhunter/match.py:classify_role`), not by hand:
-  - Default (every category except PM), identical to `templates/cv_base.tex`: "Seeking a full-time Machine Learning role (CDI/CDD) from September 2026 — Île-de-France, open to mobility."
-  - `role_category == "PM"` (AI/Technical Product Manager postings): "Seeking a full-time AI/Technical Product Manager role (CDI/CDD) from September 2026 — Île-de-France, open to mobility."
-  Always include "from September 2026" (`jobhunter/tailor/engine.py`'s `AVAILABILITY` constant, update both variants if the date changes). Once a header is in a CV, it is locked: do not regenerate or reword it on a later pass over the same file, even while editing other sections.
+  - Default (every category except PM), identical to `templates/cv_base.tex`: "Seeking a Machine Learning role (CDI/CDD), available immediately — Île-de-France, open to mobility." (deliberately drops "full-time" from the older wording -- redundant with CDI/CDD, and needed to keep the line from wrapping to two lines.)
+  - `role_category == "PM"` (AI/Technical Product Manager postings): "Seeking an AI Product Manager role (CDI/CDD), available immediately — Île-de-France, open to mobility."
+  The availability clause (`jobhunter/tailor/engine.py`'s `AVAILABILITY` constant) reads "available immediately" now that the target start date has passed; switch it back to "from `<Month Year>`" if targeting a future date again, and update both variants together. Once a header is in a CV, it is locked: do not regenerate or reword it on a later pass over the same file, even while editing other sections.
 - Contact email: hongming.marius.fang@gmail.com
 - Education entry for Beihang: "CTI-accredited French engineering degree from a joint program between Beihang University and the Groupe des Écoles Centrales, also awarding Chinese Bachelor & Master of Science degrees." No "(titre d'ingénieur)" in parentheses.
 
@@ -130,7 +130,7 @@ Build the middle around one or two concrete stories with numbers, not a list of 
 
 Name a real gap if the JD has an obvious requirement I don't meet, and frame it honestly rather than hiding it. This has consistently felt better than pretending.
 
-Close with availability (September 2026, Paris) and what specifically draws me to this company.
+Close with availability (available immediately, Paris) and what specifically draws me to this company.
 
 Same no-dashes rule. Don't overclaim, don't inflate internships into full-time roles.
 

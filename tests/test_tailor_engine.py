@@ -24,5 +24,5 @@ def test_tagline_defaults_to_ml_variant():
 
 def test_tagline_pm_variant():
     line = engine._tagline("PM")
-    assert "AI/Technical Product Manager role (CDI/CDD)" in line
+    assert "AI Product Manager role (CDI/CDD)" in line
     assert "Machine Learning" not in line
