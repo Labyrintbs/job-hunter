@@ -219,6 +219,22 @@ def score(job: Job, config: dict) -> tuple[int, list[str]]:
 _SPECIFIC_ROLE_CATEGORIES = ["NLP", "CV", "AI", "PM"]   # checked before the ML/DL catch-all
 
 
+def _category_matches(title: str, full_text: str, cats: dict) -> dict[str, str]:
+    """category -> "title" | "body" for every category (from the given subset of
+    role_categories) with a hit, title checked first. Shared by classify_role()
+    (single best-match label) and score() (credits every match it finds, since a
+    job can genuinely straddle two categories) -- one matching computation, two
+    different uses of the result."""
+    out: dict[str, str] = {}
+    for cat, terms in cats.items():
+        terms_l = [t.lower() for t in terms]
+        if any(t in title for t in terms_l):
+            out[cat] = "title"
+        elif any(t in full_text for t in terms_l):
+            out[cat] = "body"
+    return out
+
+
 def classify_role(title: str, description: str, config: dict) -> str:
     """NLP / CV / AI / ML/DL, checked title-first then title+description. ML/DL
     is a true fallback (returned only when none of the domain-specific categories
@@ -228,12 +244,13 @@ def classify_role(title: str, description: str, config: dict) -> str:
     description ever gets a look. Takes primitives rather than a Job so the DB
     backfill can call it directly off a stored row."""
     cats = config.get("role_categories") or {}
-    title_text = title.lower()
-    full_text = f"{title} {description}".lower()
-    for text in (title_text, full_text):
-        for cat in _SPECIFIC_ROLE_CATEGORIES:
-            if any(kw.lower() in text for kw in cats.get(cat, [])):
-                return cat
+    matches = _category_matches(title.lower(), f"{title} {description}".lower(), cats)
+    for cat in _SPECIFIC_ROLE_CATEGORIES:
+        if matches.get(cat) == "title":
+            return cat
+    for cat in _SPECIFIC_ROLE_CATEGORIES:
+        if cat in matches:
+            return cat
     return "ML/DL"
 
 
