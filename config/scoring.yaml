@@ -104,13 +104,10 @@ role_categories:
 general_keywords:
   - pytorch
 
-# Per-category identity-tier score weight: title = category term found in the
-# job title, body = only found in the description. NLP/CV/PM only -- these are
-# the categories that behave like real domain identifiers in the DB (checked
-# fresh against these keyword lists, not stored/stale labels): NLP 16.0%
-# LLM-qualify rate, CV 8.8%, PM 1.0%. AI and ML/DL deliberately have no entry
-# here -- neither correlates with quality alone (see the depth bonus below,
-# and the commit message, for why they're pooled there instead).
+# Per-category identity-tier weight (title/body = matched in title vs only
+# description). NLP/CV/PM only -- real DB LLM-qualify rate: 16.0%/8.8%/1.0%.
+# AI/ML-DL don't correlate with quality alone, so they're not here -- see
+# depth_bonus_* below.
 category_weights:
   NLP: {title: 30, body: 15}
   CV: {title: 20, body: 10}
@@ -119,10 +116,8 @@ category_weights:
 # NLP/CV/PM cover every identity-weighted category that currently exists).
 default_category_weight: {title: 15, body: 8}
 
-# Depth/breadth bonus: AI + ML/DL + general_keywords pooled together, points
-# per distinct matched term up to a cap -- see match.py:score for why these
-# two categories are scored this way instead of getting their own identity
-# weight (neither correlates with quality alone; both together do).
+# AI + ML/DL + general_keywords pooled here instead of getting their own
+# identity weight -- see category_weights above for why.
 depth_bonus_per_term: 6
 depth_bonus_cap: 30
 

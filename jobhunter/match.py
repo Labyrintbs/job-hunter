@@ -179,12 +179,9 @@ def score(job: Job, config: dict) -> tuple[int, list[str]]:
     text = _text(job)
     pts = 0
 
-    # Identity tier: only NLP/CV/PM compete here -- real DB hit-rate shows these
-    # are genuine domain identifiers, unlike AI/ML-DL (see depth bonus below and
-    # the commit message). Credits whichever matches best (title beats body;
-    # among same-tier matches, the higher-weighted category wins) -- unlike
-    # classify_role(), which discards every category but one for its single
-    # display label, every match found here can contribute.
+    # NLP/CV/PM only -- see scoring.yaml's category_weights comment for why.
+    # Credits the best match found, not classify_role()'s single label -- see
+    # _category_matches()'s docstring.
     cats = config.get("role_categories") or {}
     identity_cats = {c: cats[c] for c in ("NLP", "CV", "PM") if c in cats}
     weights_cfg = config.get("category_weights") or {}
@@ -199,11 +196,8 @@ def score(job: Job, config: dict) -> tuple[int, list[str]]:
     if best_reason:
         reasons.append(best_reason)
 
-    # Depth/breadth bonus: AI + ML/DL + general_keywords pooled together (not a
-    # per-category identity weight) -- real DB data shows neither AI nor ML/DL
-    # correlates with quality alone, but a job mentioning terms from *both*
-    # scores as well as a specific category. That's a breadth signal, not an
-    # identity one, so they're counted together here.
+    # AI/ML-DL + general_keywords as a breadth signal, not identity credit --
+    # see scoring.yaml's category_weights comment for why.
     depth_terms = [t.lower() for c in ("AI", "ML/DL") for t in cats.get(c, [])]
     depth_terms += [t.lower() for t in config.get("general_keywords", [])]
     matched = [t for t in depth_terms if t in text]
