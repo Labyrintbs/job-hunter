@@ -27,11 +27,14 @@ DETAIL_URL = "https://europa.eu/eures/portal/jv-se/jv-details/{id}?lang=fr"
 THROTTLE_SECONDS = 0.3
 PAGE_SIZE = 50   # the API rejects resultsPerPage > 50 (HTTP 400)
 
-# Eurostat NUTS3 codes for the 8 Île-de-France departments -- match.geo_tier()
-# only recognizes IDF via place names (paris/ile-de-france/named suburbs),
-# not plain department names, so map to the region name it actually looks
-# for rather than a literal (and unrecognized) department name.
-_IDF_NUTS = {
+# Eurostat NUTS3 codes for the 8 Île-de-France departments, plus this project's
+# curated major French tech hubs (config/search.yaml's major_cities) -- match.
+# geo_tier() only recognizes these via place names, not NUTS codes, so map known
+# codes to the name it actually looks for. City codes verified live against
+# EURES's own search results (the NUTS3 code shared by postings titled after
+# that city). Any other code (most of France) falls back to plain "France" --
+# a department can contain several cities, so an unmapped code isn't guessed at.
+_KNOWN_NUTS = {
     "FR101": "Paris, Île-de-France",
     "FR102": "Île-de-France",
     "FR103": "Île-de-France",
@@ -40,6 +43,16 @@ _IDF_NUTS = {
     "FR106": "Île-de-France",
     "FR107": "Île-de-France",
     "FR108": "Île-de-France",
+    "FRK26": "Lyon",
+    "FRJ23": "Toulouse",
+    "FRK24": "Grenoble",
+    "FRL03": "Nice",
+    "FRE11": "Lille",
+    "FRG01": "Nantes",
+    "FRI12": "Bordeaux",
+    "FRH03": "Rennes",
+    "FRJ13": "Montpellier",
+    "FRF11": "Strasbourg",
 }
 
 
@@ -49,7 +62,7 @@ def _location(location_map: dict) -> str:
         return "France"
     parts: list[str] = []
     for code in codes:
-        name = _IDF_NUTS.get(code, "France")
+        name = _KNOWN_NUTS.get(code, "France")
         if name not in parts:
             parts.append(name)
     return "; ".join(parts)

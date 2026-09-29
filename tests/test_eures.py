@@ -82,8 +82,27 @@ def test_other_idf_department_nuts_code_still_maps_to_idf_geo_tier(monkeypatch):
     assert match.geo_tier(jobs[0].location, cfg) == "idf"
 
 
-def test_non_idf_french_code_falls_back_to_plain_france(monkeypatch):
-    page = {"numberRecords": 1, "jvs": [_jv(location_map={"FR": ["FR712"]})]}  # Lyon-area NUTS3, not IDF
+def test_known_major_city_nuts_code_maps_to_its_city_name(monkeypatch):
+    # Regression: any non-IDF NUTS3 code fell back to a bare "France", discarding
+    # real location data the API provides -- confirmed live (job #2351, EURES's
+    # "France" vs francetravail's "69 - LYON" for the same KOMITED posting, both
+    # sharing FRK26 in their raw locationMap). Known major-city codes should
+    # resolve to the same city name other sources use, so dedup can match.
+    page = {"numberRecords": 1, "jvs": [_jv(location_map={"FR": ["FRK26"]})]}
+    monkeypatch.setattr(eures.httpx, "Client", lambda *a, **k: Client([page]))
+    monkeypatch.setattr(eures.time, "sleep", lambda *_: None)
+
+    jobs = eures.fetch("data scientist", max_hits=10)
+
+    assert jobs[0].location == "Lyon"
+    cfg = {"locations": [], "major_cities": ["lyon"], "europe_countries": []}
+    assert match.geo_tier(jobs[0].location, cfg) == "major_city"
+
+
+def test_unmapped_french_code_falls_back_to_plain_france(monkeypatch):
+    # A department not in the curated major-city list -- could contain several
+    # cities, so it isn't guessed at.
+    page = {"numberRecords": 1, "jvs": [_jv(location_map={"FR": ["FRI31"]})]}
     monkeypatch.setattr(eures.httpx, "Client", lambda *a, **k: Client([page]))
     monkeypatch.setattr(eures.time, "sleep", lambda *_: None)
 
