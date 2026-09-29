@@ -421,11 +421,16 @@ def _norm_city(location: str) -> str:
     bare "Paris". France Travail puts its department code on the OTHER side
     ("31 - Blagnac", "75 - Paris 1er Arrondissement") -- without stripping that
     leading code, "31 - Blagnac" never matched LinkedIn's bare "Blagnac" for the
-    same posting (job #1904 vs #1862)."""
+    same posting (job #1904 vs #1862). LinkedIn also abbreviates "Saint"/"Sainte"
+    ("St.-Denis") where other sources spell it out ("Saint-Denis") -- without
+    expanding it, the same posting never matched across sources (job #2273 vs
+    #2261)."""
     city = (location or "").split(",")[0]
     city = re.sub(r"^\d{2,3}\s*-\s*", "", city)
     city = re.sub(r"\s*-\s*\d+\s*$", "", city)
     city = re.sub(r"\s+\d+(?:er|e)\s*(?:arrondissement)?\s*$", "", city, flags=re.IGNORECASE)
+    city = re.sub(r"\bSte\.?\b", "Sainte", city, flags=re.IGNORECASE)
+    city = re.sub(r"\bSt\.?\b", "Saint", city, flags=re.IGNORECASE)
     return _normalize(city)
 
 

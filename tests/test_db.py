@@ -167,6 +167,21 @@ def test_cross_source_content_dedup_francetravail_arrondissement_location(tmp_db
         assert jid1 == jid2
 
 
+def test_cross_source_content_dedup_linkedin_saint_abbreviation(tmp_db):
+    # See db._norm_city's docstring for LinkedIn's "St.-Denis" abbreviation.
+    linkedin = Job(source="linkedin", external_id="l1", title="Data Scientist",
+                  company="Altametris", location="St.-Denis, Île-de-France, France",
+                  url="https://linkedin.example/l1")
+    wttj = Job(source="wttj", external_id="w1", title="Data Scientist",
+              company="Altametris", location="Saint-Denis, Ile-de-France, France",
+              url="https://wttj.example/w1")
+    with db.connect() as conn:
+        jid1, new1 = db.upsert_job(conn, linkedin, 60, "r")
+        jid2, new2 = db.upsert_job(conn, wttj, 65, "r2")
+        assert new1 is True and new2 is False
+        assert jid1 == jid2
+
+
 def test_find_possible_duplicates_flags_exact_title_at_same_company(tmp_db):
     # See find_possible_duplicates' docstring for why an EXACT title match is
     # required at the same employer, not just a high ratio.
