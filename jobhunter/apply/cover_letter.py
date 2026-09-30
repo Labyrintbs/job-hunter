@@ -54,7 +54,8 @@ def draft(job: Job, judge_context: str | None = None, cv_text: str | None = None
         profile=profile,
         title=job.title,
         company=job.company,
-        description=(job.description or "")[:4000],
+        # 16000 matches judge.py/select.py/enrich.py's cap -- the full stored JD.
+        description=(job.description or "")[:16000],
         judge_block=judge_block,
     )
     return provider.generate(prompt, system=SYSTEM, max_tokens=1400).strip()
