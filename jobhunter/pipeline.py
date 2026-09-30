@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import shutil
+import subprocess
 import time
 from datetime import datetime, timezone
 
@@ -356,15 +357,15 @@ def daily_run(judge: bool = True, judge_min_score: int = 15, judge_limit: int = 
         with db.connect() as conn:
             to_judge = [
                 r["id"] for r in db.list_jobs(conn, min_score=judge_min_score)
-                if r["id"] in new_set and r["llm_score"] is None
+                if r["id"] in new_set and r["llm_score"] is None and not _too_short_to_judge(r)
             ][:judge_limit]
         for jid in to_judge:
             try:
                 result = judge_one(jid)
-                judged += 1
                 if result.get("skipped"):
                     print(f"  judged #{jid}: skipped ({result['skipped']})")
                 else:
+                    judged += 1
                     print(f"  judged #{jid}: {result['verdict']} ({result['score']})")
                 if result.get("verdict") in ("strong", "good", "stretch"):
                     qualified.append(jid)
@@ -865,8 +866,27 @@ def _maybe_discover_ats(conn, company: str) -> None:
     db.mark_company_checked(conn, row["id"], hit or "no ATS match found (auto-probed)")
 
 
+def _record_failure(source: str, reason: str, detail: str, company: str = "") -> None:
+    """One-off fetch_diag record for a failure outside any run_tracking() block."""
+    with fetch_diag.run_tracking() as tracker:
+        fetch_diag.track(source, reason, detail=detail, company=company)
+    with db.connect() as conn:
+        tracker.flush(conn)
+
+
+def _judge_failure_reason(exc: Exception) -> str:
+    if isinstance(exc, subprocess.TimeoutExpired):
+        return "judge_timeout"
+    if isinstance(exc, provider.LLMUnavailable):
+        return "judge_llm_unavailable"
+    if isinstance(exc, ValueError):   # includes json.JSONDecodeError
+        return "judge_bad_output"
+    return "judge_error"
+
+
 def judge_one(job_id: int) -> dict:
-    """LLM fit-judge one job; store score/verdict/reasons on the job."""
+    """LLM fit-judge one job; store score/verdict/reasons on the job. A skip or an
+    LLM failure is recorded via fetch_diag under a `judge_*` reason (failures re-raise)."""
     db.init_db()
     with db.connect() as conn:
         row = db.get_job(conn, job_id)
@@ -875,8 +895,13 @@ def judge_one(job_id: int) -> dict:
         job = db.job_from_row(row)
         profile = db.current_profile(conn)
     if len((job.description or "").strip()) < _MIN_DESCRIPTION_CHARS:
+        _record_failure(job.source, "judge_skipped_short", f"#{job_id}", job.company)
         return {"job_id": job_id, "skipped": "no real JD content yet"}
-    result = llm_judge.judge(job, preferences=profile["text"] if profile else "")
+    try:
+        result = llm_judge.judge(job, preferences=profile["text"] if profile else "")
+    except Exception as exc:
+        _record_failure(job.source, _judge_failure_reason(exc), f"#{job_id} {exc}"[:200], job.company)
+        raise
     with db.connect() as conn:
         db.set_llm_judgment(conn, job_id, result["score"], result["verdict"], result["reasons"])
         if result.get("seniority") or result.get("min_years") is not None:
@@ -1040,18 +1065,22 @@ def _permanently_unfetchable(row) -> bool:
             and (row["enrich_attempts"] or 0) >= db.MAX_ENRICH_ATTEMPTS)
 
 
+def _too_short_to_judge(row) -> bool:
+    return len((row["description"] or "").strip()) < _MIN_DESCRIPTION_CHARS
+
+
 def judge_all(min_score: int = 40, limit: int | None = None) -> dict:
     """Judge every stored job at/above a rule-score threshold that isn't judged yet.
-    Skips jobs with no real JD content rather than burning a call on a title-only guess --
-    see judge_one's _MIN_DESCRIPTION_CHARS gate. Jobs that will never get real JD content
-    (enrichment permanently exhausted) are excluded from the queue entirely, rather than
-    just skipped call-by-call -- otherwise a high rule-score but permanently-unfetchable
-    job sits at the front of the score-ordered queue forever, crowding out real candidates
-    behind it every run."""
+    Jobs without real JD content (see judge_one's _MIN_DESCRIPTION_CHARS gate) --
+    still too short, or permanently unfetchable (enrichment exhausted) -- are excluded
+    from the queue entirely rather than skipped call-by-call: a permanently-unfetchable
+    high-score job would otherwise sit at the front of the score-ordered queue forever,
+    crowding out real candidates, and a short one would log a skip every run."""
     db.init_db()
     with db.connect() as conn:
         rows = [r for r in db.list_jobs(conn, min_score=min_score)
-                if r["llm_score"] is None and not _permanently_unfetchable(r)]
+                if r["llm_score"] is None and not _permanently_unfetchable(r)
+                and not _too_short_to_judge(r)]
     if limit:
         rows = rows[:limit]
     judged = 0
