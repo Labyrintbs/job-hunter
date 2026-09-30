@@ -1326,6 +1326,54 @@ def test_auto_tailor_drafts_the_letter_only_for_a_properly_tailored_cv(tmp_db, c
     assert tailored == 2                 # the fallback CV compiled, the failed one did not
 
 
+def test_tailor_lock_is_exclusive_and_released_afterwards(tmp_path):
+    with pipeline._tailor_lock(tmp_path) as first:
+        assert first
+        with pipeline._tailor_lock(tmp_path) as second:
+            assert not second                      # a concurrent run is refused, not blocked
+    with pipeline._tailor_lock(tmp_path) as again:
+        assert again
+
+
+def test_tailor_one_skips_a_job_another_run_is_tailoring(tmp_db, config, tmp_path, monkeypatch):
+    with db.connect() as conn:
+        jid = _insert(conn, config, description=_REAL_JD)
+    fake = _fake_tailor_job(tmp_path)
+    monkeypatch.setattr(pipeline.cv_engine, "tailor_job", fake)
+    out_dir = pipeline.cv_engine.CV_OUT_DIR / f"{jid}-{pipeline.cv_engine._slug('Acme')}"
+
+    with pipeline._tailor_lock(out_dir):           # the "other run"
+        result = pipeline.tailor_one(jid, auto=True)
+
+    assert result["skipped"] and fake.calls == []
+    with db.connect() as conn:
+        assert db.list_cv_artifacts(conn, jid) == []
+
+
+def test_tailor_one_auto_rechecks_under_the_lock_but_manual_tailoring_still_runs(tmp_db, config, tmp_path, monkeypatch):
+    with db.connect() as conn:
+        jid = _insert(conn, config, description=_REAL_JD)
+        db.add_cv_artifact(conn, jid, "/t/1.tex", "/t/1.pdf")        # another run finished it meanwhile
+    fake = _fake_tailor_job(tmp_path)
+    monkeypatch.setattr(pipeline.cv_engine, "tailor_job", fake)
+
+    assert pipeline.tailor_one(jid, auto=True)["skipped"] == "already tailored"
+    assert fake.calls == []
+    assert "skipped" not in pipeline.tailor_one(jid)                  # the dashboard/CLI re-tailor button
+    assert fake.calls == [jid]
+
+
+def test_auto_tailor_moves_on_when_a_job_is_skipped_by_the_lock(tmp_db, config, monkeypatch):
+    with db.connect() as conn:
+        jid = _insert(conn, config, description=_REAL_JD)
+    monkeypatch.setattr(pipeline, "tailor_one", lambda jid, auto=False: {"job_id": jid, "skipped": "busy"})
+    letters = []
+    monkeypatch.setattr(pipeline, "cover_one", lambda jid: letters.append(jid) or {})
+
+    assert pipeline._auto_tailor_jobs([jid], limit=10) == 0
+    assert letters == []
+
+
 def test_tailor_one_records_a_keyword_fallback_cv_with_its_marker(tmp_db, config, tmp_path, monkeypatch):
     with db.connect() as conn:
         jid = _insert(conn, config, description=_REAL_JD)

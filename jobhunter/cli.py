@@ -218,8 +218,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "tailor":
         result = tailor_one(args.job_id)
-        if result.get("error"):
-            print(f"error: {result['error']}")
+        if result.get("error") or result.get("skipped"):
+            print(f"error: {result.get('error') or result['skipped']}")
             return 1
         print(f"tex: {result['tex']}")
         print(f"pdf: {result['pdf']}  (compiled={result['compiled']})")

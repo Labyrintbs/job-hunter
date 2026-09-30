@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import fcntl
 import re
 import shutil
 import subprocess
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -331,6 +333,9 @@ def _auto_tailor_jobs(job_ids: list[int], limit: int) -> int:
                 continue   # LLM still failing: don't retry every fallback CV in the batch
             print(f"  tailoring #{jid}...")
             result = tailor_one(jid, auto=True)
+            if result.get("skipped"):
+                print(f"  tailoring #{jid} skipped: {result['skipped']}")
+                continue
             llm_down = llm_down or bool(result.get("fallback"))
             if not result.get("compiled"):
                 print(f"  tailored #{jid}: compile failed ({result.get('note') or result.get('error')}); "
@@ -1168,6 +1173,37 @@ def tailor_one(job_id: int, auto: bool = False) -> dict:
             return {"job_id": job_id, "error": "not found"}
         job = db.job_from_row(row)
 
+    out_dir = cv_engine.CV_OUT_DIR / f"{job_id}-{cv_engine._slug(job.company)}"
+    with _tailor_lock(out_dir) as acquired:
+        if not acquired:
+            return {"job_id": job_id, "skipped": "another run is already tailoring this job"}
+        if auto:
+            # Callers check needs_tailoring before calling; a run that held the lock
+            # in between may have finished the job already.
+            with db.connect() as conn:
+                if not db.needs_tailoring(conn, job_id):
+                    return {"job_id": job_id, "skipped": "already tailored"}
+        return _tailor_and_record(job_id, auto, row, job)
+
+
+@contextmanager
+def _tailor_lock(out_dir: Path):
+    """Non-blocking per-job file lock (yields whether it was acquired), so the daily
+    run and the hourly sweep can't tailor the same job at once and clobber its files."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    with open(out_dir / ".tailor.lock", "w") as lock_file:
+        try:
+            fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            yield False
+            return
+        try:
+            yield True
+        finally:
+            fcntl.flock(lock_file, fcntl.LOCK_UN)
+
+
+def _tailor_and_record(job_id: int, auto: bool, row, job) -> dict:
     with fetch_diag.run_tracking() as tracker:
         result = cv_engine.tailor_job(
             job, job_id, auto=auto, judge_context=_judge_context(row),
