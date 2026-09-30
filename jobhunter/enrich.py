@@ -13,6 +13,8 @@ from html.parser import HTMLParser
 
 import httpx
 
+from . import fetch_diag
+
 _LI_DETAIL_URL = "https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/{id}"
 _LI_MARKUP_RE = re.compile(r'show-more-less-html__markup[^>]*>(.*?)</div>', re.S)
 # Header/nav/cookie chrome ahead of the real content can eat the whole _MAX_CHARS
@@ -97,31 +99,35 @@ def fetch_full_text(source: str, external_id: str, url: str,
     _looks_like_scraped_chrome) or is a takedown notice for a delisted posting
     (see _looks_delisted). Better to leave a job un-enriched than store text
     that's long and clean enough to pass every other check but isn't this job's
-    actual description."""
+    actual description. Each None return is recorded via fetch_diag under an
+    `enrich_*` reason."""
+    is_linkedin = source == "linkedin" and external_id.isdigit()
+    target = _LI_DETAIL_URL.format(id=external_id) if is_linkedin else url
+    if not target:
+        fetch_diag.track(source, "enrich_no_url", detail=f"external_id={external_id}")
+        return None
     own = client is None
     client = client or httpx.Client(timeout=20, headers=_HEADERS, follow_redirects=True)
     try:
-        if source == "linkedin" and external_id.isdigit():
-            resp = client.get(_LI_DETAIL_URL.format(id=external_id))
-            if resp.status_code != 200 or not resp.text.strip():
-                return None
-            m = _LI_MARKUP_RE.search(resp.text)
-            text = _strip_html(m.group(1)) if m else _strip_html(resp.text)
-            text = text[:_MAX_CHARS]
-            if not text or _looks_like_scraped_chrome(text) or _looks_delisted(text):
-                return None
+        resp = client.get(target)
+        if resp.status_code != 200 or not resp.text.strip():
+            fetch_diag.track(source, "enrich_bad_response", detail=f"HTTP {resp.status_code} {target}")
+            return None
+        m = (_LI_MARKUP_RE if is_linkedin else _MAIN_TAG_RE).search(resp.text)
+        text = _strip_html(m.group(1)) if m else _strip_html(resp.text)
+        text = text[:_MAX_CHARS]
+        if not text:
+            reason = "enrich_empty_text"
+        elif _looks_like_scraped_chrome(text):
+            reason = "enrich_scraped_chrome"
+        elif _looks_delisted(text):
+            reason = "enrich_delisted"
+        else:
             return text
-        if url:
-            resp = client.get(url)
-            if resp.status_code == 200 and resp.text.strip():
-                m = _MAIN_TAG_RE.search(resp.text)
-                text = _strip_html(m.group(1)) if m else _strip_html(resp.text)
-                text = text[:_MAX_CHARS]
-                if not text or _looks_like_scraped_chrome(text) or _looks_delisted(text):
-                    return None
-                return text
+        fetch_diag.track(source, reason, detail=target)
         return None
-    except httpx.HTTPError:
+    except httpx.HTTPError as exc:
+        fetch_diag.track(source, "enrich_network_error", detail=f"{type(exc).__name__} {target}")
         return None
     finally:
         if own:

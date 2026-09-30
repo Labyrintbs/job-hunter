@@ -759,10 +759,12 @@ def enrich_one(job_id: int) -> dict:
             return {"job_id": job_id, "error": "not found"}
         source, ext, url = row["source"], row["external_id"], row["url"]
         title, company = row["title"], row["company"]
-    text = enrich.fetch_full_text(source, ext, url)
+    with fetch_diag.run_tracking() as tracker:
+        text = enrich.fetch_full_text(source, ext, url)
     if not text:
         with db.connect() as conn:
             db.bump_enrich_attempts(conn, job_id)
+            tracker.flush(conn)
         return {"job_id": job_id, "enriched": False}
     jd_path = jd_store.save_jd(source=source, external_id=ext, title=title, company=company,
                                 url=url, description=text)

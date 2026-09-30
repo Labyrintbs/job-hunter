@@ -135,8 +135,8 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("metrics", help="screening calibration (false-negative rate, etc.)")
 
-    p_fetch_diag = sub.add_parser("fetch-diag", help="recent fetch-phase drop/degradation counts "
-                                   "(non-France misses, pagination caps hit, malformed records, ...)")
+    p_fetch_diag = sub.add_parser("fetch-diag", help="recent fetch/enrich-phase drop/degradation counts (non-France misses, "
+                                   "pagination caps hit, malformed records, failed JD fetches, ...)")
     p_fetch_diag.add_argument("--hours", type=int, default=24)
 
     p_export = sub.add_parser("export", help="export analytics views (CSV/JSON) for Grafana/Metabase")

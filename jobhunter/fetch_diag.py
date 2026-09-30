@@ -1,6 +1,7 @@
 """Fetch-phase drop/degradation tracking -- makes otherwise-silent skips
 (non-France location miss, pagination cap hit, malformed record, a per-item
-error that doesn't stop the whole fetch) visible after the fact, without
+error that doesn't stop the whole fetch, a failed JD fetch during enrichment,
+reasons prefixed `enrich_`) visible after the fact, without
 persisting every dropped job. Ambient: track() is a no-op unless a
 run_tracking() block is active, so it's safe to call from anywhere with no
 signature changes to any fetch function."""
