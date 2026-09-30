@@ -84,6 +84,19 @@ def test_list_jobs_exposes_the_newest_artifacts_note(tmp_db):
         assert db.list_jobs(conn)[0]["cv_note"] == ""
 
 
+def test_a_failed_retailor_keeps_the_previous_good_cv_active_but_flags_the_failure(tmp_db):
+    with db.connect() as conn:
+        jid = _seed(conn)
+        db.add_cv_artifact(conn, jid, "/tmp/cv-1.tex", "/tmp/cv-1.pdf", origin="ai")
+        listed = db.list_jobs(conn)[0]
+        assert listed["cv_pdf"] == "/tmp/cv-1.pdf" and not listed["cv_latest_failed"]
+        db.add_cv_artifact(conn, jid, "/tmp/cv-2.tex", "", origin="ai", note="compiled to 3 page(s)")
+        listed = db.list_jobs(conn)[0]
+    assert listed["cv_pdf"] == "/tmp/cv-1.pdf"      # the good CV is still the one linked
+    assert listed["cv_latest_failed"]
+    assert listed["cv_note"] == "compiled to 3 page(s)"
+
+
 def test_tailor_one_stores_the_failure_note_and_tracks_it(tmp_db, monkeypatch):
     from jobhunter import fetch_diag
     with db.connect() as conn:

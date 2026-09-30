@@ -670,12 +670,14 @@ def list_jobs(conn: sqlite3.Connection, status: str | None = None, min_score: in
     Adds computed `is_stale` / `days_since_seen` (relative to the latest fetch run)."""
     sql = """
         SELECT j.*, a.status, a.notes, a.submitted_url, a.cover_letter_path, a.updated_at,
-               (SELECT pdf_path FROM cv_artifacts c WHERE c.job_id = j.id
+               (SELECT pdf_path FROM cv_artifacts c WHERE c.job_id = j.id AND c.pdf_path != ''
                 ORDER BY c.generated_at DESC, c.id DESC LIMIT 1) AS cv_pdf,
-               (SELECT origin FROM cv_artifacts c WHERE c.job_id = j.id
+               (SELECT origin FROM cv_artifacts c WHERE c.job_id = j.id AND c.pdf_path != ''
                 ORDER BY c.generated_at DESC, c.id DESC LIMIT 1) AS cv_origin,
                (SELECT note FROM cv_artifacts c WHERE c.job_id = j.id
                 ORDER BY c.generated_at DESC, c.id DESC LIMIT 1) AS cv_note,
+               (SELECT c.pdf_path = '' FROM cv_artifacts c WHERE c.job_id = j.id
+                ORDER BY c.generated_at DESC, c.id DESC LIMIT 1) AS cv_latest_failed,
                (SELECT COUNT(*) FROM cv_artifacts c WHERE c.job_id = j.id) AS cv_versions,
                (SELECT GROUP_CONCAT(to_value || ' (' || substr(occurred_at, 1, 10) || ')', ' -> ')
                 FROM job_events e WHERE e.job_id = j.id AND e.event_type IN ('created', 'status')

@@ -421,7 +421,8 @@ def _tailor_with_tracking(tmp_path, monkeypatch, compile_fn, ratios=None, auto=T
 def _failing_compile(log_text):
     def fake(tex, out_dir, name="cv", expected_pages=None):
         out_dir.mkdir(parents=True, exist_ok=True)
-        (out_dir / "cv.compile.log").write_text(log_text, encoding="utf-8")
+        (out_dir / f"{name}.tex").write_text(tex, encoding="utf-8")
+        (out_dir / f"{name}.compile.log").write_text(log_text, encoding="utf-8")
         return None
     return fake
 
@@ -456,6 +457,46 @@ def test_tailor_job_flags_a_still_sparse_page_two_after_the_retry_but_keeps_the_
     assert result.pdf_path is not None                     # a valid 2-page PDF stays usable
     assert "sparse" in result.note and "20%" in result.note
     assert dict(tracker.counts) == {("tailor", "Acme", "tailor_sparse_after_retry"): 1}
+
+
+def _writing_compile(tex, out_dir, name="cv", expected_pages=None):
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / f"{name}.tex").write_text(tex, encoding="utf-8")
+    (out_dir / f"{name}.pdf").write_bytes(b"%PDF " + name.encode())
+    return out_dir / f"{name}.pdf"
+
+
+def test_each_tailoring_gets_its_own_files_and_cv_tex_pdf_mirror_the_latest(tmp_path, monkeypatch):
+    monkeypatch.setattr(engine, "CV_OUT_DIR", tmp_path)
+    _no_llm(monkeypatch)
+    monkeypatch.setattr(engine, "compile_tex", _writing_compile)
+    monkeypatch.setattr(engine, "_last_page_fill_ratio", lambda pdf, n: 0.9)
+    stamps = iter(["20260101-000000-000", "20260102-000000-000"])
+    monkeypatch.setattr(engine, "_version_stamp", lambda: next(stamps))
+    job = Job(source="x", external_id="1", title="ML Engineer", company="Acme", description="machine learning")
+
+    first = engine.tailor_job(job, 1, auto=True)
+    second = engine.tailor_job(job, 1, auto=True)
+
+    folder = tmp_path / "1-acme"
+    assert first.tex_path == folder / "cv-20260101-000000-000.tex"
+    assert second.pdf_path == folder / "cv-20260102-000000-000.pdf"
+    assert first.pdf_path.read_bytes() == b"%PDF cv-20260101-000000-000"   # the earlier version survives
+    assert (folder / "cv.pdf").read_bytes() == second.pdf_path.read_bytes()   # latest working copy
+    assert (folder / "cv.tex").read_text() == second.tex_path.read_text()
+
+
+def test_cv_compile_log_mirrors_a_failure_and_is_cleared_by_the_next_success(tmp_path, monkeypatch):
+    log = "Compiled to 3 page(s), expected exactly 2.\n"
+    _tailor_with_tracking(tmp_path, monkeypatch, _failing_compile(log))
+    assert "Compiled to 3" in (tmp_path / "1-acme" / "cv.compile.log").read_text()
+
+    monkeypatch.setattr(engine, "compile_tex", _writing_compile)
+    monkeypatch.setattr(engine, "_last_page_fill_ratio", lambda pdf, n: 0.9)
+    job = Job(source="x", external_id="1", title="ML Engineer", company="Acme", description="machine learning")
+    engine.tailor_job(job, 1, auto=True)
+
+    assert not (tmp_path / "1-acme" / "cv.compile.log").exists()   # no stale "needs a manual pass" evidence
 
 
 def test_tailor_job_has_no_note_when_the_retry_fixes_it(tmp_path, monkeypatch):

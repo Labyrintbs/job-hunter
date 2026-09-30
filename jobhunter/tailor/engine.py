@@ -6,6 +6,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple
 
@@ -314,12 +315,12 @@ def _last_page_fill_ratio(pdf_path: Path, n_pages: int) -> float | None:
     return (_nonblank(last) / base) if base else None
 
 
-def _retry_feedback(pdf: Path | None, out_dir: Path) -> str | None:
+def _retry_feedback(pdf: Path | None, out_dir: Path, name: str = "cv") -> str | None:
     """A hint for a second tailoring attempt, or None if the first attempt
     doesn't need one (it fit well) or can't be helped by retrying (a hard
     LaTeX error, not a length issue)."""
     if pdf is None:
-        log = out_dir / "cv.compile.log"
+        log = out_dir / f"{name}.compile.log"
         text = log.read_text(encoding="utf-8") if log.exists() else ""
         m = re.search(r"Compiled to (\d+) page", text)
         if not m:
@@ -347,15 +348,33 @@ class TailorResult(NamedTuple):
     note: str = ""   # why the CV failed or needs review; "" when fine
 
 
-def _compile_failure(out_dir: Path) -> tuple[str, str]:
+def _compile_failure(out_dir: Path, name: str = "cv") -> tuple[str, str]:
     """(fetch_diag reason, note) for a compile that returned no PDF, read off the
     log compile_tex wrote."""
-    log = out_dir / "cv.compile.log"
+    log = out_dir / f"{name}.compile.log"
     text = log.read_text(encoding="utf-8") if log.exists() else ""
     m = re.search(r"Compiled to (\d+|an unknown number of) page", text)
     if m:
-        return "tailor_page_count", f"compiled to {m.group(1)} page(s), expected exactly 2 -- see cv.compile.log"
-    return "tailor_latex_error", "LaTeX compile error -- see cv.compile.log"
+        return "tailor_page_count", f"compiled to {m.group(1)} page(s), expected exactly 2 -- see {name}.compile.log"
+    return "tailor_latex_error", f"LaTeX compile error -- see {name}.compile.log"
+
+
+def _version_stamp() -> str:
+    return datetime.now().strftime("%Y%m%d-%H%M%S-%f")[:-3]
+
+
+def _publish_latest(out_dir: Path, name: str) -> None:
+    """Mirror a versioned tailoring to the fixed cv.tex / cv.pdf / cv.compile.log
+    names, which the hand-editing workflow (cv_tailoring_workflow.md) opens."""
+    for ext in ("tex", "pdf"):
+        src = out_dir / f"{name}.{ext}"
+        if src.exists():
+            shutil.copy(src, out_dir / f"cv.{ext}")
+    log, latest_log = out_dir / f"{name}.compile.log", out_dir / "cv.compile.log"
+    if log.exists():
+        shutil.copy(log, latest_log)
+    else:
+        latest_log.unlink(missing_ok=True)
 
 
 def tailor_job(job: Job, job_id: int, auto: bool = False,
@@ -373,24 +392,29 @@ def tailor_job(job: Job, job_id: int, auto: bool = False,
     command) skips both -- its output is a starting point for a hand-editing
     pass, not a finished CV (cv_tailoring_workflow.md Step 0). `judge_context`
     (optional) is the fit-judge's own verdict/reasons for this posting, passed
-    through to the block-selection call as background."""
+    through to the block-selection call as background.
+
+    Every tailoring is written under its own timestamped name (cv-<stamp>.tex/.pdf),
+    which is what the returned paths point at, so a re-tailor never overwrites an
+    earlier version; cv.tex/cv.pdf are then refreshed as the latest working copy."""
     out_dir = CV_OUT_DIR / f"{job_id}-{_slug(job.company)}"
+    name = f"cv-{_version_stamp()}"
 
     tex = tailor_tex(job, judge_context=judge_context, role_category=role_category)
-    pdf = compile_tex(tex, out_dir, name="cv", expected_pages=2 if auto else None)
+    pdf = compile_tex(tex, out_dir, name=name, expected_pages=2 if auto else None)
 
     retried = False
     if auto:
-        feedback = _retry_feedback(pdf, out_dir)
+        feedback = _retry_feedback(pdf, out_dir, name)
         if feedback:
             tex = tailor_tex(job, feedback=feedback, judge_context=judge_context,
                              role_category=role_category)
-            pdf = compile_tex(tex, out_dir, name="cv", expected_pages=2)
+            pdf = compile_tex(tex, out_dir, name=name, expected_pages=2)
             retried = True
 
     reason = note = ""
     if pdf is None:
-        reason, note = _compile_failure(out_dir)
+        reason, note = _compile_failure(out_dir, name)
     elif retried:
         # The retry's own output is never re-tried, so flag a still-sparse page 2
         # instead of letting it pass as fine.
@@ -399,4 +423,5 @@ def tailor_job(job: Job, job_id: int, auto: bool = False,
             reason, note = "tailor_sparse_after_retry", f"page 2 sparse ({ratio:.0%} of page 1) -- review before use"
     if reason:
         fetch_diag.track("tailor", reason, detail=note, company=job.company)
-    return TailorResult(out_dir / "cv.tex", pdf, note)
+    _publish_latest(out_dir, name)
+    return TailorResult(out_dir / f"{name}.tex", pdf, note)

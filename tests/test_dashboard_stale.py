@@ -47,6 +47,18 @@ def test_dashboard_shows_failed_cv_reason_and_review_badge(tmp_db):
     assert 'title="page 2 sparse (20% of page 1)">⚠ review' in html
 
 
+def test_dashboard_flags_a_failed_retailor_next_to_the_older_good_cv(tmp_db):
+    with db.connect() as conn:
+        jid, _ = db.upsert_job(conn, J("12", title="Retailored Job"), 60, "r")
+        db.add_cv_artifact(conn, jid, "/tmp/cv-1.tex", "/tmp/cv-1.pdf")
+        db.add_cv_artifact(conn, jid, "/tmp/cv-2.tex", "", note="LaTeX compile error -- see cv-2.compile.log")
+
+    html = TestClient(app).get("/").text
+
+    assert "⚠ re-tailor failed" in html
+    assert 'href="file:///tmp/cv-1.pdf"' in html      # the earlier good CV stays linked
+
+
 def test_stuck_pill_shows_unenrichable_jobs_even_when_filtered_or_dismissed(tmp_db):
     with db.connect() as conn:
         filtered_id, _ = db.upsert_job(conn, J("1", title="Filtered No-JD Job"), 60, "r")
