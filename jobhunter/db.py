@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS cv_artifacts (
     pdf_path     TEXT DEFAULT '',
     base_version TEXT DEFAULT '',
     origin       TEXT DEFAULT 'ai',      -- base | ai | revised (human-uploaded)
+    note         TEXT DEFAULT '',        -- why it failed / needs review, '' when fine
     generated_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -272,6 +273,7 @@ MIGRATIONS = {
     },
     "cv_artifacts": {
         "origin": "TEXT DEFAULT 'ai'",
+        "note": "TEXT DEFAULT ''",
     },
     "fetch_runs": {
         "new_major_city": "INTEGER DEFAULT 0",
@@ -669,9 +671,11 @@ def list_jobs(conn: sqlite3.Connection, status: str | None = None, min_score: in
     sql = """
         SELECT j.*, a.status, a.notes, a.submitted_url, a.cover_letter_path, a.updated_at,
                (SELECT pdf_path FROM cv_artifacts c WHERE c.job_id = j.id
-                ORDER BY c.generated_at DESC LIMIT 1) AS cv_pdf,
+                ORDER BY c.generated_at DESC, c.id DESC LIMIT 1) AS cv_pdf,
                (SELECT origin FROM cv_artifacts c WHERE c.job_id = j.id
-                ORDER BY c.generated_at DESC LIMIT 1) AS cv_origin,
+                ORDER BY c.generated_at DESC, c.id DESC LIMIT 1) AS cv_origin,
+               (SELECT note FROM cv_artifacts c WHERE c.job_id = j.id
+                ORDER BY c.generated_at DESC, c.id DESC LIMIT 1) AS cv_note,
                (SELECT COUNT(*) FROM cv_artifacts c WHERE c.job_id = j.id) AS cv_versions,
                (SELECT GROUP_CONCAT(to_value || ' (' || substr(occurred_at, 1, 10) || ')', ' -> ')
                 FROM job_events e WHERE e.job_id = j.id AND e.event_type IN ('created', 'status')
@@ -950,12 +954,15 @@ def job_from_row(row: sqlite3.Row) -> Job:
 
 
 def add_cv_artifact(conn: sqlite3.Connection, job_id: int, tex_path: str,
-                    pdf_path: str, base_version: str = "", origin: str = "ai") -> int:
+                    pdf_path: str, base_version: str = "", origin: str = "ai",
+                    note: str = "") -> int:
     """Append a CV artifact (append-only; latest-by-generated_at is the active one).
-    origin: 'ai' (auto-tailored) | 'revised' (human-uploaded) | 'base'."""
+    origin: 'ai' (auto-tailored) | 'revised' (human-uploaded) | 'base'.
+    note: why the CV failed to compile or needs review; '' when it's fine."""
     cur = conn.execute(
-        "INSERT INTO cv_artifacts (job_id, tex_path, pdf_path, base_version, origin) VALUES (?,?,?,?,?)",
-        (job_id, tex_path, pdf_path, base_version, origin),
+        "INSERT INTO cv_artifacts (job_id, tex_path, pdf_path, base_version, origin, note) "
+        "VALUES (?,?,?,?,?,?)",
+        (job_id, tex_path, pdf_path, base_version, origin, note),
     )
     return cur.lastrowid
 

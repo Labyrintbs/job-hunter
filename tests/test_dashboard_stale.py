@@ -34,6 +34,19 @@ def test_stale_pill_shows_stale_jobs_even_when_filtered_or_dismissed(tmp_db):
     assert "Dismissed Stale Job" in resp.text
 
 
+def test_dashboard_shows_failed_cv_reason_and_review_badge(tmp_db):
+    with db.connect() as conn:
+        failed, _ = db.upsert_job(conn, J("10", title="Failed CV Job"), 60, "r")
+        db.add_cv_artifact(conn, failed, "/tmp/cv.tex", "", note="compiled to 3 page(s)")
+        sparse, _ = db.upsert_job(conn, J("11", title="Sparse CV Job"), 60, "r")
+        db.add_cv_artifact(conn, sparse, "/tmp/cv.tex", "/tmp/cv.pdf", note="page 2 sparse (20% of page 1)")
+
+    html = TestClient(app).get("/").text
+
+    assert 'title="compiled to 3 page(s)">⚠ CV failed' in html
+    assert 'title="page 2 sparse (20% of page 1)">⚠ review' in html
+
+
 def test_stuck_pill_shows_unenrichable_jobs_even_when_filtered_or_dismissed(tmp_db):
     with db.connect() as conn:
         filtered_id, _ = db.upsert_job(conn, J("1", title="Filtered No-JD Job"), 60, "r")

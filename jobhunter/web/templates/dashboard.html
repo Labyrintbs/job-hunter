@@ -83,7 +83,7 @@
         {% if j["cv_pdf"] and j["cover_letter_path"] %}
           <span class="pill" style="font-size:11px; padding:2px 7px; border-color:var(--tag-green)" title="CV + cover letter ready to review">✅ ready</span>
         {% elif j["cv_versions"] and not j["cv_pdf"] %}
-          <span class="pill" style="font-size:11px; padding:2px 7px; border-color:var(--danger); color:var(--danger)" title="tailor was attempted but the CV failed to compile — check data/cv/.../cv.compile.log">⚠ CV failed</span>
+          <span class="pill" style="font-size:11px; padding:2px 7px; border-color:var(--danger); color:var(--danger)" title="tailor was attempted but the CV failed to compile{% if j['cv_note'] %}: {{ j['cv_note'] }}{% else %} — check data/cv/.../cv.compile.log{% endif %}">⚠ CV failed</span>
         {% endif %}
       </td>
       <td><span class="pill" style="font-size:11px; padding:2px 7px">{{ j["role_category"] or "ML/DL" }}</span></td>
@@ -135,6 +135,8 @@
         {% if not j["description_full"] %}
         <button class="ghost" style="padding:4px 7px; font-size:12px;" onclick="enrichJob(this, {{ j['id'] }})" title="fetch the full job description">↓desc</button>
         {% endif %}
+        {% if j["cv_versions"] and not j["cv_pdf"] %}<span style="color:var(--danger)" title="{{ j['cv_note'] or 'CV failed to compile' }}">⚠ CV failed</span>{% endif %}
+        {% if j["cv_pdf"] and j["cv_note"] %}<span style="color:var(--warn)" title="{{ j['cv_note'] }}">⚠ review</span>{% endif %}
         {% if j["cv_pdf"] %}<a href="file://{{ j['cv_pdf'] }}" target="_blank">CV</a>{% if j["cv_origin"] == "revised" %}<span title="human-revised, {{ j['cv_versions'] }} version(s)">✎</span>{% elif j["cv_origin"] == "ai" %}<span class="muted" title="auto-tailored, {{ j['cv_versions'] }} version(s)">🤖</span>{% endif %}{% endif %}
         <button class="ghost" style="padding:4px 7px; font-size:12px;" onclick="tailorCV(this, {{ j['id'] }})">
           {% if j["cv_pdf"] %}↻{% else %}CV{% endif %}

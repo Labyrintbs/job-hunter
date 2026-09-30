@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from jobhunter import fetch_diag
 from jobhunter.models import Job
 from jobhunter.tailor import engine, snippet_bank
 from jobhunter.tailor.engine import BASE_CV
@@ -384,7 +385,7 @@ def test_tailor_job_retries_once_when_first_attempt_is_sparse(tmp_path, monkeypa
     monkeypatch.setattr(engine, "_last_page_fill_ratio", lambda pdf, n: next(ratios))
 
     job = Job(source="x", external_id="1", title="ML Engineer", company="Acme", description="machine learning")
-    tex_path, pdf_path = engine.tailor_job(job, 1, auto=True)
+    tex_path, pdf_path, note = engine.tailor_job(job, 1, auto=True)
 
     assert len(calls) == 2   # first attempt + exactly one retry, not an unbounded loop
     assert pdf_path == tmp_path / "1-acme" / "cv.pdf"
@@ -402,3 +403,64 @@ def test_tailor_job_does_not_retry_when_first_attempt_is_already_healthy(tmp_pat
     engine.tailor_job(job, 1, auto=True)
 
     assert len(calls) == 1
+
+
+def _tailor_with_tracking(tmp_path, monkeypatch, compile_fn, ratios=None, auto=True):
+    monkeypatch.setattr(engine, "CV_OUT_DIR", tmp_path)
+    _no_llm(monkeypatch)
+    monkeypatch.setattr(engine, "compile_tex", compile_fn)
+    if ratios is not None:
+        it = iter(ratios)
+        monkeypatch.setattr(engine, "_last_page_fill_ratio", lambda pdf, n: next(it))
+    job = Job(source="x", external_id="1", title="ML Engineer", company="Acme", description="machine learning")
+    with fetch_diag.run_tracking() as tracker:
+        result = engine.tailor_job(job, 1, auto=auto)
+    return result, tracker
+
+
+def _failing_compile(log_text):
+    def fake(tex, out_dir, name="cv", expected_pages=None):
+        out_dir.mkdir(parents=True, exist_ok=True)
+        (out_dir / "cv.compile.log").write_text(log_text, encoding="utf-8")
+        return None
+    return fake
+
+
+def test_tailor_job_records_a_page_count_failure_after_the_retry(tmp_path, monkeypatch):
+    log = "Compiled to 3 page(s), expected exactly 2. PDF kept at x for review.\n"
+    result, tracker = _tailor_with_tracking(tmp_path, monkeypatch, _failing_compile(log))
+
+    assert result.pdf_path is None
+    assert "3 page(s)" in result.note
+    assert dict(tracker.counts) == {("tailor", "Acme", "tailor_page_count"): 1}   # final outcome only
+
+
+def test_tailor_job_records_a_latex_error(tmp_path, monkeypatch):
+    result, tracker = _tailor_with_tracking(tmp_path, monkeypatch, _failing_compile("! Undefined control sequence.\n"))
+
+    assert result.pdf_path is None and "LaTeX compile error" in result.note
+    assert dict(tracker.counts) == {("tailor", "Acme", "tailor_latex_error"): 1}
+
+
+def test_tailor_job_records_failures_for_the_interactive_path_too(tmp_path, monkeypatch):
+    result, tracker = _tailor_with_tracking(tmp_path, monkeypatch, _failing_compile("! boom\n"), auto=False)
+
+    assert result.note and ("tailor", "Acme", "tailor_latex_error") in tracker.counts
+
+
+def test_tailor_job_flags_a_still_sparse_page_two_after_the_retry_but_keeps_the_pdf(tmp_path, monkeypatch):
+    result, tracker = _tailor_with_tracking(
+        tmp_path, monkeypatch, lambda tex, out_dir, name="cv", expected_pages=None: out_dir / "cv.pdf",
+        ratios=[0.1, 0.2])   # sparse on the first check, still sparse after the retry
+
+    assert result.pdf_path is not None                     # a valid 2-page PDF stays usable
+    assert "sparse" in result.note and "20%" in result.note
+    assert dict(tracker.counts) == {("tailor", "Acme", "tailor_sparse_after_retry"): 1}
+
+
+def test_tailor_job_has_no_note_when_the_retry_fixes_it(tmp_path, monkeypatch):
+    result, tracker = _tailor_with_tracking(
+        tmp_path, monkeypatch, lambda tex, out_dir, name="cv", expected_pages=None: out_dir / "cv.pdf",
+        ratios=[0.1, 0.9])
+
+    assert result.note == "" and dict(tracker.counts) == {}

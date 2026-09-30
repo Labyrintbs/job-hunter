@@ -7,7 +7,9 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+from typing import NamedTuple
 
+from .. import fetch_diag
 from ..config import DATA_DIR, REPO_ROOT
 from ..llm import provider
 from ..models import Job
@@ -339,9 +341,28 @@ def _retry_feedback(pdf: Path | None, out_dir: Path) -> str | None:
     return None
 
 
+class TailorResult(NamedTuple):
+    tex_path: Path
+    pdf_path: Path | None
+    note: str = ""   # why the CV failed or needs review; "" when fine
+
+
+def _compile_failure(out_dir: Path) -> tuple[str, str]:
+    """(fetch_diag reason, note) for a compile that returned no PDF, read off the
+    log compile_tex wrote."""
+    log = out_dir / "cv.compile.log"
+    text = log.read_text(encoding="utf-8") if log.exists() else ""
+    m = re.search(r"Compiled to (\d+|an unknown number of) page", text)
+    if m:
+        return "tailor_page_count", f"compiled to {m.group(1)} page(s), expected exactly 2 -- see cv.compile.log"
+    return "tailor_latex_error", "LaTeX compile error -- see cv.compile.log"
+
+
 def tailor_job(job: Job, job_id: int, auto: bool = False,
-              judge_context: str | None = None, role_category: str = "") -> tuple[Path, Path | None]:
-    """Generate + compile a tailored CV for a job. Returns (tex_path, pdf_path).
+              judge_context: str | None = None, role_category: str = "") -> TailorResult:
+    """Generate + compile a tailored CV for a job. Returns a TailorResult; a failed
+    compile, or a still-sparse second page after the retry, sets `note` and is
+    recorded via fetch_diag under a `tailor_*` reason.
 
     `auto=True` is the unsupervised daily_run path: it also enforces the exact
     2-page rule via compile_tex's expected_pages, since nothing else reviews the
@@ -358,11 +379,24 @@ def tailor_job(job: Job, job_id: int, auto: bool = False,
     tex = tailor_tex(job, judge_context=judge_context, role_category=role_category)
     pdf = compile_tex(tex, out_dir, name="cv", expected_pages=2 if auto else None)
 
+    retried = False
     if auto:
         feedback = _retry_feedback(pdf, out_dir)
         if feedback:
             tex = tailor_tex(job, feedback=feedback, judge_context=judge_context,
                              role_category=role_category)
             pdf = compile_tex(tex, out_dir, name="cv", expected_pages=2)
+            retried = True
 
-    return out_dir / "cv.tex", pdf
+    reason = note = ""
+    if pdf is None:
+        reason, note = _compile_failure(out_dir)
+    elif retried:
+        # The retry's own output is never re-tried, so flag a still-sparse page 2
+        # instead of letting it pass as fine.
+        ratio = _last_page_fill_ratio(pdf, 2)
+        if ratio is not None and ratio < _MIN_LAST_PAGE_FILL_RATIO:
+            reason, note = "tailor_sparse_after_retry", f"page 2 sparse ({ratio:.0%} of page 1) -- review before use"
+    if reason:
+        fetch_diag.track("tailor", reason, detail=note, company=job.company)
+    return TailorResult(out_dir / "cv.tex", pdf, note)

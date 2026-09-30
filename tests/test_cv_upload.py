@@ -73,3 +73,33 @@ def test_failed_compile_shows_attempted_but_no_pdf(tmp_db):
         listed = db.list_jobs(conn)[0]
     assert listed["cv_versions"] == 1
     assert not listed["cv_pdf"]
+
+
+def test_list_jobs_exposes_the_newest_artifacts_note(tmp_db):
+    with db.connect() as conn:
+        jid = _seed(conn)
+        db.add_cv_artifact(conn, jid, "/tmp/cv.tex", "", origin="ai", note="compiled to 3 page(s)")
+        assert db.list_jobs(conn)[0]["cv_note"] == "compiled to 3 page(s)"
+        db.add_cv_artifact(conn, jid, "/tmp/cv.tex", "/tmp/cv.pdf", origin="ai")   # a later, clean one
+        assert db.list_jobs(conn)[0]["cv_note"] == ""
+
+
+def test_tailor_one_stores_the_failure_note_and_tracks_it(tmp_db, monkeypatch):
+    from jobhunter import fetch_diag
+    with db.connect() as conn:
+        jid = _seed(conn)
+
+    def failing_tailor_job(job, job_id, auto=False, judge_context=None, role_category=""):
+        fetch_diag.track("tailor", "tailor_page_count", detail="compiled to 3 page(s)", company=job.company)
+        return cv_engine.TailorResult(Path("/tmp/cv.tex"), None, "compiled to 3 page(s)")
+
+    monkeypatch.setattr(pipeline.cv_engine, "tailor_job", failing_tailor_job)
+
+    result = pipeline.tailor_one(jid, auto=True)
+
+    assert result["compiled"] is False and result["note"] == "compiled to 3 page(s)"
+    with db.connect() as conn:
+        assert db.list_cv_artifacts(conn, jid)[0]["note"] == "compiled to 3 page(s)"
+        assert db.get_job(conn, jid)["status"] != "cv_ready"
+        drops = db.recent_fetch_drops(conn, hours=1)
+    assert [(r["source"], r["reason"]) for r in drops] == [("tailor", "tailor_page_count")]

@@ -330,7 +330,7 @@ def _auto_tailor_jobs(job_ids: list[int], limit: int) -> int:
                 tailored += 1
                 print(f"  tailored #{jid}: compiled + cover letter drafted")
             else:
-                print(f"  tailored #{jid}: compile failed (see cv.compile.log)")
+                print(f"  tailored #{jid}: compile failed ({result['note']})")
         except Exception as exc:
             print(f"  auto-tailor warn: job {jid} failed: {exc}")
     return tailored
@@ -1144,19 +1144,23 @@ def tailor_one(job_id: int, auto: bool = False) -> dict:
             return {"job_id": job_id, "error": "not found"}
         job = db.job_from_row(row)
 
-    tex_path, pdf_path = cv_engine.tailor_job(job, job_id, auto=auto, judge_context=_judge_context(row),
-                                              role_category=row["role_category"] or "")
+    with fetch_diag.run_tracking() as tracker:
+        tex_path, pdf_path, note = cv_engine.tailor_job(
+            job, job_id, auto=auto, judge_context=_judge_context(row),
+            role_category=row["role_category"] or "")
 
     with db.connect() as conn:
         db.add_cv_artifact(conn, job_id, str(tex_path), str(pdf_path or ""),
-                           base_version="cv_base.tex", origin="ai")
+                           base_version="cv_base.tex", origin="ai", note=note)
         if pdf_path:
             db.update_status(conn, job_id, "cv_ready")
+        tracker.flush(conn)
     return {
         "job_id": job_id,
         "tex": str(tex_path),
         "pdf": str(pdf_path) if pdf_path else None,
         "compiled": pdf_path is not None,
+        "note": note,
     }
 
 
