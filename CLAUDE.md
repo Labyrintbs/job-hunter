@@ -17,6 +17,12 @@ but none of them are on PATH by default for non-interactive shells (the Bash
 tool here doesn't source `~/.zshrc`). Use the full invocations below instead
 of re-discovering these each session.
 
+### Python / tests
+
+Use the project's conda env, not a system Python:
+`/Users/tuboshu/opt/anaconda3/envs/jobhunter/bin/python -m pytest -q`
+(`python3` on PATH resolves to it today, but use the full path to be safe).
+
 ### Compile LaTeX -> PDF
 
 MacTeX 2021 is installed at `/usr/local/texlive/2021`, with `latexmk` and
