@@ -1,0 +1,23 @@
+# Anchor text for the CV summary, by the job's role_category (see
+# jobhunter/tailor/summary.py). The LLM writes the real summary per job; this is
+# shown to it as the intended content and tone, and is the fallback text (plus a
+# closing line) when its output fails validation. The general variant is also the
+# default summary block in cv_base.tex.
+variants:
+  llm:
+    categories: [AI, NLP]
+    core: >-
+      Machine Learning Engineer specialized in LLM systems, from prompt design and
+      agentic workflows to fine-tuning and evaluation, with production experience
+      from an ML internship on multilingual legal extraction.
+  cv:
+    categories: [CV]
+    core: >-
+      Computer Vision Engineer with clinical CT/CTA segmentation models deployed in
+      a production annotation pipeline, plus research in 3D point cloud
+      registration and medical image classification.
+  general:
+    categories: []
+    core: >-
+      Machine Learning Engineer with hands-on LLM engineering and clinical
+      medical-image segmentation experience, from ML internships in Paris and Beijing.

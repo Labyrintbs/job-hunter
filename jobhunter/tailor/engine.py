@@ -16,7 +16,7 @@ from ..db import CV_FALLBACK_NOTE
 from ..llm import provider
 from ..models import Job
 from . import select as llm_select
-from . import snippet_bank
+from . import snippet_bank, summary
 from .snippet_bank import Block, ParsedCV, SkillCategory
 
 BASE_CV = REPO_ROOT / "templates" / "cv_base.tex"
@@ -193,6 +193,10 @@ def _tailor(job: Job, parsed: ParsedCV | None = None, feedback: str | None = Non
     doc = snippet_bank.reassemble_skills(doc, skills)
     if parsed.heading_line:
         doc = doc.replace(parsed.heading_line, _tagline(role_category), 1)
+    summ = summary.build(job, role_category, parsed.document)
+    if summ.reason:
+        fetch_diag.track("tailor", summ.reason, detail=summ.detail, company=job.company)
+    doc = snippet_bank.set_summary(doc, summary.latex_escape(summ.text))
     return doc, used_fallback
 
 

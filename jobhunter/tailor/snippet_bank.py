@@ -240,6 +240,19 @@ def reassemble(doc: str, section_title_regex: str, ordered_items: list[Block]) -
     return doc[:start] + new_body + doc[end:]
 
 
+SUMMARY_BLOCK_RE = re.compile(r"%SUMMARY-BEGIN\n.*?%SUMMARY-END", re.S)
+
+
+def set_summary(doc: str, latex_text: str) -> str:
+    """Replace the marked summary block with `latex_text` (already LaTeX-escaped).
+    An empty text removes the summary; a document without the markers is unchanged."""
+    if not SUMMARY_BLOCK_RE.search(doc):
+        return doc
+    body = f"\\noindent\\small{{{latex_text}}}\\par\n\\vspace{{-4pt}}\n" if latex_text else ""
+    block = f"%SUMMARY-BEGIN\n{body}%SUMMARY-END"
+    return SUMMARY_BLOCK_RE.sub(lambda _: block, doc, count=1)
+
+
 def reassemble_skills(doc: str, categories: list[SkillCategory]) -> str:
     """Replace the SKILLS item lines with a filtered subset, keeping every
     existing line verbatim (reuse-only -- never invents an item)."""

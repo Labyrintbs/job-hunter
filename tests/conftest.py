@@ -3,6 +3,15 @@ import pytest
 from jobhunter import db as db_mod
 from jobhunter import jd_store as jd_store_mod
 from jobhunter.tailor import engine as cv_engine_mod
+from jobhunter.tailor import summary as summary_mod
+
+
+@pytest.fixture(autouse=True)
+def no_real_summary_llm(monkeypatch):
+    """The summary sentence is one extra LLM call per tailoring; tests that make the
+    backend look available must never reach a real one. Tests of the summary itself
+    override this."""
+    monkeypatch.setattr(summary_mod, "generate_summary", lambda *a, **k: None)
 
 
 @pytest.fixture
