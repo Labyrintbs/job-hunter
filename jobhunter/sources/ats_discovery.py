@@ -27,9 +27,8 @@ from .ats import _UA, _is_france
 THROTTLE_SECONDS = 0.3
 
 # (ats_type, url_template, format ("json"/"xml"), response -> list of postings)
-# SuccessFactors is deliberately absent: its token is a full hostname, not a
-# guessable slug (see config/companies.yaml's header), so probing would
-# essentially never hit -- it stays a manually-added, manually-researched source only.
+# SuccessFactors is absent: its token is a full hostname, not a guessable slug
+# (see config/companies.yaml's header) -- manually-added source only.
 _CHECKS = [
     ("greenhouse", "https://boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true",
      "json", lambda d: d.get("jobs", [])),

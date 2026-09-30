@@ -52,10 +52,9 @@ def fetch(tenant: str, wd_host: str, site: str, company: str, locale: str = "en-
                     if not path or path in seen_paths:
                         continue
                     seen_paths.add(path)
-                    # locationsText is the normal field, but some tenants (e.g. Renault's
-                    # site) leave it empty and put the city in bulletFields[0] instead --
-                    # harmless to fall back to it even where it's actually a req id, since
-                    # that just won't match any France hint.
+                    # Some tenants (e.g. Renault) leave locationsText empty and put the
+                    # city in bulletFields[0] instead -- harmless fallback even where
+                    # that's actually a req id, since it just won't match a France hint.
                     location = (p.get("locationsText") or "").strip()
                     if not location:
                         bullets = p.get("bulletFields") or [""]

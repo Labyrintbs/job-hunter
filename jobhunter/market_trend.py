@@ -13,9 +13,8 @@ from .config import load_search_config
 from .sources import francetravail
 
 # domaine=M18 is France Travail's aggregate for the whole IT/telecom domain;
-# codeROME entries are a representative slice (counts at design time: M1805=383,
-# M1811=490, M1889=215, M1827=318, M1856=227) -- not the job-search query list in
-# config["francetravail"]["queries"].
+# codeROME entries are a representative slice, not the job-search query list
+# in config["francetravail"]["queries"].
 DEFAULT_CATEGORIES = [
     {"label": "Whole IT/CS market", "param": "domaine", "code": "M18"},
     {"label": "Software development", "param": "codeROME", "code": "M1805"},

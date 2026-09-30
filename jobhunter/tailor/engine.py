@@ -153,10 +153,9 @@ AVAILABILITY = "available immediately"
 
 
 def _tagline(role_category: str = "") -> str:
-    # Deliberately generic, no per-job "targeting <role> at <company>" clause.
-    # Two fixed variants only (by role_category), not per-job customized -- see
-    # templates/cv_tailoring_workflow.md. The default variant is identical to
-    # templates/cv_base.tex's own heading line.
+    # Deliberately generic (no per-job targeting clause), two fixed variants
+    # only by role_category -- see templates/cv_tailoring_workflow.md. Default
+    # variant matches templates/cv_base.tex's own heading line.
     if role_category == "PM":
         return (
             f"{{Seeking an AI Product Manager role (CDI/CDD), "
@@ -263,10 +262,9 @@ def compile_tex(tex: str, out_dir: Path, name: str = "cv",
         return pdf_path
 
 
-# Same environment quirk as latexmk (CLAUDE.md): poppler's CLI tools aren't
-# reliably on PATH either, but a working `pdftotext` ships with the dalas conda
-# env used for rendering. Best-effort only -- the fill-ratio check below just
-# no-ops if it can't be found, it never blocks tailoring on its own.
+# Same environment quirk as latexmk (CLAUDE.md) -- poppler's CLI tools aren't
+# reliably on PATH either, but pdftotext ships with the dalas conda env used
+# for rendering. Best-effort: the fill-ratio check below just no-ops if not found.
 _PDFTOTEXT_CANDIDATES = ["/Users/tuboshu/opt/anaconda3/envs/dalas/bin/pdftotext"]
 _PDFTOTEXT_ENV_EXTRA = {"DYLD_LIBRARY_PATH": "/Users/tuboshu/opt/anaconda3/envs/dalas/lib"}
 

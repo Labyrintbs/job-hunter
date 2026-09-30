@@ -37,10 +37,9 @@ def _posted_at(created_at) -> str:
 
 
 def _to_job(item: dict) -> Job:
-    # The API's `remote=true` query param does NOT filter (verified live: identical
-    # results with or without it) -- never pass it. Each record's own `remote`
-    # boolean is trustworthy though (employer-declared, like wttj's remote:fulltime
-    # facet), so location is tagged from that field instead.
+    # `remote=true` query param doesn't filter (verified live) -- use each
+    # record's own `remote` boolean instead (employer-declared, like wttj's
+    # remote:fulltime facet) to tag location.
     location = (item.get("location") or "").strip()
     if item.get("remote") and "remote" not in location.lower():
         location = f"{location} - Remote" if location else "Remote"

@@ -372,10 +372,9 @@ def _backfill_job_events(conn: sqlite3.Connection) -> None:
 
 
 def init_db(db_path: Path | None = None) -> None:
-    # executescript() auto-commits per statement rather than as one transaction,
-    # so two concurrent init_db() calls (every CLI invocation runs this on
-    # startup) can interleave DROP/CREATE VIEW pairs and crash -- a cross-process
-    # lock serializes schema init instead.
+    # executescript() auto-commits per statement, not as one transaction -- two
+    # concurrent init_db() calls (every CLI invocation runs this) can interleave
+    # DROP/CREATE VIEW pairs and crash, so a cross-process lock serializes this instead.
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     lock_path = DATA_DIR / ".init_db.lock"
     with open(lock_path, "w") as lock_file:

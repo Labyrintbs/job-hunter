@@ -187,6 +187,8 @@ def score(job: Job, config: dict) -> tuple[int, list[str]]:
     weights_cfg = config.get("category_weights") or {}
     default_w = config.get("default_category_weight") or {"title": 15, "body": 8}
     best_pts, best_reason = 0, None
+    # Keep only the single highest-scoring match across every category found --
+    # not their sum -- so a job matching two categories doesn't get double credit.
     for cat, where in _category_matches(job.title.lower(), text, identity_cats).items():
         w = weights_cfg.get(cat, default_w)
         achieved = w["title"] if where == "title" else w["body"]
@@ -234,10 +236,10 @@ _SPECIFIC_ROLE_CATEGORIES = ["NLP", "CV", "AI", "PM"]   # checked before the ML/
 
 def _category_matches(title: str, full_text: str, cats: dict) -> dict[str, str]:
     """category -> "title" | "body" for every category (from the given subset of
-    role_categories) with a hit, title checked first. Shared by classify_role()
-    (single best-match label) and score() (credits every match it finds, since a
-    job can genuinely straddle two categories) -- one matching computation, two
-    different uses of the result."""
+    role_categories) with a hit, title checked first. E.g. title="Computer Vision
+    Engineer" with full_text also mentioning "sentiment analysis" ->
+    {"CV": "title", "NLP": "body"}. Shared by classify_role() (picks one) and
+    score() (credits every match, since a job can straddle two categories)."""
     out: dict[str, str] = {}
     for cat, terms in cats.items():
         terms_l = [t.lower() for t in terms]
@@ -352,9 +354,3 @@ def screen(job: Job, config: dict) -> Screening:
         matched_rules=matched,
         role_category=role_category,
     )
-
-
-def evaluate(job: Job, config: dict) -> tuple[int, str, bool]:
-    """Back-compat shim: (score, reasons, keep-and-not-filtered)."""
-    s = screen(job, config)
-    return s.score, (s.filter_reason if not s.keep else s.reasons), s.keep and not s.filtered

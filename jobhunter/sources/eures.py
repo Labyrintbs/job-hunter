@@ -27,13 +27,9 @@ DETAIL_URL = "https://europa.eu/eures/portal/jv-se/jv-details/{id}?lang=fr"
 THROTTLE_SECONDS = 0.3
 PAGE_SIZE = 50   # the API rejects resultsPerPage > 50 (HTTP 400)
 
-# Eurostat NUTS3 codes for the 8 Île-de-France departments, plus this project's
-# curated major French tech hubs (config/search.yaml's major_cities) -- match.
-# geo_tier() only recognizes these via place names, not NUTS codes, so map known
-# codes to the name it actually looks for. City codes verified live against
-# EURES's own search results (the NUTS3 code shared by postings titled after
-# that city). Any other code (most of France) falls back to plain "France" --
-# a department can contain several cities, so an unmapped code isn't guessed at.
+# Eurostat NUTS3 codes -> place names match.geo_tier() actually recognizes (IDF
+# departments + this project's curated major-city hubs, search.yaml's
+# major_cities) -- verified live against EURES's own search results.
 _KNOWN_NUTS = {
     "FR101": "Paris, Île-de-France",
     "FR102": "Île-de-France",
@@ -62,7 +58,7 @@ def _location(location_map: dict) -> str:
         return "France"
     parts: list[str] = []
     for code in codes:
-        name = _KNOWN_NUTS.get(code, "France")
+        name = _KNOWN_NUTS.get(code, "France")  # unmapped code -> plain France, not guessed further
         if name not in parts:
             parts.append(name)
     return "; ".join(parts)
