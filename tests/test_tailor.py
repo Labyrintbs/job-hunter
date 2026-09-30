@@ -31,11 +31,12 @@ def test_parse_blocks():
     parsed = snippet_bank.parse(BASE_CV)
     # Data Joker is commented out of cv_base.tex (retired, see
     # cv_tailoring_workflow.md) and must not be resurrected by the parser.
-    assert len(parsed.projects) == 5
+    assert len(parsed.projects) == 6
     assert len(parsed.experiences) == 3
     assert len(parsed.skills) == 6
     assert parsed.heading_line
     assert all("Data Joker" not in p.text for p in parsed.projects)
+    assert any("Job Hunter" in p.text and len(p.bullets()) == 4 for p in parsed.projects)
 
 
 def test_terms_boundary_no_false_positive():

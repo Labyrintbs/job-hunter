@@ -21,10 +21,10 @@
 \usepackage{ragged2e}
 \usepackage{needspace}
 \usepackage[
-  top=0.6in,
-  bottom=0.55in,
-  left=0.6in,
-  right=0.6in
+  top=0.3in,
+  bottom=0.5in,
+  left=0.55in,
+  right=0.55in
 ]{geometry}
 
 \setlength{\multicolsep}{-3.0pt}
@@ -107,7 +107,7 @@
 \newcommand{\resumeItemListEnd}{\end{itemize}\vspace{-5pt}}
 
 \newcommand{\projectdesc}[1]{%
-  {\fontsize{11pt}{12pt}\selectfont #1}%
+  {\fontsize{11pt}{12pt}\selectfont #1}\vspace{-6pt}%
 }
 
 %-------------------------------------------
@@ -119,9 +119,9 @@
 %----------HEADING----------
 \vspace*{-0.15in}
 \begin{center}
-    {\Huge \scshape Hongming Fang} \\[2pt]
+    {\LARGE \scshape Hongming Fang} \\[2pt]
     \small Paris, France $|$ (+33) 07 75 77 55 06 $|$
-    \href{mailto:hongming.marius.fang@gmail.com}{hongming.marius.fang@gmail.com} \\[2pt]
+    \href{mailto:hongming.marius.fang@gmail.com}{hongming.marius.fang@gmail.com} $|$
     \href{https://linkedin.com/in/hongming-fang}{\raisebox{-0.2\height}\faLinkedin\ linkedin.com/in/hongming-fang} \\
     {Seeking a Machine Learning role (CDI/CDD), available immediately — Île-de-France, open to mobility}
     \vspace{-5pt}
@@ -190,6 +190,18 @@
     \resumeSubHeadingListStart
 
     \resumeProjectHeadingFourItemResearch
+    {\textbf{Job Hunter: LLM-Driven Job Search and CV Tailoring System}}{08/2026 -- 09/2026}
+    {Personal Project}{Paris, France}
+
+    \projectdesc{System that collects job postings across France and the EU, scores their fit to a candidate profile with an LLM, and tailors a CV to each posting.}
+    \resumeItemListStart
+      \resumeItem{Built an ingestion layer over 17 sources (about 120 company career boards on ATS platforms, job boards, LinkedIn, France Travail API) that indexed 3,000+ postings, with failures isolated per source and cross-source deduplication combining exact matching and an LLM check.}
+      \resumeItem{Implemented a bilingual (FR/EN) rule-based scorer weighting role category, geography and seniority to screen out mismatches before the LLM judge.}
+      \resumeItem{Added an LLM-as-a-judge that scores each enriched posting against the candidate profile. Its verdict hides weak postings and triggers automatic CV tailoring for the rest, where the LLM only selects from existing CV entries and bullets, so it cannot invent content. So far it has judged 1,000+ postings and produced 200 tailored CVs.}
+      \resumeItem{Automated the pipeline with scheduled jobs (daily fetch, hourly backlog processing, weekly backfill) and a watchdog for missed runs, with a FastAPI dashboard and a Streamlit history board on SQLite to track every application and measure the search funnel.}
+    \resumeItemListEnd
+
+    \resumeProjectHeadingFourItemResearch
     {\textbf{Image and Point Cloud Analysis for Art History}}{11/2025 -- 02/2026}{Sorbonne University, PRAT Project}{Paris, France}
 
     \projectdesc{Comparative study of geometric (FPFH) and learning-based (SpinNet) descriptors for cross-modal 3D point cloud registration, aligning photogrammetry and laser scans of a 12-meter Japanese wooden dragon relief from the Cernuschi Museum.}
@@ -251,8 +263,8 @@
 \section{SKILLS}
  \begin{itemize}[leftmargin=0.2in, label={}]
     \small{\item{
-    \textbf{Technical Skills:} Python, C/C++; PyTorch, NumPy, pandas, scikit-learn, OpenCV, Open3D; Linux, Git, GitLab CI/CD, Docker\\
-    \textbf{Generative AI \& Agentic Systems:} Prompt engineering, RAG, LoRA SFT \& GRPO fine-tuning with custom reward design, LangGraph agentic pipelines (tool orchestration, iterative refinement), model selection under cost/performance constraints, vLLM\\
+    \textbf{Technical Skills:} Python, C/C++; PyTorch, NumPy, pandas, scikit-learn, OpenCV, Open3D; FastAPI, SQLite, Pydantic, REST APIs, pytest; Linux, Git, GitLab CI/CD, Docker\\
+    \textbf{Generative AI \& Agentic Systems:} Prompt engineering, RAG, LoRA SFT \& GRPO fine-tuning with custom reward design, LangGraph agentic pipelines (tool orchestration, iterative refinement), structured LLM output, model selection under cost/performance constraints, vLLM\\
     \textbf{LLM Evaluation \& Monitoring:} LLM-as-a-judge evaluation frameworks, failure taxonomy design, hallucination and generalization diagnosis, inference cost/latency optimization, continuous evaluation pipelines\\
     \textbf{Deep Learning:} CNNs, Transformers, self-supervised representation learning, transfer learning, distributed training (DDP), training pipeline design, experiment reproducibility\\
     \textbf{Computer Vision \& Medical Imaging:} Image processing, segmentation, 2D/3D point cloud registration, classification, CT/CTA segmentation, clinical annotation workflows, class imbalance handling, filtering, FFT\\

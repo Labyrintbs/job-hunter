@@ -104,7 +104,7 @@ Work from the master version I attach. The master is deliberately over-long; tai
 - Compile and render using the invocations in Step 0.5 (bare `pdflatex`/`pdftoppm` won't be found on PATH), and actually look at the rendered pages before showing me the result. Report the page count.
 - If a section heading lands at the bottom of a page with its content pushed to the next, add `\needspace{N\baselineskip}` before it.
 - If a page ends with a large gap, the fix is adjusting content volume (add a project back, trim a bullet, tighten a Skills line), not fighting LaTeX.
-- Don't change the preamble, custom commands, geometry, or fonts.
+- Don't change the preamble, custom commands, geometry, or fonts while tailoring a single CV. Layout changes (margins, header size, spacing) are made once in `templates/cv_base.tex` and checked against a sample of real jobs.
 
 ## Step 4: Writing conventions
 
