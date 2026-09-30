@@ -2,11 +2,10 @@
 
 Triggered once per newly-seen company, only when the LLM judge rates one of
 their postings good/strong (see pipeline.judge_one) -- worth the probe cost
-only once there's real signal this company is worth pursuing. A guessed slug
-can coincidentally collide with an unrelated company's real board on some
-ATS, so a hit is NEVER trusted automatically: it's staged as a target_companies
-last_result for manual confirmation before anyone adds it to
-config/companies.yaml, exactly like any other hand-researched company.
+only once there's real signal this company is worth pursuing. A hit is added
+to config/companies.yaml automatically (see pipeline._maybe_discover_ats); a
+guessed slug can collide with an unrelated company's real board, so check
+git history for that file if a company's postings look wrong.
 
 Same URLs/response shapes as sources/ats.py's real fetchers, deliberately --
 if the probe says yes, fetch_all must actually agree once the company is
@@ -17,6 +16,7 @@ from __future__ import annotations
 import re
 import time
 import unicodedata
+from typing import NamedTuple
 from xml.etree import ElementTree
 
 import httpx
@@ -93,14 +93,26 @@ def _postings_location(ats_type: str, posting) -> str:
     return (posting.get("location") or {}).get("name", "")  # greenhouse
 
 
-def probe(company: str, client: httpx.Client | None = None) -> str | None:
+class Hit(NamedTuple):
+    ats: str
+    token: str
+    postings: int
+
+
+class ProbeIncomplete(RuntimeError):
+    """No board found, but some requests failed transiently -- "no match" isn't a
+    safe conclusion, so the caller should retry later instead of recording a miss."""
+
+
+def probe(company: str, client: httpx.Client | None = None) -> Hit | None:
     """Try plausible slug variants against each supported ATS's public board
-    endpoint. Returns a human-readable, unconfirmed hit description (for
-    db.mark_company_checked) on the first board found with at least one
-    France-located posting, or None. One caller-visible network call per
-    (slug, ats) combo tried -- call this once per company, not per job."""
+    endpoint. Returns the first board found with at least one France-located
+    posting, or None. Raises ProbeIncomplete if nothing was found and any request
+    failed transiently (network error, 429, 5xx). One network call per (slug,
+    ats) combo tried -- call this once per company, not per job."""
     own = client is None
     client = client or httpx.Client(timeout=10, headers=_UA)
+    transient_failures = 0
     try:
         for token in _slugs(company):
             for ats_type, template, fmt, extract in _CHECKS:
@@ -109,8 +121,14 @@ def probe(company: str, client: httpx.Client | None = None) -> str | None:
                 except httpx.HTTPError as exc:
                     fetch_diag.track("ats_discovery", "probe_error", detail=f"{ats_type}/{token}: {exc}",
                                       company=company)
+                    transient_failures += 1
                     continue
                 time.sleep(THROTTLE_SECONDS)
+                if resp.status_code == 429 or resp.status_code >= 500:
+                    fetch_diag.track("ats_discovery", "probe_error",
+                                      detail=f"{ats_type}/{token}: HTTP {resp.status_code}", company=company)
+                    transient_failures += 1
+                    continue
                 if resp.status_code != 200:
                     continue
                 try:
@@ -124,9 +142,9 @@ def probe(company: str, client: httpx.Client | None = None) -> str | None:
                     continue
                 if not any(_is_france(_postings_location(ats_type, p)) for p in postings):
                     continue
-                return (f"possible {ats_type} board: token={token}, "
-                        f"{len(postings)} postings -- unconfirmed, verify before adding "
-                        f"to companies.yaml")
+                return Hit(ats_type, token, len(postings))
+        if transient_failures:
+            raise ProbeIncomplete(f"{transient_failures} probe request(s) failed transiently")
         return None
     finally:
         if own:

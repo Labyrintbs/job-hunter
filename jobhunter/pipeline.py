@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 from . import db, enrich, fetch_diag, jd_store, match
 from .apply import cover_letter
-from .config import DATA_DIR, load_companies, load_search_config
+from .config import DATA_DIR, add_company, load_companies, load_search_config
 from .llm import dedup as llm_dedup
 from .llm import judge as llm_judge
 from .llm import provider
@@ -842,28 +842,38 @@ def enrich_new(job_ids: list[int]) -> dict:
 _MIN_DESCRIPTION_CHARS = 100
 
 
+_PROBE_RETRY_RESULT = "probe failed -- will retry"
+
+
 def _maybe_discover_ats(conn, company: str) -> None:
     """Once a company has a good/strong verdict, see if it already runs a public
     ATS board we could fetch from directly instead of relying on LinkedIn/HelloWork
-    scraping. Only probes a company once (skips if already in companies.yaml or
-    already on the target_companies checklist) -- a hit is staged as an unconfirmed
-    target_companies result, never written straight to companies.yaml, since a
-    guessed slug can coincidentally collide with an unrelated company's real
-    board (see ats_discovery.probe's docstring)."""
+    scraping. A hit is added to companies.yaml (and recorded on its target_companies
+    row); a definite miss is probed only once, but a failed probe is retried on the
+    company's next good verdict. Probe errors go to fetch_diag."""
     known = {c["name"].strip().lower() for c in load_companies()}
     if company.strip().lower() in known:
         return
-    if not db.add_target_company(conn, company):
-        return  # already on the checklist -- don't re-probe every good verdict
+    added = db.add_target_company(conn, company)
     row = conn.execute(
-        "SELECT id FROM target_companies WHERE LOWER(name) = LOWER(?)", (company,)
+        "SELECT id, last_result FROM target_companies WHERE LOWER(name) = LOWER(?)", (company,)
     ).fetchone()
-    try:
-        hit = ats_discovery.probe(company)
-    except Exception as exc:
-        hit = None
-        print(f"  ats_discovery warn: {company}: {exc}")
-    db.mark_company_checked(conn, row["id"], hit or "no ATS match found (auto-probed)")
+    if not added and row["last_result"] != _PROBE_RETRY_RESULT:
+        return  # already probed or on the manual checklist -- don't re-probe every good verdict
+    with fetch_diag.run_tracking() as tracker:
+        try:
+            hit = ats_discovery.probe(company)
+            if hit:
+                add_company(company, hit.ats, hit.token)
+                result = (f"auto-added to companies.yaml: {hit.ats} board, token={hit.token}, "
+                          f"{hit.postings} postings")
+            else:
+                result = "no ATS match found (auto-probed)"
+        except Exception as exc:
+            fetch_diag.track("ats_discovery", "probe_failed", detail=str(exc)[:200], company=company)
+            result = _PROBE_RETRY_RESULT
+    db.mark_company_checked(conn, row["id"], result)
+    tracker.flush(conn)
 
 
 def _record_failure(source: str, reason: str, detail: str, company: str = "") -> None:

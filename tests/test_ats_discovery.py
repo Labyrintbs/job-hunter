@@ -1,3 +1,7 @@
+import httpx
+import pytest
+
+from jobhunter import fetch_diag
 from jobhunter.sources import ats_discovery
 
 
@@ -44,8 +48,7 @@ def test_probe_finds_greenhouse_board_with_france_posting():
 
     hit = ats_discovery.probe("Acme Corp", client=client)
 
-    assert hit is not None
-    assert "greenhouse" in hit and "acme-corp" in hit
+    assert hit == ats_discovery.Hit("greenhouse", "acme-corp", 1)
 
 
 def test_probe_skips_board_with_no_france_postings():
@@ -63,7 +66,7 @@ def test_probe_tries_lever_raw_list_response_shape():
 
     hit = ats_discovery.probe("Acme Corp", client=client)
 
-    assert hit is not None and "lever" in hit
+    assert hit is not None and hit.ats == "lever"
 
 
 def test_probe_returns_none_when_nothing_matches():
@@ -82,7 +85,7 @@ def test_probe_tries_multiple_slug_variants_before_giving_up():
 
     hit = ats_discovery.probe("Acme Corp", client=client)
 
-    assert hit is not None and "acmecorp" in hit
+    assert hit is not None and hit.token == "acmecorp"
 
 
 def test_probe_finds_teamtailor_board_with_france_posting():
@@ -93,7 +96,7 @@ def test_probe_finds_teamtailor_board_with_france_posting():
 
     hit = ats_discovery.probe("Acme Corp", client=client)
 
-    assert hit is not None and "teamtailor" in hit
+    assert hit is not None and hit.ats == "teamtailor"
 
 
 def test_probe_finds_personio_xml_board_with_france_posting():
@@ -103,7 +106,7 @@ def test_probe_finds_personio_xml_board_with_france_posting():
 
     hit = ats_discovery.probe("Acme Corp", client=client)
 
-    assert hit is not None and "personio" in hit
+    assert hit is not None and hit.ats == "personio"
 
 
 def test_probe_skips_personio_board_with_malformed_xml():
@@ -113,3 +116,42 @@ def test_probe_skips_personio_board_with_malformed_xml():
     hit = ats_discovery.probe("Acme Corp", client=client)
 
     assert hit is None
+
+
+class RaisingClient:
+    def get(self, url):
+        raise httpx.ConnectError("boom")
+
+
+@pytest.mark.parametrize("status", [429, 500, 503])
+def test_probe_raises_incomplete_when_a_board_check_fails_transiently(status):
+    # A rate-limited/erroring board isn't evidence of "no board" -- the caller must
+    # retry later rather than record a permanent miss.
+    url = "https://boards-api.greenhouse.io/v1/boards/acme-corp/jobs?content=true"
+    client = Client({url: Resp(status)})   # everything else 404s
+
+    with pytest.raises(ats_discovery.ProbeIncomplete):
+        ats_discovery.probe("Acme Corp", client=client)
+
+
+def test_probe_raises_incomplete_on_network_errors_and_tracks_them():
+    with fetch_diag.run_tracking() as t:
+        with pytest.raises(ats_discovery.ProbeIncomplete):
+            ats_discovery.probe("Acme Corp", client=RaisingClient())
+    assert t.counts[("ats_discovery", "Acme Corp", "probe_error")] > 0
+
+
+def test_probe_plain_404s_are_a_definite_miss_not_incomplete():
+    assert ats_discovery.probe("Acme Corp", client=Client({})) is None
+
+
+def test_probe_returns_a_hit_even_if_an_earlier_check_failed_transiently():
+    url = "https://api.lever.co/v0/postings/acme-corp?mode=json"
+    client = Client({
+        "https://boards-api.greenhouse.io/v1/boards/acme-corp/jobs?content=true": Resp(503),
+        url: Resp(200, [{"categories": {"location": "Lyon, France"}}]),
+    })
+
+    hit = ats_discovery.probe("Acme Corp", client=client)
+
+    assert hit is not None and hit.ats == "lever"

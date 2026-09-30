@@ -707,16 +707,19 @@ def test_judge_one_probes_ats_for_new_company_on_good_verdict(tmp_db, config, mo
         jid = _insert(conn, config, company="Brand New Startup", description=_REAL_JD)
     monkeypatch.setattr(pipeline.llm_judge, "judge", _fake_verdict("good"))
     monkeypatch.setattr(pipeline, "load_companies", lambda: [])   # not in companies.yaml
-    probed = []
+    probed, added = [], []
     monkeypatch.setattr(pipeline.ats_discovery, "probe", lambda company, **kw:
-                        probed.append(company) or "possible greenhouse board: token=x, 3 postings")
+                        probed.append(company) or pipeline.ats_discovery.Hit("greenhouse", "x", 3))
+    monkeypatch.setattr(pipeline, "add_company", lambda *a: added.append(a))
 
     pipeline.judge_one(jid)
 
     assert probed == ["Brand New Startup"]
+    assert added == [("Brand New Startup", "greenhouse", "x")]   # promoted without manual confirmation
     with db.connect() as conn:
         companies = {c["name"]: c["last_result"] for c in db.list_target_companies(conn)}
-    assert companies["Brand New Startup"] == "possible greenhouse board: token=x, 3 postings"
+    assert companies["Brand New Startup"] == \
+        "auto-added to companies.yaml: greenhouse board, token=x, 3 postings"
 
 
 def test_judge_one_does_not_probe_ats_on_weak_or_stretch_verdict(tmp_db, config, monkeypatch):
@@ -768,6 +771,60 @@ def test_judge_one_only_probes_a_company_once(tmp_db, config, monkeypatch):
     pipeline.judge_one(jid2)
 
     assert probed == ["Repeat Co"]   # second good verdict for the same company: no re-probe
+
+
+def test_failed_probe_is_tracked_and_retried_on_the_next_good_verdict(tmp_db, config, monkeypatch):
+    monkeypatch.setattr(pipeline, "load_companies", lambda: [])
+    monkeypatch.setattr(pipeline.llm_judge, "judge", _fake_verdict("good"))
+    outcomes = [pipeline.ats_discovery.ProbeIncomplete("3 probe request(s) failed transiently"), None]
+    probed = []
+
+    def flaky_probe(company, **kw):
+        probed.append(company)
+        outcome = outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(pipeline.ats_discovery, "probe", flaky_probe)
+
+    with db.connect() as conn:
+        jid1 = _insert(conn, config, company="Flaky Co", external_id="f1", description=_REAL_JD)
+    pipeline.judge_one(jid1)
+
+    with db.connect() as conn:
+        result = {c["name"]: c["last_result"] for c in db.list_target_companies(conn)}
+        assert result["Flaky Co"] == pipeline._PROBE_RETRY_RESULT      # not recorded as a miss
+    assert ("probe_failed", "Flaky Co") in _drop_reasons()
+
+    with db.connect() as conn:
+        jid2 = _insert(conn, config, company="Flaky Co", external_id="f2", description=_REAL_JD)
+    pipeline.judge_one(jid2)
+    assert probed == ["Flaky Co", "Flaky Co"]                          # retried
+    with db.connect() as conn:
+        result = {c["name"]: c["last_result"] for c in db.list_target_companies(conn)}
+    assert result["Flaky Co"] == "no ATS match found (auto-probed)"
+
+    with db.connect() as conn:
+        jid3 = _insert(conn, config, company="Flaky Co", external_id="f3", description=_REAL_JD)
+    pipeline.judge_one(jid3)
+    assert probed == ["Flaky Co", "Flaky Co"]                          # definite miss: stops for good
+
+
+def test_judge_one_does_not_probe_a_company_already_on_the_manual_checklist(tmp_db, config, monkeypatch):
+    monkeypatch.setattr(pipeline, "load_companies", lambda: [])
+    monkeypatch.setattr(pipeline.llm_judge, "judge", _fake_verdict("good"))
+    probed = []
+    monkeypatch.setattr(pipeline.ats_discovery, "probe", lambda company, **kw: probed.append(company))
+    with db.connect() as conn:
+        db.add_target_company(conn, "Manual Co")
+        row = conn.execute("SELECT id FROM target_companies WHERE name = 'Manual Co'").fetchone()
+        db.mark_company_checked(conn, row["id"], "careers page is a custom site, no ATS")
+        jid = _insert(conn, config, company="Manual Co", description=_REAL_JD)
+
+    pipeline.judge_one(jid)
+
+    assert probed == []
 
 
 def test_rejudge_juniors_unfilters_junior_rule_filtered_job(tmp_db, config, monkeypatch):
