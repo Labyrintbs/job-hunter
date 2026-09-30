@@ -65,3 +65,32 @@ def test_judge_passes_up_to_16000_chars_of_description(monkeypatch):
     J.judge(job)
     assert "WITHIN_CUTOFF" in captured["prompt"]
     assert "PAST_CUTOFF" not in captured["prompt"]   # still bounded at 16000, not unlimited
+
+
+def _capture_prompt(monkeypatch, standing):
+    captured = {}
+    monkeypatch.setattr(J, "load_standing_preferences", lambda: standing)
+    monkeypatch.setattr(J.provider, "generate_json",
+                        lambda prompt, system=None, **kw: captured.update(prompt=prompt)
+                        or {"score": 50, "verdict": "stretch", "reasons": ""})
+    J.judge(Job(source="wttj", external_id="1", title="ML Engineer", company="C", description="d"),
+            preferences="- Avoid blockchain")
+    return captured["prompt"]
+
+
+def test_judge_puts_standing_preferences_right_after_learned_ones(monkeypatch):
+    prompt = _capture_prompt(monkeypatch, ["Prefer CV roles", "Accept PM roles"])
+    learned, standing, posting = (prompt.index(m) for m in
+                                  ("LEARNED PREFERENCES", "STANDING PREFERENCES", "JOB POSTING:"))
+    assert learned < standing < posting
+    assert "- Prefer CV roles\n- Accept PM roles" in prompt
+
+
+def test_judge_omits_standing_block_when_none_configured(monkeypatch):
+    assert "STANDING PREFERENCES" not in _capture_prompt(monkeypatch, [])
+
+
+def test_shipped_standing_preferences_cover_cv_and_pm():
+    from jobhunter.config import load_standing_preferences
+    text = " ".join(load_standing_preferences()).lower()
+    assert "computer vision" in text and "product manager" in text

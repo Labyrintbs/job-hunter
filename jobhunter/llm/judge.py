@@ -1,6 +1,7 @@
 """LLM fit-judge: score a job against the candidate profile, junior-calibrated."""
 from __future__ import annotations
 
+from ..config import load_standing_preferences
 from ..models import Job
 from . import provider
 from .profile import condensed_profile_text
@@ -78,7 +79,7 @@ SYSTEM = (
 
 PROMPT = """CANDIDATE PROFILE:
 {profile}
-{preferences}
+{preferences}{standing}
 JOB POSTING:
 Title: {title}
 Company: {company}
@@ -119,9 +120,15 @@ def judge(job: Job, preferences: str = "") -> dict:
     if preferences:
         pref_block = ("\nLEARNED PREFERENCES (from the candidate's own accept/reject history — "
                       "weigh these):\n" + preferences.strip() + "\n")
+    standing_block = ""
+    if standing := load_standing_preferences():
+        standing_block = ("\nSTANDING PREFERENCES (set directly by the candidate, not learned "
+                          "from feedback — weigh these):\n"
+                          + "\n".join(f"- {p}" for p in standing) + "\n")
     prompt = PROMPT.format(
         profile=condensed_profile_text()[:6000],
         preferences=pref_block,
+        standing=standing_block,
         title=job.title,
         company=job.company,
         location=job.location,

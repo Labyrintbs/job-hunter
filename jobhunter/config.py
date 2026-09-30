@@ -10,6 +10,7 @@ DB_PATH = DATA_DIR / "jobhunter.db"
 CONFIG_PATH = REPO_ROOT / "config" / "search.yaml"
 SCORING_PATH = REPO_ROOT / "config" / "scoring.yaml"
 COMPANIES_PATH = REPO_ROOT / "config" / "companies.yaml"
+JUDGE_PREFERENCES_PATH = REPO_ROOT / "config" / "judge_preferences.yaml"
 
 
 def load_search_config(path: Path | None = None) -> dict:
@@ -31,3 +32,11 @@ def load_companies(path: Path | None = None) -> list[dict]:
         return []
     with open(path, "r", encoding="utf-8") as f:
         return (yaml.safe_load(f) or {}).get("companies", [])
+
+
+def load_standing_preferences(path: Path | None = None) -> list[str]:
+    path = path or JUDGE_PREFERENCES_PATH
+    if not path.exists():
+        return []
+    with open(path, "r", encoding="utf-8") as f:
+        return (yaml.safe_load(f) or {}).get("standing_preferences") or []

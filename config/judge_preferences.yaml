@@ -1,0 +1,6 @@
+# Hand-written preferences appended to the judge prompt right after the learned
+# ones (see jobhunter/llm/judge.py). Unlike the learned profile, condense_profile
+# never rewrites these.
+standing_preferences:
+  - Prefer computer vision / medical imaging roles (segmentation, classification, 2D/3D point cloud analysis and registration on clinical CT/CTA) as a co-equal target with LLM/NLP; weigh them the same on technical fit.
+  - Accept AI / Technical Product Manager roles as a second target, judged on hands-on ML/AI depth and cross-functional experience rather than a prior PM title; avoid postings demanding years of formal product ownership, go-to-market/pricing ownership, or an MBA-style commercial background.
