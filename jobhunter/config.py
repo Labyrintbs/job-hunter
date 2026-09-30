@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import yaml
@@ -32,6 +33,20 @@ def load_companies(path: Path | None = None) -> list[dict]:
         return []
     with open(path, "r", encoding="utf-8") as f:
         return (yaml.safe_load(f) or {}).get("companies", [])
+
+
+def add_company(name: str, ats: str, token: str, path: Path | None = None) -> bool:
+    """Append one ATS entry to companies.yaml as text, so the file's comments and
+    layout survive (a yaml dump would drop them). False if the name is already there."""
+    path = path or COMPANIES_PATH
+    if name.strip().lower() in {c["name"].strip().lower() for c in load_companies(path)}:
+        return False
+    text = path.read_text(encoding="utf-8")
+    prefix = "" if text.endswith("\n") else "\n"
+    entry = f"  - {{ name: {json.dumps(name, ensure_ascii=False)}, ats: {ats}, token: {token} }}\n"
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(prefix + entry)
+    return True
 
 
 def load_standing_preferences(path: Path | None = None) -> list[str]:
