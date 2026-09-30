@@ -27,16 +27,18 @@ def test_judge_without_preferences_has_no_pref_block(monkeypatch):
     assert "LEARNED PREFERENCES" not in captured["prompt"]
 
 
-def test_judge_uses_condensed_profile_not_full(monkeypatch):
-    # The judge should get background/skills, not verbose project bullets.
+def test_judge_gets_the_full_cv_including_projects_and_skills(monkeypatch):
+    # Projects carry evidence the internships don't (e.g. point cloud / NeRF work), and
+    # SKILLS sits last -- a too-small cap on the CV text would silently cut it off.
+    from jobhunter.llm.profile import profile_text
     captured = {}
     monkeypatch.setattr(J.provider, "generate_json",
                         lambda prompt, system=None, **kw: captured.update(prompt=prompt)
                         or {"score": 50, "verdict": "stretch", "reasons": ""})
     job = Job(source="wttj", external_id="1", title="ML Engineer", company="C", description="d")
     J.judge(job)
-    assert "SKILLS" in captured["prompt"]
-    assert "Point Cloud" not in captured["prompt"]
+    assert "PROJECTS" in captured["prompt"] and "NeRF" in captured["prompt"]
+    assert profile_text()[-200:] in captured["prompt"]   # the CV's tail (SKILLS) is intact
 
 
 def test_judge_passes_the_result_schema_to_the_provider(monkeypatch):

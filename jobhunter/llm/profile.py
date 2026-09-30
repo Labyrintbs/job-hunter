@@ -35,11 +35,3 @@ def _document_body() -> str:
 def profile_text() -> str:
     return _clean_latex(_document_body())
 
-
-@lru_cache(maxsize=1)
-def condensed_profile_text() -> str:
-    """Like profile_text(), but drops the Projects & Research Experience section --
-    a job-fit judge needs background/skills/specialization, not verbose project
-    bullets, and dropping them keeps the prompt shorter and more focused."""
-    body = re.sub(r"\\section\{PROJECTS.*?(?=\\section\{)", "", _document_body(), flags=re.DOTALL)
-    return _clean_latex(body)

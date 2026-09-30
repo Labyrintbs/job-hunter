@@ -4,7 +4,7 @@ from __future__ import annotations
 from ..config import load_standing_preferences
 from ..models import Job
 from . import provider
-from .profile import condensed_profile_text
+from .profile import profile_text
 
 SYSTEM = (
     "You assess how well a specific candidate fits a job posting for their own job "
@@ -126,7 +126,7 @@ def judge(job: Job, preferences: str = "") -> dict:
                           "from feedback — weigh these):\n"
                           + "\n".join(f"- {p}" for p in standing) + "\n")
     prompt = PROMPT.format(
-        profile=condensed_profile_text()[:6000],
+        profile=profile_text()[:10000],   # full CV incl. projects; > its length so SKILLS isn't cut
         preferences=pref_block,
         standing=standing_block,
         title=job.title,
