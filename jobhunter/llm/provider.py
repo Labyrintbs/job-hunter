@@ -17,6 +17,7 @@ import subprocess
 from pathlib import Path
 
 DEFAULT_TIMEOUT = 180
+MODEL = os.environ.get("JOBHUNTER_MODEL", "claude-sonnet-5-5")
 
 # cron runs with a bare minimal PATH that won't include where `claude` actually lives
 # (e.g. ~/.local/bin), so PATH-only lookup silently disables the judge under cron.
@@ -90,7 +91,7 @@ def _generate_api(prompt: str, system: str | None, max_tokens: int) -> str:
 
     client = anthropic.Anthropic()
     msg = client.messages.create(
-        model=os.environ.get("JOBHUNTER_MODEL", "claude-sonnet-5"),
+        model=MODEL,
         max_tokens=max_tokens,
         system=system or "You are a concise, factual assistant.",
         messages=[{"role": "user", "content": prompt}],
@@ -100,7 +101,7 @@ def _generate_api(prompt: str, system: str | None, max_tokens: int) -> str:
 
 def _generate_cli(prompt: str, system: str | None, timeout: int,
                   json_schema: dict | None = None) -> str:
-    cmd = [_cli_path() or "claude", "-p", prompt]
+    cmd = [_cli_path() or "claude", "-p", prompt, "--model", MODEL]
     if system:
         cmd += ["--append-system-prompt", system]
     if json_schema:
@@ -110,7 +111,9 @@ def _generate_cli(prompt: str, system: str | None, timeout: int,
         cmd += ["--json-schema", json.dumps(json_schema)]
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=_cli_env())
     if proc.returncode != 0:
-        raise LLMUnavailable(f"claude CLI failed: {proc.stderr[:300]}")
+        # The CLI prints errors like usage limits / "Not logged in" to stdout, not stderr.
+        raise LLMUnavailable(f"claude CLI failed (rc={proc.returncode}): "
+                             f"{(proc.stderr or proc.stdout).strip()[:300]}")
     return proc.stdout.strip()
 
 
