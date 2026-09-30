@@ -1,6 +1,11 @@
+import json
+import subprocess
 from pathlib import Path
 
-from jobhunter import db, pipeline
+import pytest
+
+from jobhunter import db, fetch_diag, pipeline
+from jobhunter.llm import provider
 from jobhunter.models import Job
 from jobhunter.tailor import engine as cv_engine
 
@@ -1337,3 +1342,100 @@ def test_backfill_francetravail_force_bypasses_due_check(tmp_db, config, monkeyp
     result = pipeline.backfill_francetravail(force=True)
     assert called   # one call per configured francetravail query, at least one
     assert "skipped" not in result
+
+
+def test_enrich_one_failure_persists_the_fetch_diag_reason(tmp_db, config, monkeypatch):
+    with db.connect() as conn:
+        jid = _insert(conn, config, external_id="41", company="DiagCo", description="")
+
+    def failing_fetch(source, ext, url, client=None):
+        fetch_diag.track(source, "enrich_bad_response", detail="HTTP 403 http://x")
+        return None
+
+    monkeypatch.setattr(pipeline.enrich, "fetch_full_text", failing_fetch)
+    pipeline.enrich_one(jid)
+
+    with db.connect() as conn:
+        rows = db.recent_fetch_drops(conn, hours=1)
+    assert [(r["source"], r["reason"], r["count"]) for r in rows] == [("linkedin", "enrich_bad_response", 1)]
+    assert json.loads(rows[0]["samples"]) == ["HTTP 403 http://x"]
+
+
+def test_enrich_one_success_records_no_drops(tmp_db, config, monkeypatch):
+    with db.connect() as conn:
+        jid = _insert(conn, config, external_id="42", company="FineCo", description="")
+    monkeypatch.setattr(pipeline.enrich, "fetch_full_text", lambda *a, **k: _LONG_REAL_JD)
+    pipeline.enrich_one(jid)
+    with db.connect() as conn:
+        assert db.recent_fetch_drops(conn, hours=1) == []
+
+
+def _drop_reasons():
+    with db.connect() as conn:
+        return [(r["reason"], r["company"]) for r in db.recent_fetch_drops(conn, hours=1)]
+
+
+def test_judge_one_records_a_skip_for_short_descriptions(tmp_db, config):
+    with db.connect() as conn:
+        jid = _insert(conn, config, company="ShortCo", description="too short")
+    assert pipeline.judge_one(jid).get("skipped")
+    assert _drop_reasons() == [("judge_skipped_short", "ShortCo")]
+
+
+@pytest.mark.parametrize("exc,reason", [
+    (provider.LLMUnavailable("claude CLI failed (rc=1): usage limit"), "judge_llm_unavailable"),
+    (subprocess.TimeoutExpired("claude", 180), "judge_timeout"),
+    (json.JSONDecodeError("bad", "{", 0), "judge_bad_output"),
+    (ValueError("no JSON object in LLM output"), "judge_bad_output"),
+    (KeyError("x"), "judge_error"),
+])
+def test_judge_one_records_the_failure_reason_and_reraises(tmp_db, config, monkeypatch, exc, reason):
+    with db.connect() as conn:
+        jid = _insert(conn, config, company="FailCo", description=_REAL_JD)
+
+    def failing_judge(job, preferences=""):
+        raise exc
+
+    monkeypatch.setattr(pipeline.llm_judge, "judge", failing_judge)
+    with pytest.raises(type(exc)):
+        pipeline.judge_one(jid)
+
+    assert _drop_reasons() == [(reason, "FailCo")]
+    with db.connect() as conn:
+        assert db.get_job(conn, jid)["llm_score"] is None   # nothing stored: retried next run
+
+
+def test_judge_all_excludes_short_description_jobs_from_the_queue(tmp_db, config, monkeypatch):
+    """A short-description job must neither reach the LLM nor take a limit slot / log a
+    skip row every run -- it waits until enrichment gives it real text."""
+    with db.connect() as conn:
+        short = _insert(conn, config, external_id="s", company="ShortCo",
+                        description="machine learning deep learning nlp mlops pytorch")   # outscores below
+        judgeable = _insert(conn, config, external_id="ok", company="OkCo", description=_REAL_JD)
+    monkeypatch.setattr(pipeline.llm_judge, "judge", lambda job, preferences="":
+                        {"score": 70, "verdict": "good", "seniority": "junior",
+                         "min_years": 0, "reasons": "solid fit"})
+
+    stats = pipeline.judge_all(min_score=0, limit=1)
+
+    assert stats == {"candidates": 1, "judged": 1, "skipped_no_description": 0}
+    with db.connect() as conn:
+        assert db.get_job(conn, judgeable)["llm_score"] == 70
+        assert db.get_job(conn, short)["llm_score"] is None
+    assert _drop_reasons() == []
+
+
+def test_daily_run_does_not_judge_jobs_whose_enriched_text_is_still_short(tmp_db, config, monkeypatch):
+    fresh_job = Job(source="linkedin", external_id="98", title="Machine Learning Engineer",
+                    company="Acme", location="Paris, Ile-de-France, France", url="http://x/98")
+    monkeypatch.setattr(pipeline, "_gather", lambda cfg, force=False: [fresh_job])
+    monkeypatch.setattr(pipeline.enrich, "fetch_full_text", lambda *a, **k: "only a teaser")
+    monkeypatch.setattr(pipeline.provider, "available", lambda: True)
+    called = []
+    monkeypatch.setattr(pipeline.llm_judge, "judge", lambda job, preferences="": called.append(1))
+    monkeypatch.setattr(pipeline.notify_dispatch, "send", lambda rows, cfg: {"selected": 0, "results": {}})
+
+    summary = pipeline.daily_run(judge=True)
+
+    assert summary["judged"] == 0 and called == []
+    assert _drop_reasons() == []

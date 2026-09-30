@@ -1,4 +1,7 @@
-from jobhunter import enrich
+import httpx
+import pytest
+
+from jobhunter import enrich, fetch_diag
 
 
 class Resp:
@@ -175,3 +178,40 @@ def test_generic_enrichment_returns_none_when_page_is_mostly_scraped_chrome():
     )
     c = Client({"http://job": Resp(200, garbage_html)})
     assert enrich.fetch_full_text("hellowork", "abc", "http://job", client=c) is None
+
+
+class RaisingClient:
+    def get(self, url):
+        raise httpx.ConnectError("boom")
+
+
+_SCRAPED_CHROME = "".join(f"<span>{t}</span>" for t in ["analytics#push", "input-checker#uncheck",
+                                                           "toggle#expand", "toggle#collapse", "toggle#add",
+                                                           "analytics#push", 'data-action="x"', "toggle#remove"])
+
+
+@pytest.mark.parametrize("source,ext,url,client,reason", [
+    ("wttj", "1", "", Client({}), "enrich_no_url"),
+    ("wttj", "1", "http://x/1", Client({}), "enrich_bad_response"),   # 404
+    ("wttj", "1", "http://x/1", RaisingClient(), "enrich_network_error"),
+    ("wttj", "1", "http://x/1", Client({"http://x/1": Resp(200, "<script>x=1</script>")}), "enrich_empty_text"),
+    ("wttj", "1", "http://x/1", Client({"http://x/1": Resp(200, _SCRAPED_CHROME)}), "enrich_scraped_chrome"),
+    ("wttj", "1", "http://x/1", Client({"http://x/1": Resp(200, "<p>no longer available</p>")}), "enrich_delisted"),
+])
+def test_failed_fetch_records_its_reason_via_fetch_diag(source, ext, url, client, reason):
+    with fetch_diag.run_tracking() as t:
+        assert enrich.fetch_full_text(source, ext, url, client=client) is None
+    assert dict(t.counts) == {(source, "", reason): 1}
+
+
+def test_successful_fetch_records_nothing():
+    c = Client({"http://x/1": Resp(200, "<p>A real job description.</p>")})
+    with fetch_diag.run_tracking() as t:
+        assert enrich.fetch_full_text("wttj", "1", "http://x/1", client=c) is not None
+    assert dict(t.counts) == {}
+
+
+def test_linkedin_with_non_digit_id_falls_back_to_the_job_url():
+    c = Client({"http://x/li": Resp(200, "<p>Fallback page text.</p>")})
+    assert enrich.fetch_full_text("linkedin", "not-digits", "http://x/li", client=c) == "Fallback page text."
+    assert c.calls == ["http://x/li"]
