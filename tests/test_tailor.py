@@ -1,6 +1,8 @@
 from pathlib import Path
 
-from jobhunter import fetch_diag
+import pytest
+
+from jobhunter import db, fetch_diag
 from jobhunter.models import Job
 from jobhunter.tailor import engine, snippet_bank
 from jobhunter.tailor.engine import BASE_CV
@@ -405,9 +407,17 @@ def test_tailor_job_does_not_retry_when_first_attempt_is_already_healthy(tmp_pat
     assert len(calls) == 1
 
 
+def _llm_ok(monkeypatch):
+    """LLM block selection succeeds with a minimal valid pick, so no keyword fallback."""
+    monkeypatch.setattr(engine.provider, "available", lambda: True)
+    monkeypatch.setattr(engine.llm_select, "select", lambda job, e, p, s, feedback=None, judge_context=None: {
+        "experience_ids": [0], "experience_bullets": [[]], "project_ids": [0], "project_bullets": [[]],
+        "skill_categories": ["Technical Skills"], "reasoning": ""})
+
+
 def _tailor_with_tracking(tmp_path, monkeypatch, compile_fn, ratios=None, auto=True):
     monkeypatch.setattr(engine, "CV_OUT_DIR", tmp_path)
-    _no_llm(monkeypatch)
+    _llm_ok(monkeypatch)
     monkeypatch.setattr(engine, "compile_tex", compile_fn)
     if ratios is not None:
         it = iter(ratios)
@@ -497,6 +507,51 @@ def test_cv_compile_log_mirrors_a_failure_and_is_cleared_by_the_next_success(tmp
     engine.tailor_job(job, 1, auto=True)
 
     assert not (tmp_path / "1-acme" / "cv.compile.log").exists()   # no stale "needs a manual pass" evidence
+
+
+@pytest.mark.parametrize("setup,reason", [
+    ("unavailable", "tailor_llm_unavailable"),
+    ("raises", "tailor_llm_error"),
+    ("incomplete", "tailor_llm_unusable"),
+])
+def test_keyword_fallback_is_tracked_and_marked_on_the_cv(tmp_path, monkeypatch, setup, reason):
+    monkeypatch.setattr(engine, "CV_OUT_DIR", tmp_path)
+    monkeypatch.setattr(engine, "compile_tex", _writing_compile)
+    monkeypatch.setattr(engine, "_last_page_fill_ratio", lambda pdf, n: 0.9)
+    monkeypatch.setattr(engine.provider, "available", lambda: setup != "unavailable")
+    if setup == "raises":
+        def boom(*a, **k):
+            raise RuntimeError("usage limit reached")
+        monkeypatch.setattr(engine.llm_select, "select", boom)
+    elif setup == "incomplete":
+        monkeypatch.setattr(engine.llm_select, "select", lambda *a, **k: {
+            "experience_ids": [], "experience_bullets": [], "project_ids": [0],
+            "project_bullets": [[]], "skill_categories": [], "reasoning": ""})
+    job = Job(source="x", external_id="1", title="ML Engineer", company="Acme", description="machine learning")
+
+    with fetch_diag.run_tracking() as tracker:
+        result = engine.tailor_job(job, 1, auto=True)
+
+    assert result.fallback and result.note == db.CV_FALLBACK_NOTE
+    assert result.pdf_path is not None                       # still a usable CV
+    assert dict(tracker.counts) == {("tailor", "Acme", reason): 1}
+
+
+def test_fallback_marker_is_kept_alongside_a_compile_failure_note(tmp_path, monkeypatch):
+    monkeypatch.setattr(engine, "CV_OUT_DIR", tmp_path)
+    _no_llm(monkeypatch)
+    monkeypatch.setattr(engine, "compile_tex", _failing_compile("! boom\n"))
+    job = Job(source="x", external_id="1", title="ML Engineer", company="Acme", description="machine learning")
+
+    result = engine.tailor_job(job, 1, auto=True)
+
+    assert result.fallback and "LaTeX compile error" in result.note
+
+
+def test_llm_selection_success_is_not_marked_as_fallback(tmp_path, monkeypatch):
+    result, tracker = _tailor_with_tracking(
+        tmp_path, monkeypatch, _writing_compile, ratios=[0.9])
+    assert not result.fallback and dict(tracker.counts) == {}
 
 
 def test_tailor_job_has_no_note_when_the_retry_fixes_it(tmp_path, monkeypatch):

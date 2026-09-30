@@ -31,6 +31,10 @@ EVENT_TYPES = ("created", "status", "filtered", "label")
 # forever and starve newer jobs -- give up after this many attempts instead.
 MAX_ENRICH_ATTEMPTS = 3
 
+# Note stored on a CV built by the keyword fallback because LLM block selection failed;
+# such a CV counts as not-yet-tailored, so the backlog sweep re-tailors it later.
+CV_FALLBACK_NOTE = "keyword fallback (LLM selection failed)"
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS jobs (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -977,9 +981,23 @@ def list_cv_artifacts(conn: sqlite3.Connection, job_id: int) -> list[sqlite3.Row
     ).fetchall()
 
 
+_NEWEST_ARTIFACT_IS_FALLBACK = """(SELECT c.note FROM cv_artifacts c WHERE c.job_id = j.id
+        ORDER BY c.generated_at DESC, c.id DESC LIMIT 1) LIKE ? || '%'"""
+
+
+def needs_tailoring(conn: sqlite3.Connection, job_id: int) -> bool:
+    """No CV artifact yet, or the newest one is a keyword-fallback CV (see CV_FALLBACK_NOTE)."""
+    row = conn.execute(
+        "SELECT note FROM cv_artifacts WHERE job_id = ? ORDER BY generated_at DESC, id DESC LIMIT 1",
+        (job_id,),
+    ).fetchone()
+    return row is None or (row["note"] or "").startswith(CV_FALLBACK_NOTE)
+
+
 def jobs_ready_for_auto_tailor(conn: sqlite3.Connection, limit: int = 10) -> list[sqlite3.Row]:
     """Backlog-wide: jobs the LLM judge rated strong/good/stretch that don't
-    have a CV artifact yet. Unlike daily_run's inline auto-tailor gate (scoped
+    have a CV artifact yet (or whose newest one is a keyword-fallback CV, to be
+    upgraded once the LLM is back). Unlike daily_run's inline auto-tailor gate (scoped
     to that run's freshly-judged jobs only), this sweeps every qualifying job
     ever judged, so one that missed a prior cutoff isn't stuck forever.
     Excludes filtered (e.g. manually flagged as a cross-board duplicate) and
@@ -992,10 +1010,11 @@ def jobs_ready_for_auto_tailor(conn: sqlite3.Connection, limit: int = 10) -> lis
            WHERE llm_verdict IN ('strong', 'good', 'stretch')
              AND COALESCE(j.filtered, 0) = 0
              AND COALESCE(j.user_label, '') != 'dismissed'
-             AND NOT EXISTS (SELECT 1 FROM cv_artifacts c WHERE c.job_id = j.id)
+             AND (NOT EXISTS (SELECT 1 FROM cv_artifacts c WHERE c.job_id = j.id)
+                  OR """ + _NEWEST_ARTIFACT_IS_FALLBACK + """)
            ORDER BY llm_score DESC
            LIMIT ?""",
-        (limit,),
+        (CV_FALLBACK_NOTE, limit),
     ).fetchall()
 
 

@@ -12,6 +12,7 @@ from typing import NamedTuple
 
 from .. import fetch_diag
 from ..config import DATA_DIR, REPO_ROOT
+from ..db import CV_FALLBACK_NOTE
 from ..llm import provider
 from ..models import Job
 from . import select as llm_select
@@ -112,7 +113,7 @@ def _menu_pairs(blocks: list[Block]) -> list[tuple[str, list[str]]]:
 
 def _select_blocks(job: Job, parsed: ParsedCV, terms: set[str], feedback: str | None = None,
                     judge_context: str | None = None
-                    ) -> tuple[list[Block], list[Block], list[SkillCategory]]:
+                    ) -> tuple[list[Block], list[Block], list[SkillCategory], bool]:
     """Decide which experiences/projects/skill categories (and which bullets
     within them) to keep, mirroring templates/cv_tailoring_workflow.md (same
     rules used tailoring by hand): an LLM call chooses from the real, existing
@@ -123,7 +124,9 @@ def _select_blocks(job: Job, parsed: ParsedCV, terms: set[str], feedback: str | 
     a previous compile attempt that didn't fit the page -- see tailor_job's
     retry. `judge_context` (optional) is the fit-judge's own verdict/reasons
     for this posting, already computed and stored -- passed through as extra
-    background, not re-derived. Returns (projects, experiences, skills)."""
+    background, not re-derived. Returns (projects, experiences, skills, used_fallback);
+    each fallback is recorded via fetch_diag under a `tailor_llm_*` reason."""
+    reason, detail = "tailor_llm_unavailable", "no LLM backend"
     if provider.available():
         try:
             result = llm_select.select(
@@ -140,13 +143,15 @@ def _select_blocks(job: Job, parsed: ParsedCV, terms: set[str], feedback: str | 
                                          result.get("project_bullets"), MAX_PROJECTS)
             skills = _apply_names(parsed.skills, result.get("skill_categories"))
             if experiences and projects and skills:
-                return projects, experiences, skills
-        except Exception:
-            pass  # fall through to the deterministic path below
+                return projects, experiences, skills, False
+            reason, detail = "tailor_llm_unusable", "LLM selection was empty or incomplete"
+        except Exception as exc:
+            reason, detail = "tailor_llm_error", f"{type(exc).__name__}: {exc}"[:200]
 
+    fetch_diag.track("tailor", reason, detail=detail, company=job.company)
     return (_fallback_select(parsed.projects, terms, MAX_PROJECTS),
             _fallback_select(parsed.experiences, terms, MAX_EXPERIENCES),
-            _fallback_select_skills(parsed.skills, terms))
+            _fallback_select_skills(parsed.skills, terms), True)
 
 
 # Update when the target start date changes (e.g. back to "from <Month Year>")
@@ -174,20 +179,26 @@ def _slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:40] or "job"
 
 
-def tailor_tex(job: Job, parsed: ParsedCV | None = None, feedback: str | None = None,
-               judge_context: str | None = None, role_category: str = "") -> str:
+def _tailor(job: Job, parsed: ParsedCV | None = None, feedback: str | None = None,
+            judge_context: str | None = None, role_category: str = "") -> tuple[str, bool]:
+    """(tex, used_keyword_fallback)."""
     parsed = parsed or snippet_bank.parse(BASE_CV)
     terms = _job_terms(job)
     doc = parsed.document
 
-    projects, experiences, skills = _select_blocks(job, parsed, terms, feedback=feedback,
-                                                    judge_context=judge_context)
+    projects, experiences, skills, used_fallback = _select_blocks(
+        job, parsed, terms, feedback=feedback, judge_context=judge_context)
     doc = snippet_bank.reassemble(doc, r"PROJECTS[^}]*", projects)
     doc = snippet_bank.reassemble(doc, r"PROFESSIONAL EXPERIENCE", experiences)
     doc = snippet_bank.reassemble_skills(doc, skills)
     if parsed.heading_line:
         doc = doc.replace(parsed.heading_line, _tagline(role_category), 1)
-    return doc
+    return doc, used_fallback
+
+
+def tailor_tex(job: Job, parsed: ParsedCV | None = None, feedback: str | None = None,
+               judge_context: str | None = None, role_category: str = "") -> str:
+    return _tailor(job, parsed, feedback, judge_context, role_category)[0]
 
 
 # MacTeX's latexmk/pdflatex live here but aren't on PATH for non-interactive
@@ -347,6 +358,10 @@ class TailorResult(NamedTuple):
     pdf_path: Path | None
     note: str = ""   # why the CV failed or needs review; "" when fine
 
+    @property
+    def fallback(self) -> bool:
+        return self.note.startswith(CV_FALLBACK_NOTE)
+
 
 def _compile_failure(out_dir: Path, name: str = "cv") -> tuple[str, str]:
     """(fetch_diag reason, note) for a compile that returned no PDF, read off the
@@ -400,15 +415,15 @@ def tailor_job(job: Job, job_id: int, auto: bool = False,
     out_dir = CV_OUT_DIR / f"{job_id}-{_slug(job.company)}"
     name = f"cv-{_version_stamp()}"
 
-    tex = tailor_tex(job, judge_context=judge_context, role_category=role_category)
+    tex, used_fallback = _tailor(job, judge_context=judge_context, role_category=role_category)
     pdf = compile_tex(tex, out_dir, name=name, expected_pages=2 if auto else None)
 
     retried = False
     if auto:
         feedback = _retry_feedback(pdf, out_dir, name)
         if feedback:
-            tex = tailor_tex(job, feedback=feedback, judge_context=judge_context,
-                             role_category=role_category)
+            tex, used_fallback = _tailor(job, feedback=feedback, judge_context=judge_context,
+                                         role_category=role_category)
             pdf = compile_tex(tex, out_dir, name=name, expected_pages=2)
             retried = True
 
@@ -423,5 +438,7 @@ def tailor_job(job: Job, job_id: int, auto: bool = False,
             reason, note = "tailor_sparse_after_retry", f"page 2 sparse ({ratio:.0%} of page 1) -- review before use"
     if reason:
         fetch_diag.track("tailor", reason, detail=note, company=job.company)
+    if used_fallback:
+        note = f"{CV_FALLBACK_NOTE}; {note}" if note else CV_FALLBACK_NOTE
     _publish_latest(out_dir, name)
     return TailorResult(out_dir / f"{name}.tex", pdf, note)

@@ -444,6 +444,36 @@ def test_jobs_ready_for_auto_tailor_needs_qualifying_verdict_and_no_cv(tmp_db):
     assert candidates == [strong]   # not the weak verdict, not the already-tailored one
 
 
+def test_needs_tailoring_treats_a_keyword_fallback_cv_as_not_done(tmp_db):
+    with db.connect() as conn:
+        jid, _ = db.upsert_job(conn, J("1", title="A", url="http://x/1"), 60, "r")
+        assert db.needs_tailoring(conn, jid)                                      # no CV yet
+        db.add_cv_artifact(conn, jid, "/t/1.tex", "/t/1.pdf", note=db.CV_FALLBACK_NOTE)
+        assert db.needs_tailoring(conn, jid)                                      # fallback: still due
+        db.add_cv_artifact(conn, jid, "/t/2.tex", "/t/2.pdf")                     # proper CV lands
+        assert not db.needs_tailoring(conn, jid)
+        db.add_cv_artifact(conn, jid, "/t/3.tex", "/t/3.pdf", note=db.CV_FALLBACK_NOTE + "; page 2 sparse")
+        assert db.needs_tailoring(conn, jid)                                      # newest one decides
+
+
+def test_jobs_ready_for_auto_tailor_includes_jobs_whose_newest_cv_is_a_fallback(tmp_db):
+    with db.connect() as conn:
+        fallback, _ = db.upsert_job(conn, J("1", title="A", url="http://x/1"), 60, "r")
+        db.set_llm_judgment(conn, fallback, 80, "good", "solid fit")
+        db.add_cv_artifact(conn, fallback, "/t/1.tex", "/t/1.pdf", note=db.CV_FALLBACK_NOTE)
+        upgraded, _ = db.upsert_job(conn, J("2", title="B", url="http://x/2"), 60, "r")
+        db.set_llm_judgment(conn, upgraded, 80, "good", "solid fit")
+        db.add_cv_artifact(conn, upgraded, "/t/2a.tex", "/t/2a.pdf", note=db.CV_FALLBACK_NOTE)
+        db.add_cv_artifact(conn, upgraded, "/t/2b.tex", "/t/2b.pdf")
+        revised, _ = db.upsert_job(conn, J("3", title="C", url="http://x/3"), 60, "r")
+        db.set_llm_judgment(conn, revised, 80, "good", "solid fit")
+        db.add_cv_artifact(conn, revised, "/t/3a.tex", "/t/3a.pdf", note=db.CV_FALLBACK_NOTE)
+        db.add_cv_artifact(conn, revised, "", "/t/3r.pdf", origin="revised")   # the user replaced it
+
+        candidates = [r["id"] for r in db.jobs_ready_for_auto_tailor(conn, limit=10)]
+    assert candidates == [fallback]
+
+
 def test_jobs_ready_for_auto_tailor_orders_by_score_and_respects_limit(tmp_db):
     with db.connect() as conn:
         low, _ = db.upsert_job(conn, J("1", title="A", url="http://x/1"), 60, "r")

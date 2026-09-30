@@ -313,18 +313,23 @@ def import_manual_job(title: str, company: str, url: str, location: str = "",
 
 def _auto_tailor_jobs(job_ids: list[int], limit: int) -> int:
     """Tailor a CV + draft a cover letter for up to `limit` of the given job ids,
-    skipping any that already have an artifact (idempotency guard). Shared by
+    skipping any that already have a proper CV (idempotency guard; a keyword-fallback
+    CV doesn't count, so it's re-tailored once the LLM is back). Shared by
     daily_run's inline "new this run" gate and process_backlog's backlog-wide
     sweep. Returns the count that actually compiled."""
     tailored = 0
+    llm_down = False   # set by the first fallback of the batch
     for jid in job_ids[:limit]:
         try:
             with db.connect() as conn:
-                already = db.list_cv_artifacts(conn, jid)
-            if already:
-                continue
+                if not db.needs_tailoring(conn, jid):
+                    continue
+                is_upgrade = bool(db.list_cv_artifacts(conn, jid))
+            if is_upgrade and llm_down:
+                continue   # LLM still failing: don't retry every fallback CV in the batch
             print(f"  tailoring #{jid}...")
             result = tailor_one(jid, auto=True)
+            llm_down = llm_down or bool(result.get("fallback"))
             cover_one(jid)
             if result.get("compiled"):
                 tailored += 1
@@ -1145,22 +1150,34 @@ def tailor_one(job_id: int, auto: bool = False) -> dict:
         job = db.job_from_row(row)
 
     with fetch_diag.run_tracking() as tracker:
-        tex_path, pdf_path, note = cv_engine.tailor_job(
+        result = cv_engine.tailor_job(
             job, job_id, auto=auto, judge_context=_judge_context(row),
             role_category=row["role_category"] or "")
+    tex_path, pdf_path, note = result
 
     with db.connect() as conn:
-        db.add_cv_artifact(conn, job_id, str(tex_path), str(pdf_path or ""),
-                           base_version="cv_base.tex", origin="ai", note=note)
-        if pdf_path:
-            db.update_status(conn, job_id, "cv_ready")
+        # An auto retry that falls back again would only pile an identical keyword-fallback
+        # CV on the one already recorded (needs_tailoring is true while one exists).
+        repeat_fallback = (auto and result.fallback and bool(db.list_cv_artifacts(conn, job_id))
+                           and db.needs_tailoring(conn, job_id))
+        if not repeat_fallback:
+            db.add_cv_artifact(conn, job_id, str(tex_path), str(pdf_path or ""),
+                               base_version="cv_base.tex", origin="ai", note=note)
+            if pdf_path:
+                db.update_status(conn, job_id, "cv_ready")
         tracker.flush(conn)
+    if repeat_fallback:
+        for stale in (tex_path, pdf_path, tex_path.with_suffix(".compile.log")):
+            if stale:
+                stale.unlink(missing_ok=True)
     return {
         "job_id": job_id,
         "tex": str(tex_path),
         "pdf": str(pdf_path) if pdf_path else None,
         "compiled": pdf_path is not None,
         "note": note,
+        "fallback": result.fallback,
+        "unchanged": repeat_fallback,
     }
 
 

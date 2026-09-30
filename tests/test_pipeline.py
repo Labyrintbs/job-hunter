@@ -1247,6 +1247,95 @@ def test_judge_context_is_none_when_job_not_yet_judged(tmp_db, config, monkeypat
     assert captured["tailor_ctx"] is None
 
 
+def _fake_tailor_job(tmp_path, note=""):
+    """A tailor_job stand-in that writes real versioned files, like the engine does."""
+    calls = []
+
+    def fake(job, job_id, auto=False, judge_context=None, role_category=""):
+        stamp = f"v{len(calls)}"
+        tex, pdf = tmp_path / f"cv-{stamp}.tex", tmp_path / f"cv-{stamp}.pdf"
+        tex.write_text("tex"); pdf.write_bytes(b"%PDF")
+        calls.append(job_id)
+        return cv_engine.TailorResult(tex, pdf, note)
+    fake.calls = calls
+    return fake
+
+
+def test_tailor_one_records_a_keyword_fallback_cv_with_its_marker(tmp_db, config, tmp_path, monkeypatch):
+    with db.connect() as conn:
+        jid = _insert(conn, config, description=_REAL_JD)
+    monkeypatch.setattr(pipeline.cv_engine, "tailor_job", _fake_tailor_job(tmp_path, db.CV_FALLBACK_NOTE))
+
+    result = pipeline.tailor_one(jid, auto=True)
+
+    assert result["fallback"] and result["compiled"] and not result["unchanged"]
+    with db.connect() as conn:
+        assert db.list_cv_artifacts(conn, jid)[0]["note"] == db.CV_FALLBACK_NOTE
+        assert db.get_job(conn, jid)["status"] == "cv_ready"      # usable immediately
+        assert db.needs_tailoring(conn, jid)                       # ...but still due an upgrade
+
+
+def test_tailor_one_upgrades_a_fallback_cv_when_the_llm_is_back(tmp_db, config, tmp_path, monkeypatch):
+    with db.connect() as conn:
+        jid = _insert(conn, config, description=_REAL_JD)
+        db.add_cv_artifact(conn, jid, "/tmp/old.tex", "/tmp/old.pdf", note=db.CV_FALLBACK_NOTE)
+    monkeypatch.setattr(pipeline.cv_engine, "tailor_job", _fake_tailor_job(tmp_path))
+
+    pipeline.tailor_one(jid, auto=True)
+
+    with db.connect() as conn:
+        assert len(db.list_cv_artifacts(conn, jid)) == 2
+        assert not db.needs_tailoring(conn, jid)
+
+
+def test_tailor_one_does_not_pile_up_repeat_fallback_cvs(tmp_db, config, tmp_path, monkeypatch):
+    with db.connect() as conn:
+        jid = _insert(conn, config, description=_REAL_JD)
+        db.add_cv_artifact(conn, jid, "/tmp/old.tex", "/tmp/old.pdf", note=db.CV_FALLBACK_NOTE)
+    fake = _fake_tailor_job(tmp_path, db.CV_FALLBACK_NOTE)
+    monkeypatch.setattr(pipeline.cv_engine, "tailor_job", fake)
+
+    result = pipeline.tailor_one(jid, auto=True)
+
+    assert result["unchanged"]
+    with db.connect() as conn:
+        assert len(db.list_cv_artifacts(conn, jid)) == 1          # no duplicate row
+    assert not (tmp_path / "cv-v0.tex").exists() and not (tmp_path / "cv-v0.pdf").exists()
+
+
+def test_auto_tailor_upgrades_fallback_cvs_but_skips_proper_ones(tmp_db, config, monkeypatch):
+    with db.connect() as conn:
+        fallback = _insert(conn, config, external_id="a", company="A", description=_REAL_JD)
+        db.add_cv_artifact(conn, fallback, "/t/a.tex", "/t/a.pdf", note=db.CV_FALLBACK_NOTE)
+        proper = _insert(conn, config, external_id="b", company="B", description=_REAL_JD)
+        db.add_cv_artifact(conn, proper, "/t/b.tex", "/t/b.pdf")
+    tailored = []
+    monkeypatch.setattr(pipeline, "tailor_one", lambda jid, auto=False:
+                        tailored.append(jid) or {"compiled": True, "note": "", "fallback": False})
+    monkeypatch.setattr(pipeline, "cover_one", lambda jid: {})
+
+    pipeline._auto_tailor_jobs([fallback, proper], limit=10)
+
+    assert tailored == [fallback]
+
+
+def test_auto_tailor_stops_retrying_upgrades_once_the_llm_fails_again(tmp_db, config, monkeypatch):
+    with db.connect() as conn:
+        up1 = _insert(conn, config, external_id="u1", company="U1", description=_REAL_JD)
+        db.add_cv_artifact(conn, up1, "/t/1.tex", "/t/1.pdf", note=db.CV_FALLBACK_NOTE)
+        up2 = _insert(conn, config, external_id="u2", company="U2", description=_REAL_JD)
+        db.add_cv_artifact(conn, up2, "/t/2.tex", "/t/2.pdf", note=db.CV_FALLBACK_NOTE)
+        fresh = _insert(conn, config, external_id="f", company="F", description=_REAL_JD)
+    tailored = []
+    monkeypatch.setattr(pipeline, "tailor_one", lambda jid, auto=False:
+                        tailored.append(jid) or {"compiled": True, "note": db.CV_FALLBACK_NOTE, "fallback": True})
+    monkeypatch.setattr(pipeline, "cover_one", lambda jid: {})
+
+    pipeline._auto_tailor_jobs([up1, up2, fresh], limit=10)
+
+    assert tailored == [up1, fresh]   # up2's upgrade skipped, but a job with no CV still gets one
+
+
 # --- backfill: shared persist helper -----------------------------------------
 
 def test_persist_jobs_does_not_write_fetch_runs(tmp_db, config):
