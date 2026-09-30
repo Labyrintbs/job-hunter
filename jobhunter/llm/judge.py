@@ -126,7 +126,7 @@ def judge(job: Job, preferences: str = "") -> dict:
                           "from feedback — weigh these):\n"
                           + "\n".join(f"- {p}" for p in standing) + "\n")
     prompt = PROMPT.format(
-        profile=profile_text()[:10000],   # full CV incl. projects; > its length so SKILLS isn't cut
+        profile=profile_text(),
         preferences=pref_block,
         standing=standing_block,
         title=job.title,
