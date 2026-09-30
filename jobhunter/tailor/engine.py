@@ -314,11 +314,13 @@ def _last_page_fill_ratio(pdf_path: Path, n_pages: int) -> float | None:
     proxy that doesn't need vision -- page 1 of this template reliably packs
     edge-to-edge, so it's a reasonable self-calibrating baseline for "how full
     should a page look". None (no-op) if pdftotext isn't available or there's
-    only 1 page to compare."""
+    only 1 page to compare; the pdftotext case is recorded via fetch_diag so
+    sparse CVs don't pass silently."""
     if n_pages < 2:
         return None
     first, last = _page_text(pdf_path, 1), _page_text(pdf_path, n_pages)
     if first is None or last is None:
+        fetch_diag.track("tailor", "tailor_fill_check_unavailable", detail="pdftotext missing or failed")
         return None
     def _nonblank(t: str) -> int:
         return sum(1 for line in t.splitlines() if line.strip())

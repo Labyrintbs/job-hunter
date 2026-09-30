@@ -334,6 +334,21 @@ def test_last_page_fill_ratio_none_without_pdftotext(tmp_path, monkeypatch):
     assert engine._last_page_fill_ratio(tmp_path / "cv.pdf", 2) is None
 
 
+def test_missing_pdftotext_is_tracked_so_the_skipped_sparse_check_is_visible(tmp_path, monkeypatch):
+    monkeypatch.setattr(engine, "_pdftotext_path", lambda: None)
+    with fetch_diag.run_tracking() as tracker:
+        assert engine._last_page_fill_ratio(tmp_path / "cv.pdf", 2) is None
+    assert dict(tracker.counts) == {("tailor", "", "tailor_fill_check_unavailable"): 1}
+
+
+def test_a_single_page_or_a_working_pdftotext_is_not_tracked(tmp_path, monkeypatch):
+    monkeypatch.setattr(engine, "_page_text", lambda pdf, page: "line\n" * 10)
+    with fetch_diag.run_tracking() as tracker:
+        engine._last_page_fill_ratio(tmp_path / "cv.pdf", 1)
+        engine._last_page_fill_ratio(tmp_path / "cv.pdf", 2)
+    assert dict(tracker.counts) == {}
+
+
 def test_last_page_fill_ratio_none_for_single_page(tmp_path):
     assert engine._last_page_fill_ratio(tmp_path / "cv.pdf", 1) is None
 
