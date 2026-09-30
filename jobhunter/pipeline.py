@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
 from . import db, enrich, fetch_diag, jd_store, match
 from .apply import cover_letter
@@ -12,6 +13,7 @@ from .config import DATA_DIR, add_company, load_companies, load_search_config
 from .llm import dedup as llm_dedup
 from .llm import judge as llm_judge
 from .llm import provider
+from .llm.profile import tailored_cv_text
 from .notify import dispatch as notify_dispatch
 from .sources import (aijobs, arbeitnow, ats, ats_discovery, eures, francetravail, free_work,
                        hellowork, lesjeudis, linkedin, workday, wttj)
@@ -330,12 +332,16 @@ def _auto_tailor_jobs(job_ids: list[int], limit: int) -> int:
             print(f"  tailoring #{jid}...")
             result = tailor_one(jid, auto=True)
             llm_down = llm_down or bool(result.get("fallback"))
-            cover_one(jid)
-            if result.get("compiled"):
+            if not result.get("compiled"):
+                print(f"  tailored #{jid}: compile failed ({result.get('note') or result.get('error')}); "
+                      f"no cover letter")
+            elif result.get("fallback"):
                 tailored += 1
-                print(f"  tailored #{jid}: compiled + cover letter drafted")
+                print(f"  tailored #{jid}: keyword-fallback CV; cover letter waits for a proper tailoring")
             else:
-                print(f"  tailored #{jid}: compile failed ({result['note']})")
+                tailored += 1
+                cover_one(jid)
+                print(f"  tailored #{jid}: compiled + cover letter drafted")
         except Exception as exc:
             print(f"  auto-tailor warn: job {jid} failed: {exc}")
     return tailored
@@ -1123,16 +1129,29 @@ def _judge_context(row) -> str | None:
     return f"Rated '{row['llm_verdict']}' fit ({row['llm_score']}/100): {row['llm_reasons']}"
 
 
+def _cv_text_for_letter(conn, job_id: int) -> str | None:
+    """Text of the newest CV version that has both a PDF and a readable .tex -- the
+    one the dashboard links, unless that is a PDF-only upload, in which case the
+    newest version with a .tex. None if the job has no such CV yet."""
+    for art in db.list_cv_artifacts(conn, job_id):
+        tex = Path(art["tex_path"]) if art["tex_path"] else None
+        if art["pdf_path"] and tex and tex.exists():
+            return tailored_cv_text(tex)
+    return None
+
+
 def cover_one(job_id: int) -> dict:
-    """Draft a cover letter for one job; store the file path on the application."""
+    """Draft a cover letter for one job, grounded in its tailored CV when there is
+    one (else the full base CV); store the file path on the application."""
     db.init_db()
     with db.connect() as conn:
         row = db.get_job(conn, job_id)
         if not row:
             return {"job_id": job_id, "error": "not found"}
         job = db.job_from_row(row)
+        cv_text = _cv_text_for_letter(conn, job_id)
     out_dir = cv_engine.CV_OUT_DIR / f"{job_id}-{cv_engine._slug(job.company)}"
-    path = cover_letter.draft_to_file(job, out_dir, judge_context=_judge_context(row))
+    path = cover_letter.draft_to_file(job, out_dir, judge_context=_judge_context(row), cv_text=cv_text)
     with db.connect() as conn:
         db.set_cover_letter(conn, job_id, str(path))
     return {"job_id": job_id, "cover_letter": str(path)}

@@ -1222,7 +1222,7 @@ def test_tailor_one_and_cover_one_pass_the_judge_context_through(tmp_db, config,
                         lambda job, job_id, auto=False, judge_context=None, role_category="":
                         captured.update(tailor_ctx=judge_context) or cv_engine.TailorResult(Path("/tmp/cv.tex"), Path("/tmp/cv.pdf")))
     monkeypatch.setattr(pipeline.cover_letter, "draft_to_file",
-                        lambda job, out_dir, judge_context=None:
+                        lambda job, out_dir, judge_context=None, cv_text=None:
                         captured.update(cover_ctx=judge_context) or Path("/tmp/cover_letter.md"))
 
     pipeline.tailor_one(jid)
@@ -1259,6 +1259,71 @@ def _fake_tailor_job(tmp_path, note=""):
         return cv_engine.TailorResult(tex, pdf, note)
     fake.calls = calls
     return fake
+
+
+def _write_cv(tmp_path, name, marker):
+    tex = tmp_path / f"{name}.tex"
+    tex.write_text(f"\\begin{{document}}{marker}\\end{{document}}", encoding="utf-8")
+    return str(tex)
+
+
+def _letter_cv_text(tmp_db, config, monkeypatch, artifacts):
+    """Run cover_one on a job with the given artifacts (oldest first); return the cv_text it used."""
+    with db.connect() as conn:
+        jid = _insert(conn, config, description=_REAL_JD)
+        for tex, pdf, origin in artifacts:
+            db.add_cv_artifact(conn, jid, tex, pdf, origin=origin)
+    captured = {}
+    monkeypatch.setattr(pipeline.cover_letter, "draft_to_file",
+                        lambda job, out_dir, judge_context=None, cv_text=None:
+                        captured.update(cv_text=cv_text) or Path("/tmp/cover_letter.md"))
+    pipeline.cover_one(jid)
+    return captured["cv_text"]
+
+
+def test_cover_one_uses_the_newest_tailored_cv(tmp_db, config, tmp_path, monkeypatch):
+    text = _letter_cv_text(tmp_db, config, monkeypatch, [
+        (_write_cv(tmp_path, "cv-1", "OLD_VERSION"), "/t/1.pdf", "ai"),
+        (_write_cv(tmp_path, "cv-2", "NEW_VERSION"), "/t/2.pdf", "ai")])
+    assert "NEW_VERSION" in text and "OLD_VERSION" not in text
+
+
+def test_cover_one_skips_a_failed_newest_attempt_for_the_older_good_cv(tmp_db, config, tmp_path, monkeypatch):
+    text = _letter_cv_text(tmp_db, config, monkeypatch, [
+        (_write_cv(tmp_path, "cv-1", "GOOD_VERSION"), "/t/1.pdf", "ai"),
+        (_write_cv(tmp_path, "cv-2", "FAILED_VERSION"), "", "ai")])   # no PDF: failed compile
+    assert "GOOD_VERSION" in text
+
+
+def test_cover_one_uses_the_ai_tex_when_the_newest_cv_is_a_pdf_only_upload(tmp_db, config, tmp_path, monkeypatch):
+    text = _letter_cv_text(tmp_db, config, monkeypatch, [
+        (_write_cv(tmp_path, "cv-1", "AI_VERSION"), "/t/1.pdf", "ai"),
+        ("", "/t/revised.pdf", "revised")])
+    assert "AI_VERSION" in text
+
+
+def test_cover_one_falls_back_to_the_base_cv_when_there_is_no_usable_tailored_cv(tmp_db, config, monkeypatch):
+    assert _letter_cv_text(tmp_db, config, monkeypatch, []) is None
+
+
+def test_auto_tailor_drafts_the_letter_only_for_a_properly_tailored_cv(tmp_db, config, monkeypatch):
+    with db.connect() as conn:
+        good = _insert(conn, config, external_id="g", company="G", description=_REAL_JD)
+        fallback = _insert(conn, config, external_id="f", company="F", description=_REAL_JD)
+        failed = _insert(conn, config, external_id="x", company="X", description=_REAL_JD)
+    results = {
+        good: {"compiled": True, "note": "", "fallback": False},
+        fallback: {"compiled": True, "note": db.CV_FALLBACK_NOTE, "fallback": True},
+        failed: {"compiled": False, "note": "compiled to 3 page(s)", "fallback": False},
+    }
+    monkeypatch.setattr(pipeline, "tailor_one", lambda jid, auto=False: results[jid])
+    letters = []
+    monkeypatch.setattr(pipeline, "cover_one", lambda jid: letters.append(jid) or {})
+
+    tailored = pipeline._auto_tailor_jobs([good, fallback, failed], limit=10)
+
+    assert letters == [good]
+    assert tailored == 2                 # the fallback CV compiled, the failed one did not
 
 
 def test_tailor_one_records_a_keyword_fallback_cv_with_its_marker(tmp_db, config, tmp_path, monkeypatch):

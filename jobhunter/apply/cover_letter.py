@@ -40,12 +40,18 @@ Description:
 Write the cover letter body only (no address block, no placeholders like [Name])."""
 
 
-def draft(job: Job, judge_context: str | None = None) -> str:
+def draft(job: Job, judge_context: str | None = None, cv_text: str | None = None) -> str:
     """`judge_context` (optional) is the fit-judge's own verdict/reasons for this
-    posting, passed through as background (see pipeline._judge_context)."""
+    posting, passed through as background (see pipeline._judge_context). `cv_text`
+    (optional) is the tailored CV sent with this application; without it the letter
+    is grounded in the full base CV."""
     judge_block = f"\nFIT-JUDGE'S OWN ASSESSMENT OF THIS POSTING (background only, don't quote it back):\n{judge_context}\n" if judge_context else ""
+    profile = profile_text()
+    if cv_text:
+        profile = ("(This is the exact CV sent with this application; refer only to what it "
+                   "contains.)\n" + cv_text)
     prompt = PROMPT.format(
-        profile=profile_text()[:6000],
+        profile=profile,
         title=job.title,
         company=job.company,
         description=(job.description or "")[:4000],
@@ -54,9 +60,10 @@ def draft(job: Job, judge_context: str | None = None) -> str:
     return provider.generate(prompt, system=SYSTEM, max_tokens=1400).strip()
 
 
-def draft_to_file(job: Job, out_dir: Path, judge_context: str | None = None) -> Path:
+def draft_to_file(job: Job, out_dir: Path, judge_context: str | None = None,
+                  cv_text: str | None = None) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
-    text = draft(job, judge_context=judge_context)
+    text = draft(job, judge_context=judge_context, cv_text=cv_text)
     path = out_dir / "cover_letter.md"
     header = f"# {job.title} — {job.company}\n\n{job.url}\n\n---\n\n"
     path.write_text(header + text + "\n", encoding="utf-8")

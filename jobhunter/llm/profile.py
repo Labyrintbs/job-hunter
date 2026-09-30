@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 from functools import lru_cache
+from pathlib import Path
 
 from ..tailor.engine import BASE_CV
 
@@ -26,9 +27,17 @@ def _clean_latex(body: str) -> str:
     return body.strip()
 
 
-def _document_body() -> str:
-    raw = BASE_CV.read_text(encoding="utf-8")
+def _body_of(raw: str) -> str:
     return raw.split(r"\begin{document}")[-1].split(r"\end{document}")[0]
+
+
+def _document_body() -> str:
+    return _body_of(BASE_CV.read_text(encoding="utf-8"))
+
+
+def tailored_cv_text(tex_path: Path) -> str:
+    """Plain text of one tailored CV's .tex, cleaned the same way as profile_text()."""
+    return _clean_latex(_body_of(tex_path.read_text(encoding="utf-8")))
 
 
 @lru_cache(maxsize=1)
