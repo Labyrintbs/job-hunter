@@ -162,7 +162,7 @@
         \resumeItem{Evaluated Qwen3.5-4B as a candidate replacement for a production LLM in multilingual legal entity extraction. Closed its accuracy gap to the production baseline by engineering a structured prompt framework with field-level metadata, raising extraction precision by 1.6 points and context accuracy by 8.4 points.}
         \resumeItem{Built an automated agentic pipeline in LangGraph where an LLM-as-judge critic scores extraction quality against a 9-category failure taxonomy and iteratively refines the prompts used by another model, raising context accuracy to 96.8\% and cutting inference time by 40.8\% against the production model.}
         \resumeItem{Fine-tuned Qwen3.5-4B via SFT on the optimized prompt, then diagnosed overfitting: strong in-distribution gains, but generalization to unseen labels fell below the out-of-box model. Resolved this by merging multiple data sources and switching to reinforcement learning (GRPO) with a custom reward function combining exact-match and LLM-judge scoring, lifting in-distribution accuracy 8 points above the out-of-box model while achieving the best generalization to unseen labels of any fine-tuned variant.}
-        \resumeItem{Designed and implemented a metadata-generation pipeline that mines user annotation history to automatically improve per-field extraction guidance, gated by an evaluation harness that only adopts a candidate if it scores at least as well as the current best on held-out real annotations.}
+        \resumeItem{Designed and implemented a metadata-generation pipeline that mines user annotation history to automatically improve per-field extraction guidance, with a held-out evaluation gate that blocks regressions.}
       \resumeItemListEnd
 
     \needspace{8\baselineskip}
