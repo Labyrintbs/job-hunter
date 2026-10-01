@@ -17,7 +17,7 @@ from ..lang import counts, job_language
 from ..llm import provider
 from ..models import Job
 from . import select as llm_select
-from . import courses, snippet_bank, summary
+from . import courses, fit, snippet_bank, summary
 from .snippet_bank import Block, ParsedCV, SkillCategory
 
 BASE_CV = REPO_ROOT / "templates" / "cv_base.tex"
@@ -68,114 +68,117 @@ def _fallback_select(blocks: list[Block], terms: set[str], cap: int) -> list[Blo
     return sorted(chosen, key=lambda b: b.end_date(), reverse=True)
 
 
-def _fallback_select_skills(categories: list[SkillCategory], terms: set[str],
-                            lang: str = "en") -> list[SkillCategory]:
-    """Deterministic fallback: only ever drops the one category that's actually
-    been dropped in practice, and only when irrelevant."""
-    conditional = _CONDITIONAL_SKILL_CATEGORY[lang]
-    return [c for c in categories if c.name != conditional or (c.tags & terms)]
-
-
-def _apply_ids(blocks: list[Block], ids: object, cap: int) -> list[Block]:
-    """Map the LLM's chosen ids back to real blocks, preserving its given order
-    (it was told to default to reverse-chronological and only deviate with a
-    stated reason -- trust that judgment rather than re-sorting here). Ignores
-    out-of-range/duplicate/malformed ids rather than raising, since a slightly
-    messy response shouldn't crash tailoring."""
+def _pick(blocks: list[Block], ids: object, scores: object, cap: int) -> list[tuple[Block, list]]:
+    """The chosen blocks with their bullet scores, in the order the LLM gave (it was told
+    to default to reverse-chronological and only deviate with a stated reason -- trust
+    that judgment rather than re-sorting). Ignores out-of-range/duplicate/malformed ids
+    rather than raising, since a slightly messy response shouldn't crash tailoring."""
     if not isinstance(ids, list):
         return []
+    scores = scores if isinstance(scores, list) else []
     seen: set[int] = set()
     chosen = []
-    for i in ids:
-        if isinstance(i, int) and 0 <= i < len(blocks) and i not in seen:
-            chosen.append(blocks[i])
-            seen.add(i)
-    return chosen[:cap]
-
-
-def _apply_selection(blocks: list[Block], ids: object, bullets_per_id: object, cap: int) -> list[Block]:
-    """Like _apply_ids, but also trims each chosen block to the bullets picked
-    for it (bullets_per_id[i] corresponds to ids[i]) via
-    snippet_bank.filter_bullets -- reuse-only, never invents a bullet, only
-    ever drops from what's already there. A missing/malformed bullet list for
-    a given entry just keeps that entry's bullets unfiltered."""
-    if not isinstance(ids, list):
-        return []
-    bullets_per_id = bullets_per_id if isinstance(bullets_per_id, list) else []
-    seen: set[int] = set()
-    chosen: list[Block] = []
     for pos, i in enumerate(ids):
-        if not (isinstance(i, int) and 0 <= i < len(blocks) and i not in seen):
-            continue
-        seen.add(i)
-        block = blocks[i]
-        keep = bullets_per_id[pos] if pos < len(bullets_per_id) and isinstance(bullets_per_id[pos], list) else None
-        text = snippet_bank.filter_bullets(block.text, keep) if keep else block.text
-        chosen.append(Block(text=text, tags=block.tags))
-        if len(chosen) >= cap:
-            break
-    return chosen
-
-
-def _apply_names(categories: list[SkillCategory], names: object) -> list[SkillCategory]:
-    if not isinstance(names, list):
-        return []
-    by_name = {c.name: c for c in categories}
-    return [by_name[n] for n in names if isinstance(n, str) and n in by_name]
+        if isinstance(i, int) and 0 <= i < len(blocks) and i not in seen:
+            seen.add(i)
+            mine = scores[pos] if pos < len(scores) and isinstance(scores[pos], list) else []
+            chosen.append((blocks[i], [s for s in mine if isinstance(s, (int, float))]))
+    return chosen[:cap]
 
 
 def _menu_pairs(blocks: list[Block]) -> list[tuple[str, list[str]]]:
     return [(b.text, b.bullets()) for b in blocks]
 
 
-_FRENCH_LENGTH_HINT = ("This CV is the French version, whose text runs about 10% longer than the "
-                       "English one: keep roughly one bullet fewer per entry than you would in "
-                       "English so it still fits exactly two pages.")
+# Skills lines that are never trimmed or scored.
+_FIXED_SKILL_CATEGORY = {"en": "Languages", "fr": "Langues"}
+_CONDITIONAL_MAX_SCORE = 25     # the conditional category is dropped when no item scores above this
 
 
-def _select_blocks(job: Job, parsed: ParsedCV, terms: set[str], feedback: str | None = None,
-                    judge_context: str | None = None
-                    ) -> tuple[list[Block], list[Block], list[SkillCategory], bool]:
-    """Decide which experiences/projects/skill categories (and which bullets
-    within them) to keep, mirroring templates/cv_tailoring_workflow.md (same
-    rules used tailoring by hand): an LLM call chooses from the real, existing
-    content (see tailor/select.py), falling back to a deterministic
-    keyword-overlap heuristic (whole blocks, no bullet trimming) if the LLM
-    backend is unavailable or its response is unusable, so tailoring never
-    hard-fails just because that call did. `feedback` (optional) is a hint from
-    a previous compile attempt that didn't fit the page -- see tailor_job's
-    retry. `judge_context` (optional) is the fit-judge's own verdict/reasons
-    for this posting, already computed and stored -- passed through as extra
-    background, not re-derived. Returns (projects, experiences, skills, used_fallback);
-    each fallback is recorded via fetch_diag under a `tailor_llm_*` reason."""
+class Selection(NamedTuple):
+    experiences: list[Block]
+    projects: list[Block]
+    skills: list[SkillCategory]
+    plan: fit.Plan
+    used_fallback: bool
+
+
+def _keyword_bullet_scores(text: str, terms: set[str]) -> int:
+    return min(100, 30 + 15 * len(snippet_bank.terms_in(text) & terms))
+
+
+def _plan_for(experiences, projects, skills, lang: str) -> fit.Plan:
+    """`experiences`/`projects` are [(Block, bullet scores)]; `skills` is
+    [(SkillCategory, item scores or None)]."""
+    def entry(block, scores):
+        return fit.Entry.build(block.text, block.bullets(), scores)
+    lines = []
+    for cat, scores in skills:
+        parts = snippet_bank.split_skill_items(cat.line)
+        fixed = cat.name == _FIXED_SKILL_CATEGORY[lang] or parts is None
+        lines.append(fit.SkillLine.build(parts.items if parts else [], scores, trimmable=not fixed))
+    return fit.Plan([entry(b, s) for b, s in experiences], [entry(b, s) for b, s in projects], lines)
+
+
+def _select_blocks(job: Job, parsed: ParsedCV, terms: set[str],
+                   judge_context: str | None = None) -> Selection:
+    """Decide which experiences/projects to keep and score every bullet and skills item,
+    mirroring templates/cv_tailoring_workflow.md: an LLM call chooses from the real,
+    existing content (see tailor/select.py), falling back to deterministic keyword
+    scores if the LLM backend is unavailable or its response is unusable, so tailoring
+    never hard-fails just because that call did. How much of it fits is decided later,
+    by measuring (tailor/fit.py). `judge_context` (optional) is the fit-judge's own
+    verdict/reasons for this posting, already computed and stored. Each fallback is
+    recorded via fetch_diag under a `tailor_llm_*` reason."""
+    lang = parsed.lang
+    conditional = _CONDITIONAL_SKILL_CATEGORY[lang]
+    menu_cats = [c for c in parsed.skills if c.name != _FIXED_SKILL_CATEGORY[lang]]
     reason, detail = "tailor_llm_unavailable", "no LLM backend"
-    if parsed.lang == "fr":
-        feedback = f"{feedback + ' ' if feedback else ''}{_FRENCH_LENGTH_HINT}"
     if provider.available():
         try:
             result = llm_select.select(
                 job,
                 _menu_pairs(parsed.experiences),
                 _menu_pairs(parsed.projects),
-                [c.name for c in parsed.skills],
-                feedback=feedback,
+                [(c.name, split.items) for c in menu_cats if (split := snippet_bank.split_skill_items(c.line))],
                 judge_context=judge_context,
             )
-            experiences = _apply_selection(parsed.experiences, result.get("experience_ids"),
-                                            result.get("experience_bullets"), MAX_EXPERIENCES)
-            projects = _apply_selection(parsed.projects, result.get("project_ids"),
-                                         result.get("project_bullets"), MAX_PROJECTS)
-            skills = _apply_names(parsed.skills, result.get("skill_categories"))
-            if experiences and projects and skills:
-                return projects, experiences, skills, False
+            exps = _pick(parsed.experiences, result.get("experience_ids"), result.get("experience_scores"),
+                         MAX_EXPERIENCES)
+            projs = _pick(parsed.projects, result.get("project_ids"), result.get("project_scores"),
+                          MAX_PROJECTS)
+            if exps and projs:
+                raw = result.get("skill_scores")
+                raw = raw if isinstance(raw, list) else []
+                by_cat = {c.name: (raw[i] if i < len(raw) and isinstance(raw[i], list) else None)
+                          for i, c in enumerate(menu_cats)}
+                skills = []
+                for c in parsed.skills:
+                    scores = by_cat.get(c.name)
+                    if c.name == conditional and scores and max(scores) < _CONDITIONAL_MAX_SCORE:
+                        continue
+                    skills.append((c, scores))
+                return Selection([b for b, _ in exps], [b for b, _ in projs], [c for c, _ in skills],
+                                 _plan_for(exps, projs, skills, lang), False)
             reason, detail = "tailor_llm_unusable", "LLM selection was empty or incomplete"
         except Exception as exc:
             reason, detail = "tailor_llm_error", f"{type(exc).__name__}: {exc}"[:200]
 
     fetch_diag.track("tailor", reason, detail=detail, company=job.company)
-    return (_fallback_select(parsed.projects, terms, MAX_PROJECTS),
-            _fallback_select(parsed.experiences, terms, MAX_EXPERIENCES),
-            _fallback_select_skills(parsed.skills, terms, parsed.lang), True)
+    exps = [(b, [_keyword_bullet_scores(x, terms) for x in b.bullets()])
+            for b in _fallback_select(parsed.experiences, terms, MAX_EXPERIENCES)]
+    projs = [(b, [_keyword_bullet_scores(x, terms) for x in b.bullets()])
+             for b in _fallback_select(parsed.projects, terms, MAX_PROJECTS)]
+    skills = []
+    for c in parsed.skills:
+        if c.name == conditional and not (c.tags & terms):
+            continue
+        split = snippet_bank.split_skill_items(c.line)
+        scores = None if c.name == _FIXED_SKILL_CATEGORY[lang] or not split else [
+            _keyword_bullet_scores(i, terms) for i in split.items]
+        skills.append((c, scores))
+    return Selection([b for b, _ in exps], [b for b, _ in projs], [c for c, _ in skills],
+                     _plan_for(exps, projs, skills, lang), True)
 
 
 # Update when the target start date changes (e.g. back to "from <Month Year>")
@@ -207,35 +210,58 @@ def _write_summary(job: Job, role_category: str, parsed: ParsedCV) -> summary.Su
     return summ
 
 
-def _tailor(job: Job, parsed: ParsedCV | None = None, feedback: str | None = None,
-            judge_context: str | None = None, role_category: str = "",
-            language: str = "en", summ: summary.Summary | None = None
-            ) -> tuple[str, bool, list[str]]:
-    """(tex, used_keyword_fallback, review_notes). `language` picks the master CV
-    ("en" or "fr"); an already parsed CV carries its own. A review note is a
-    non-fatal problem worth a look, e.g. the summary fell back to its fixed text.
-    `summ` reuses an already written summary (it doesn't depend on the selection),
-    so a page-fit retry only repeats the selection call."""
-    parsed = parsed or snippet_bank.parse(base_cv_path(language), language)
-    lang = parsed.lang
-    names = snippet_bank.SECTIONS[lang]
-    terms = _job_terms(job)
-    doc = parsed.document
+class Draft(NamedTuple):
+    """Everything chosen for one tailoring; `render` turns a (possibly trimmed) plan into LaTeX."""
+    job: Job
+    parsed: ParsedCV
+    selection: Selection
+    summ: summary.Summary
+    role_category: str
 
-    projects, experiences, skills, used_fallback = _select_blocks(
-        job, parsed, terms, feedback=feedback, judge_context=judge_context)
-    doc = snippet_bank.reassemble(doc, names["projects"], projects)
-    doc = snippet_bank.reassemble(doc, names["experience"], experiences)
-    doc = snippet_bank.reassemble_skills(doc, skills, lang)
-    if parsed.heading_line:
-        doc = doc.replace(parsed.heading_line, _tagline(role_category, lang), 1)
-    summ = summ or _write_summary(job, role_category, parsed)
-    notes = []
-    if summ.reason:
-        notes.append(f"summary fell back to the standard text ({summ.detail})")
-    doc = snippet_bank.set_summary(doc, summary.latex_escape(summ.text))
-    doc = courses.apply(doc, f"{job.title} {job.description}")
-    return doc, used_fallback, notes
+    @property
+    def plan(self) -> fit.Plan:
+        return self.selection.plan
+
+    @property
+    def notes(self) -> list[str]:
+        return [f"summary fell back to the standard text ({self.summ.detail})"] if self.summ.reason else []
+
+    def render(self, plan: fit.Plan | None = None) -> str:
+        plan = plan or self.plan
+        lang, sel, parsed = self.parsed.lang, self.selection, self.parsed
+        names = snippet_bank.SECTIONS[lang]
+
+        def trimmed(blocks, entries):
+            out = []
+            for block, e in zip(blocks, entries):
+                if not e.kept:
+                    continue
+                keep = [j for j, k in enumerate(e.keep) if k]
+                out.append(Block(snippet_bank.filter_bullets(block.text, keep) if keep else block.text, block.tags))
+            return out
+
+        skills = []
+        for cat, line in zip(sel.skills, plan.skills):
+            parts = snippet_bank.split_skill_items(cat.line)
+            text = snippet_bank.join_skill_items(parts, line.keep) if parts and line.trimmable else cat.line
+            skills.append(SkillCategory(cat.name, text, cat.tags))
+        doc = snippet_bank.reassemble(parsed.document, names["projects"], trimmed(sel.projects, plan.projects))
+        doc = snippet_bank.reassemble(doc, names["experience"], trimmed(sel.experiences, plan.experiences))
+        doc = snippet_bank.reassemble_skills(doc, skills, lang)
+        if parsed.heading_line:
+            doc = doc.replace(parsed.heading_line, _tagline(self.role_category, lang), 1)
+        doc = snippet_bank.set_summary(doc, summary.latex_escape(self.summ.text))
+        return courses.apply(doc, f"{self.job.title} {self.job.description}", keep=plan.modules)
+
+
+def _draft(job: Job, parsed: ParsedCV | None = None, judge_context: str | None = None,
+           role_category: str = "", language: str = "en",
+           summ: summary.Summary | None = None) -> Draft:
+    """`language` picks the master CV ("en" or "fr"); an already parsed CV carries its
+    own. `summ` reuses an already written summary (it doesn't depend on the selection)."""
+    parsed = parsed or snippet_bank.parse(base_cv_path(language), language)
+    selection = _select_blocks(job, parsed, _job_terms(job), judge_context=judge_context)
+    return Draft(job, parsed, selection, summ or _write_summary(job, role_category, parsed), role_category)
 
 
 _LATEX_COMMAND = re.compile(r"\\[A-Za-z]+\*?|[{}\\$]|%[^\n]*")
@@ -253,10 +279,10 @@ def cv_language_problem(tex: str, expected: str) -> str:
             f"({other} vs {mine} function words), expected {expected.upper()}")
 
 
-def tailor_tex(job: Job, parsed: ParsedCV | None = None, feedback: str | None = None,
-               judge_context: str | None = None, role_category: str = "",
-               language: str = "en") -> str:
-    return _tailor(job, parsed, feedback, judge_context, role_category, language)[0]  # (tex, fallback, notes)
+def tailor_tex(job: Job, parsed: ParsedCV | None = None, judge_context: str | None = None,
+               role_category: str = "", language: str = "en") -> str:
+    """The tailored CV before it is fitted to two pages (every chosen bullet kept)."""
+    return _draft(job, parsed, judge_context, role_category, language).render()
 
 
 # MacTeX's latexmk/pdflatex live here but aren't on PATH for non-interactive
@@ -351,66 +377,19 @@ def _pdftotext_path() -> str | None:
     return None
 
 
-def _page_text(pdf_path: Path, page: int) -> str | None:
+def _page_layout(pdf_path: Path) -> fit.Layout | None:
+    """Where every line of text sits on every page, or None when it can't be read
+    (no pdftotext, or no PDF); the fit step then can't measure and says so."""
     exe = _pdftotext_path()
     if not exe:
         return None
     env = {**os.environ, **_PDFTOTEXT_ENV_EXTRA}
     try:
-        proc = subprocess.run([exe, "-f", str(page), "-l", str(page), "-layout", str(pdf_path), "-"],
-                               capture_output=True, text=True, env=env, timeout=15)
+        proc = subprocess.run([exe, "-bbox", str(pdf_path), "-"], capture_output=True, text=True,
+                              env=env, timeout=30)
     except Exception:
         return None
-    return proc.stdout if proc.returncode == 0 else None
-
-
-_MIN_LAST_PAGE_FILL_RATIO = 0.4
-
-
-def _last_page_fill_ratio(pdf_path: Path, n_pages: int) -> float | None:
-    """Non-blank text lines on the last page vs the first, a cheap sparseness
-    proxy that doesn't need vision -- page 1 of this template reliably packs
-    edge-to-edge, so it's a reasonable self-calibrating baseline for "how full
-    should a page look". None (no-op) if pdftotext isn't available or there's
-    only 1 page to compare; the pdftotext case is recorded via fetch_diag so
-    sparse CVs don't pass silently."""
-    if n_pages < 2:
-        return None
-    first, last = _page_text(pdf_path, 1), _page_text(pdf_path, n_pages)
-    if first is None or last is None:
-        fetch_diag.track("tailor", "tailor_fill_check_unavailable", detail="pdftotext missing or failed")
-        return None
-    def _nonblank(t: str) -> int:
-        return sum(1 for line in t.splitlines() if line.strip())
-    base = _nonblank(first)
-    return (_nonblank(last) / base) if base else None
-
-
-def _retry_feedback(pdf: Path | None, out_dir: Path, name: str = "cv") -> str | None:
-    """A hint for a second tailoring attempt, or None if the first attempt
-    doesn't need one (it fit well) or can't be helped by retrying (a hard
-    LaTeX error, not a length issue)."""
-    if pdf is None:
-        log = out_dir / f"{name}.compile.log"
-        text = log.read_text(encoding="utf-8") if log.exists() else ""
-        m = re.search(r"Compiled to (\d+) page", text)
-        if not m:
-            return None  # not a page-count rejection -- a real compile error, retrying won't help
-        pages = int(m.group(1))
-        return (f"The previous attempt compiled to {pages} pages, it needs to be exactly 2. "
-                + ("Trim bullets roughly evenly across the kept experience entries, or drop "
-                   "a whole entry/project, rather than cutting one entry's bullets down far "
-                   "more than the others -- an entry left with noticeably fewer bullets than "
-                   "its neighbors reads as sparse even when the total page count is right."
-                   if pages > 2 else
-                   "You have room to keep more bullets, or add a project back."))
-    ratio = _last_page_fill_ratio(pdf, 2)
-    if ratio is not None and ratio < _MIN_LAST_PAGE_FILL_RATIO:
-        return (f"The previous attempt left the second page visibly sparse (about "
-                 f"{ratio:.0%} as full as the first page). Keep more bullets, or add a "
-                 f"project back, to fill it better -- but don't re-add anything you'd "
-                 f"otherwise cut just to take up space.")
-    return None
+    return fit.parse_bbox(proc.stdout) if proc.returncode == 0 else None
 
 
 class TailorResult(NamedTuple):
@@ -435,26 +414,20 @@ def _compile_failure(out_dir: Path, name: str = "cv") -> tuple[str, str]:
     return "tailor_latex_error", f"LaTeX compile error -- see {name}.compile.log"
 
 
-MAX_AUTOTRIM = 6
-
-
-def _trim_to_fit(tex: str, language: str, out_dir: Path, name: str) -> tuple[str, Path | None, int]:
-    """Last resort for a CV still over two pages after the LLM's own retry: drop the
-    last bullet of the last multi-bullet project (then the last project), recompile,
-    up to MAX_AUTOTRIM times. Returns (tex, pdf or None, steps taken). Never invents
-    anything."""
-    trimmed = 0
-    for _ in range(MAX_AUTOTRIM):
-        smaller = snippet_bank.drop_last_project_bullet(tex, language)
-        if smaller is None:
-            break
-        tex, trimmed = smaller, trimmed + 1
-        pdf = compile_tex(tex, out_dir, name=name, expected_pages=2)
-        if pdf is not None:
-            return tex, pdf, trimmed
-        if _compile_failure(out_dir, name)[0] != "tailor_page_count":
-            break
-    return tex, None, trimmed
+def _fit_cv(draft: Draft, out_dir: Path, name: str):
+    """Fit the draft to two pages (see tailor/fit.py) and keep a log of what it did next
+    to the CV. Trial compiles go to a scratch directory; the caller compiles the result."""
+    with tempfile.TemporaryDirectory() as tmp:
+        result = fit.fit(draft.plan, draft.render,
+                         lambda tex: compile_tex(tex, Path(tmp), name="fit"), _page_layout)
+    lay = result.layout
+    lines = [f"status: {result.status} after {result.compiles} compile(s)"]
+    if lay:
+        lines.append(f"pages: {lay.pages}; free lines per page: "
+                     + ", ".join(f"{lay.free_lines(p):.1f}" for p in range(lay.pages)))
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / f"{name}.fit.txt").write_text("\n".join(lines + result.log) + "\n", encoding="utf-8")
+    return result
 
 
 def _version_stamp() -> str:
@@ -500,34 +473,19 @@ def tailor_job(job: Job, job_id: int, auto: bool = False,
     name = f"cv-{_version_stamp()}"
 
     language = language or job_language(job.title, job.description, job.language)
-    parsed = snippet_bank.parse(base_cv_path(language), language)
-    summ = _write_summary(job, role_category, parsed)   # written once, reused by the retry
-    tex, used_fallback, notes = _tailor(job, parsed, judge_context=judge_context,
-                                        role_category=role_category, language=language, summ=summ)
+    draft = _draft(job, judge_context=judge_context, role_category=role_category, language=language)
+    used_fallback, notes = draft.selection.used_fallback, draft.notes
+    fitted = _fit_cv(draft, out_dir, name)
+    if fitted.status == "unmeasured":
+        fetch_diag.track("tailor", "tailor_fit_unmeasured", detail="could not read the page layout", company=job.company)
+    if fitted.note:
+        notes.append(fitted.note)
+    tex = fitted.tex
     pdf = compile_tex(tex, out_dir, name=name, expected_pages=2 if auto else None)
-
-    retried = False
-    if auto:
-        feedback = _retry_feedback(pdf, out_dir, name)
-        if feedback:
-            tex, used_fallback, notes = _tailor(job, parsed, feedback=feedback, judge_context=judge_context,
-                                                role_category=role_category, language=language, summ=summ)
-            pdf = compile_tex(tex, out_dir, name=name, expected_pages=2)
-            retried = True
-        if pdf is None and _compile_failure(out_dir, name)[0] == "tailor_page_count":
-            tex, pdf, trimmed = _trim_to_fit(tex, language, out_dir, name)
-            if pdf is not None:
-                notes.append(f"auto-trimmed {trimmed} project item(s) to fit two pages")
 
     reason = note = ""
     if pdf is None:
         reason, note = _compile_failure(out_dir, name)
-    elif retried:
-        # The retry's own output is never re-tried, so flag a still-sparse page 2
-        # instead of letting it pass as fine.
-        ratio = _last_page_fill_ratio(pdf, 2)
-        if ratio is not None and ratio < _MIN_LAST_PAGE_FILL_RATIO:
-            reason, note = "tailor_sparse_after_retry", f"page 2 sparse ({ratio:.0%} of page 1) -- review before use"
     wrong_language = cv_language_problem(tex, language)
     if wrong_language and not reason:
         reason, note = summary.LANGUAGE_REASON, wrong_language

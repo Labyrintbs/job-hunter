@@ -163,13 +163,13 @@ def test_a_french_tailoring_drops_the_vision_skills_line_for_a_job_with_no_visio
 def test_the_llm_selection_works_on_the_french_blocks(monkeypatch):
     monkeypatch.setattr(engine.provider, "available", lambda: True)
     parsed = snippet_bank.parse(engine.base_cv_path("fr"), "fr")
-    skills = [c.name for c in parsed.skills]
     monkeypatch.setattr(engine.llm_select, "select", lambda *a, **k: {
-        "experience_ids": [0], "experience_bullets": [[0, 1]], "project_ids": [0],
-        "project_bullets": [[0]], "skill_categories": skills[:2], "reasoning": ""})
+        "experience_ids": [0], "experience_scores": [[80, 20]], "project_ids": [0],
+        "project_scores": [[]], "skill_scores": [], "reasoning": ""})
     tex = engine.tailor_tex(_job(), parsed=parsed)
     exp = tex.split(r"\section{EXPÉRIENCE PROFESSIONNELLE}")[1].split(r"\section{PROJETS")[0]
-    assert exp.count(r"\resumeItem{") == 2 and "DiliTrust" in exp and "DeepWise" not in exp
+    assert exp.count(r"\resumeItem{") == len(parsed.experiences[0].bullets())
+    assert "DiliTrust" in exp and "DeepWise" not in exp
 
 
 def test_tailor_job_picks_the_master_from_the_postings_language(tmp_path, monkeypatch, no_llm):
@@ -177,7 +177,8 @@ def test_tailor_job_picks_the_master_from_the_postings_language(tmp_path, monkey
     seen = []
 
     def fake_compile(tex, out_dir, name="cv", expected_pages=None):
-        seen.append(tex)
+        if name != "fit":                     # the fit step's own trial compiles use that name
+            seen.append(tex)
         return None
     monkeypatch.setattr(engine, "compile_tex", fake_compile)
     engine.tailor_job(_job(description=FR_JD), 1)
@@ -207,26 +208,26 @@ def test_the_assembled_cv_language_check(no_llm):
     assert "reads as FR" in engine.cv_language_problem(fr_tex, "en")
 
 
-def test_a_cv_in_the_wrong_language_gets_a_review_note_and_is_tracked(tmp_path, monkeypatch, no_llm):
+def test_a_cv_in_the_wrong_language_gets_a_review_note_and_is_tracked(tmp_path, monkeypatch, no_llm, two_page_layout):
     from jobhunter import fetch_diag
     monkeypatch.setattr(engine, "CV_OUT_DIR", tmp_path)
     monkeypatch.setattr(engine, "compile_tex", _fake_compile)
     french = engine.tailor_tex(_job(), language="fr")
-    monkeypatch.setattr(engine, "_tailor", lambda *a, **k: (french, False, []))
+    monkeypatch.setattr(engine.Draft, "render", lambda self, plan=None: french)
     with fetch_diag.run_tracking() as tracker:
         res = engine.tailor_job(_job(), 1, language="en")
-    assert res.pdf_path is not None and res.note.startswith("language check")
-    assert dict(tracker.counts) == {("tailor", "Acme", "tailor_language_mismatch"): 1}
+    assert res.pdf_path is not None and "language check" in res.note
+    assert tracker.counts[("tailor", "Acme", "tailor_language_mismatch")] == 1
 
 
-def test_a_matching_language_leaves_no_note(tmp_path, monkeypatch, no_llm):
+def test_a_matching_language_leaves_no_note(tmp_path, monkeypatch, no_llm, two_page_layout):
     monkeypatch.setattr(engine, "CV_OUT_DIR", tmp_path)
     monkeypatch.setattr(engine, "compile_tex", _fake_compile)
     res = engine.tailor_job(_job(description=FR_JD), 1)
     assert res.lang == "fr" and "language check" not in res.note   # (the keyword fallback note is expected here)
 
 
-def test_a_summary_that_fell_back_shows_as_a_review_note(tmp_path, monkeypatch, no_llm):
+def test_a_summary_that_fell_back_shows_as_a_review_note(tmp_path, monkeypatch, no_llm, two_page_layout):
     monkeypatch.setattr(engine, "CV_OUT_DIR", tmp_path)
     monkeypatch.setattr(engine, "compile_tex", _fake_compile)
     monkeypatch.setattr(summary, "generate_summary", lambda *a, **k: "Too short.")
@@ -234,125 +235,34 @@ def test_a_summary_that_fell_back_shows_as_a_review_note(tmp_path, monkeypatch, 
     assert "summary fell back to the standard text (" in res.note
 
 
-# --- fitting two pages: French length hint, last-resort trimming, voice ------------------
+# --- fitting two pages ------------------------------------------------------------------
 
-def test_french_selection_is_told_that_french_runs_longer(monkeypatch):
+def test_french_selection_gets_no_length_hint(monkeypatch):
     monkeypatch.setattr(engine.provider, "available", lambda: True)
     seen = {}
 
-    def fake(job, e, p, s, feedback=None, judge_context=None):
-        seen["feedback"] = feedback
-        return {"experience_ids": [0], "experience_bullets": [[]], "project_ids": [0],
-                "project_bullets": [[]], "skill_categories": ["Langues"], "reasoning": ""}
+    def fake(job, e, p, s, judge_context=None):
+        seen["called"] = True
+        return {"experience_ids": [0], "experience_scores": [[]], "project_ids": [0],
+                "project_scores": [[]], "skill_scores": [], "reasoning": ""}
     monkeypatch.setattr(engine.llm_select, "select", fake)
-    parsed = snippet_bank.parse(engine.base_cv_path("fr"), "fr")
-    engine.tailor_tex(_job(), parsed=parsed)
-    assert "French version" in seen["feedback"] and "10% longer" in seen["feedback"]
-    parsed_en = snippet_bank.parse(engine.base_cv_path("en"), "en")
-    engine.tailor_tex(_job(), parsed=parsed_en)
-    assert seen["feedback"] is None                     # English gets no hint
+    engine.tailor_tex(_job(), parsed=snippet_bank.parse(engine.base_cv_path("fr"), "fr"))
+    assert seen["called"] and not hasattr(engine, "_FRENCH_LENGTH_HINT")
 
 
-def test_the_hint_is_added_to_a_retry_feedback_not_replaced(monkeypatch):
-    monkeypatch.setattr(engine.provider, "available", lambda: True)
-    seen = {}
-    monkeypatch.setattr(engine.llm_select, "select", lambda job, e, p, s, feedback=None, judge_context=None:
-                        seen.update(feedback=feedback) or {})
-    parsed = snippet_bank.parse(engine.base_cv_path("fr"), "fr")
-    engine.tailor_tex(_job(), parsed=parsed, feedback="compiled to 3 pages")
-    assert seen["feedback"].startswith("compiled to 3 pages") and "French version" in seen["feedback"]
-
-
-def test_drop_last_project_bullet_trims_the_last_multi_bullet_project_and_keeps_one_each():
-    parsed = snippet_bank.parse(engine.BASE_CV, "en")
-    doc = parsed.document
-    before = [len(b.bullets()) for b in snippet_bank.parse(engine.BASE_CV, "en").projects]
-    once = snippet_bank.drop_last_project_bullet(doc, "en")
-    after = [len(b.bullets()) for b in _projects_of(once)]
-    assert sum(before) - sum(after) == 1
-    assert after[-1] == before[-1] - 1 and after[:-1] == before[:-1]    # the last project (thesis) lost one
-    doc2 = doc
-    for _ in range(40):
-        nxt = snippet_bank.drop_last_project_bullet(doc2, "en")
-        if nxt is None:
-            break
-        doc2 = nxt
-    left = _projects_of(doc2)
-    assert all(len(b.bullets()) <= 1 for b in left)           # bullets first...
-    assert len(left) == snippet_bank.MIN_PROJECTS             # ...then whole projects, down to the floor
-    assert snippet_bank.drop_last_project_bullet(doc2, "en") is None   # nothing left to drop
-
-
-def _projects_of(doc, lang="en"):
-    import tempfile
-    from pathlib import Path
-    with tempfile.TemporaryDirectory() as tmp:
-        p = Path(tmp) / "x.tex"
-        p.write_text(doc, encoding="utf-8")
-        return snippet_bank.parse(p, lang).projects
-
-
-def _page_count_log(out_dir, name, pages=3):
-    out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / f"{name}.compile.log").write_text(f"Compiled to {pages} page(s), expected exactly 2.\n")
-
-
-def test_a_cv_still_over_two_pages_after_the_retry_is_trimmed_until_it_fits(tmp_path, monkeypatch, no_llm):
+def test_a_latex_error_is_not_retried_or_trimmed(tmp_path, monkeypatch, no_llm):
     monkeypatch.setattr(engine, "CV_OUT_DIR", tmp_path)
-    compiles = []
-
-    def fake_compile(tex, out_dir, name="cv", expected_pages=None):
-        compiles.append(tex)
-        if len(compiles) < 4:                       # first attempt, retry, first trim: still 3 pages
-            _page_count_log(out_dir, name)
-            return None
-        out_dir.mkdir(parents=True, exist_ok=True)
-        (out_dir / f"{name}.tex").write_text(tex)
-        (out_dir / f"{name}.pdf").write_bytes(b"%PDF")
-        return out_dir / f"{name}.pdf"
-    monkeypatch.setattr(engine, "compile_tex", fake_compile)
-    res = engine.tailor_job(_job(), 1, auto=True)
-    assert res.pdf_path is not None
-    assert "auto-trimmed 2 project item(s) to fit two pages" in res.note
-    assert len(compiles) == 4
-    assert compiles[3].count(r"\resumeItem{") == compiles[1].count(r"\resumeItem{") - 2
-
-
-def test_trimming_gives_up_after_the_cap_and_leaves_the_page_count_failure(tmp_path, monkeypatch, no_llm):
-    monkeypatch.setattr(engine, "CV_OUT_DIR", tmp_path)
-    compiles = []
-
-    def always_three_pages(tex, out_dir, name="cv", expected_pages=None):
-        compiles.append(tex)
-        _page_count_log(out_dir, name)
-        return None
-    monkeypatch.setattr(engine, "compile_tex", always_three_pages)
-    res = engine.tailor_job(_job(), 1, auto=True)
-    assert res.pdf_path is None and "3 page(s)" in res.note and "auto-trimmed" not in res.note
-    assert 2 < len(compiles) <= 2 + engine.MAX_AUTOTRIM      # attempt, retry, then trims up to the cap or the floor
-
-
-def test_a_latex_error_is_never_trimmed(tmp_path, monkeypatch, no_llm):
-    monkeypatch.setattr(engine, "CV_OUT_DIR", tmp_path)
-    compiles = []
+    finals = []
 
     def broken(tex, out_dir, name="cv", expected_pages=None):
-        compiles.append(1)
+        if name != "fit":
+            finals.append(1)
         out_dir.mkdir(parents=True, exist_ok=True)
         (out_dir / f"{name}.compile.log").write_text("! Undefined control sequence.\n")
         return None
     monkeypatch.setattr(engine, "compile_tex", broken)
     res = engine.tailor_job(_job(), 1, auto=True)
-    assert res.pdf_path is None and "LaTeX compile error" in res.note and len(compiles) == 1
-
-
-def test_the_interactive_path_is_not_trimmed(tmp_path, monkeypatch, no_llm):
-    monkeypatch.setattr(engine, "CV_OUT_DIR", tmp_path)
-    compiles = []
-    monkeypatch.setattr(engine, "compile_tex", lambda tex, out_dir, name="cv", expected_pages=None:
-                        compiles.append(1) or None)
-    engine.tailor_job(_job(), 1, auto=False)
-    assert len(compiles) == 1
+    assert res.pdf_path is None and "LaTeX compile error" in res.note and len(finals) == 1
 
 
 def test_the_french_summary_voice_has_no_third_person_pronoun():

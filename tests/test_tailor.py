@@ -66,39 +66,40 @@ def test_fallback_select_caps_and_orders_reverse_chronologically():
     assert dates == sorted(dates, reverse=True)
 
 
-def test_fallback_select_skills_drops_medical_imaging_when_irrelevant():
+def test_fallback_skills_drop_medical_imaging_when_irrelevant(monkeypatch):
+    _no_llm(monkeypatch)
     parsed = snippet_bank.parse(BASE_CV)
     job = Job(source="x", external_id="1", title="RAG Engineer", company="A",
               description="RAG, LLM agents, retrieval")
-    kept = engine._fallback_select_skills(parsed.skills, engine._job_terms(job))
-    names = [c.name for c in kept]
+    names = [c.name for c in engine._select_blocks(job, parsed, engine._job_terms(job)).skills]
     assert engine._CONDITIONAL_SKILL_CATEGORY["en"] not in names
     assert "Technical Skills" in names
 
 
-def test_fallback_select_skills_keeps_medical_imaging_when_relevant():
+def test_fallback_skills_keep_medical_imaging_when_relevant(monkeypatch):
+    _no_llm(monkeypatch)
     parsed = snippet_bank.parse(BASE_CV)
     job = Job(source="x", external_id="1", title="Medical Imaging Engineer", company="A",
               description="clinical CT and CTA segmentation")
-    kept = engine._fallback_select_skills(parsed.skills, engine._job_terms(job))
-    assert engine._CONDITIONAL_SKILL_CATEGORY["en"] in [c.name for c in kept]
+    names = [c.name for c in engine._select_blocks(job, parsed, engine._job_terms(job)).skills]
+    assert engine._CONDITIONAL_SKILL_CATEGORY["en"] in names
 
 
-def test_apply_ids_ignores_out_of_range_and_duplicates_and_respects_order():
+def test_pick_ignores_out_of_range_and_duplicates_and_respects_order():
     parsed = snippet_bank.parse(BASE_CV)
-    chosen = engine._apply_ids(parsed.projects, [2, 99, 2, "x", 0], cap=5)
-    assert chosen == [parsed.projects[2], parsed.projects[0]]
+    chosen = engine._pick(parsed.projects, [2, 99, 2, "x", 0], [[10, 20], [], [], [], [30]], cap=5)
+    assert chosen == [(parsed.projects[2], [10, 20]), (parsed.projects[0], [30])]   # scores follow their id's position
 
 
-def test_apply_ids_non_list_returns_empty():
+def test_pick_non_list_returns_empty():
     parsed = snippet_bank.parse(BASE_CV)
-    assert engine._apply_ids(parsed.projects, None, cap=3) == []
+    assert engine._pick(parsed.projects, None, None, cap=3) == []
 
 
-def test_apply_names_ignores_unknown_names():
+def test_pick_drops_non_numeric_scores_and_caps():
     parsed = snippet_bank.parse(BASE_CV)
-    chosen = engine._apply_names(parsed.skills, ["Technical Skills", "Not A Real Category"])
-    assert [c.name for c in chosen] == ["Technical Skills"]
+    chosen = engine._pick(parsed.projects, [0, 1, 2], [[5, "x", None, 7]], cap=2)
+    assert chosen[0][1] == [5, 7] and len(chosen) == 2
 
 
 def test_block_bullets_counts_real_bullets_and_is_empty_for_description_only_project():
@@ -130,12 +131,21 @@ def test_filter_bullets_no_op_on_description_only_project():
     assert snippet_bank.filter_bullets(nerf.text, [0, 1]) == nerf.text
 
 
-def test_apply_selection_trims_bullets_per_chosen_block():
+def test_a_trimmed_plan_renders_only_its_kept_bullets_items_and_modules(monkeypatch):
+    _no_llm(monkeypatch)
     parsed = snippet_bank.parse(BASE_CV)
-    dilitrust_idx = next(i for i, b in enumerate(parsed.experiences) if "DiliTrust" in b.text)
-    chosen = engine._apply_selection(parsed.experiences, [dilitrust_idx], [[1, 3]], cap=2)
-    assert len(chosen) == 1
-    assert len(chosen[0].bullets()) == 2
+    job = Job(source="x", external_id="1", title="ML Engineer", company="Acme", description="machine learning")
+    draft = engine._draft(job, parsed)
+    full = draft.render()
+    plan = draft.plan.copy()
+    plan.experiences[0].keep[0] = False
+    plan.skills[0].keep[0] = False
+    plan.modules = 2
+    tex = draft.render(plan)
+    first_exp = draft.selection.experiences[0].bullets()
+    assert first_exp[0] in full and first_exp[0] not in tex and first_exp[1] in tex
+    assert "Python," in full.split(r"\section{SKILLS}")[1] and "Python," not in tex.split(r"\section{SKILLS}")[1]
+    assert len(tex) < len(full)
 
 
 def test_tailor_uses_llm_selection_when_available(monkeypatch):
@@ -145,18 +155,16 @@ def test_tailor_uses_llm_selection_when_available(monkeypatch):
     parsed = snippet_bank.parse(BASE_CV)
     captured = {}
 
-    def fake_select(job, experiences, projects, skill_names, feedback=None, judge_context=None):
-        captured["job"] = job
+    def fake_select(job, experiences, projects, skills, judge_context=None):
         captured["n_experiences"] = len(experiences)
         captured["n_projects"] = len(projects)
-        captured["skill_names"] = skill_names
-        captured["feedback"] = feedback
+        captured["skill_names"] = [name for name, _ in skills]
         return {
             "experience_ids": [1, 0],           # deliberately not date order
-            "experience_bullets": [[], []],     # empty -> keep all bullets
+            "experience_scores": [[], []],
             "project_ids": [3, 1],
-            "project_bullets": [[], []],
-            "skill_categories": ["Technical Skills", "Languages"],
+            "project_scores": [[], []],
+            "skill_scores": [],
             "reasoning": "test",
         }
 
@@ -166,52 +174,44 @@ def test_tailor_uses_llm_selection_when_available(monkeypatch):
 
     assert captured["n_experiences"] == len(parsed.experiences)
     assert captured["n_projects"] == len(parsed.projects)
-    assert captured["feedback"] is None
+    assert "Languages" not in captured["skill_names"] and "Technical Skills" in captured["skill_names"]
     # experience_ids [1, 0] means block 1 appears before block 0 in the output
     assert tex.index(parsed.experiences[1].text.strip()[:40]) < tex.index(parsed.experiences[0].text.strip()[:40])
     assert _n_projects(tex) == 2
-    assert "Languages" in tex.split(r"\section{SKILLS}")[1]
+    assert "Languages" in tex.split(r"\section{SKILLS}")[1]      # every category is kept for the fit step
 
 
-def test_tailor_passes_feedback_through_to_the_llm_selection_call(monkeypatch):
-    monkeypatch.setattr(engine.provider, "available", lambda: True)
-    captured = {}
-    monkeypatch.setattr(engine.llm_select, "select", lambda job, e, p, s, feedback=None, judge_context=None:
-                        captured.update(feedback=feedback) or {
-                            "experience_ids": [0], "experience_bullets": [[]],
-                            "project_ids": [0], "project_bullets": [[]],
-                            "skill_categories": ["Technical Skills"], "reasoning": "",
-                        })
-    job = Job(source="x", external_id="1", title="ML Engineer", company="Acme", description="machine learning")
-    engine.tailor_tex(job, feedback="compiled to 3 pages, trim more")
-    assert captured["feedback"] == "compiled to 3 pages, trim more"
-
-
-def test_tailor_llm_selection_trims_bullets_within_kept_entries(monkeypatch):
-    """This is the fix for the demonstrated gap: block-level selection alone
-    kept a whole multi-bullet entry and left page 2 sparse. The LLM call can now
-    also choose a subset of a kept entry's own bullets."""
+def test_llm_scores_stay_with_their_entries_and_items(monkeypatch):
+    """The LLM only ranks: its scores become the plan the fit step trims by."""
     monkeypatch.setattr(engine.provider, "available", lambda: True)
     parsed = snippet_bank.parse(BASE_CV)
     dilitrust_idx = next(i for i, b in enumerate(parsed.experiences) if "DiliTrust" in b.text)
-    assert len(parsed.experiences[dilitrust_idx].bullets()) == 4  # sanity: master has 4
+    n_items = len(snippet_bank.split_skill_items(parsed.skills[0].line).items)
 
-    monkeypatch.setattr(engine.llm_select, "select", lambda job, e, p, s, feedback=None, judge_context=None: {
-        "experience_ids": [dilitrust_idx],
-        "experience_bullets": [[0, 2, 3]],   # keep only 3 of DiliTrust's 4 bullets
-        "project_ids": [0],
-        "project_bullets": [[]],
-        "skill_categories": ["Technical Skills"],
+    monkeypatch.setattr(engine.llm_select, "select", lambda job, e, p, s, judge_context=None: {
+        "experience_ids": [dilitrust_idx], "experience_scores": [[90, 10, 70, 30]],
+        "project_ids": [0], "project_scores": [[]],
+        "skill_scores": [list(range(n_items))],
         "reasoning": "test",
     })
     job = Job(source="x", external_id="1", title="ML Engineer", company="Acme", description="machine learning")
-    tex = engine.tailor_tex(job, parsed=parsed)
+    plan = engine._draft(job, parsed).plan
 
-    exp_section = tex.split(r"\section{PROFESSIONAL EXPERIENCE}")[1].split(r"\section{PROJECTS")[0]
-    assert exp_section.count(r"\resumeItem{") == 3
-    original = parsed.experiences[dilitrust_idx].bullets()
-    assert original[0] in exp_section and original[2] in exp_section and original[3] in exp_section
-    assert original[1] not in exp_section
+    assert plan.experiences[0].scores == [90, 10, 70, 30]
+    assert plan.skills[0].scores == list(range(n_items)) and plan.skills[0].trimmable
+    assert not plan.skills[-1].trimmable                                   # the Languages line is never trimmed
+    assert all(plan.experiences[0].keep)                                   # nothing is cut before measuring
+
+
+def test_missing_scores_default_to_neutral(monkeypatch):
+    monkeypatch.setattr(engine.provider, "available", lambda: True)
+    monkeypatch.setattr(engine.llm_select, "select", lambda *a, **k: {
+        "experience_ids": [0], "experience_scores": [[80]],
+        "project_ids": [0], "project_scores": [], "skill_scores": [], "reasoning": ""})
+    job = Job(source="x", external_id="1", title="ML Engineer", company="Acme", description="machine learning")
+    plan = engine._draft(job, snippet_bank.parse(BASE_CV)).plan
+    assert plan.experiences[0].scores[0] == 80 and set(plan.experiences[0].scores[1:]) == {50}
+    assert set(plan.skills[0].scores) == {50}
 
 
 def test_tailor_falls_back_when_llm_selection_raises(monkeypatch):
@@ -229,9 +229,9 @@ def test_tailor_falls_back_when_llm_selection_raises(monkeypatch):
 def test_tailor_falls_back_when_llm_selection_is_incomplete(monkeypatch):
     monkeypatch.setattr(engine.provider, "available", lambda: True)
     monkeypatch.setattr(engine.llm_select, "select", lambda *a, **k: {
-        "experience_ids": [], "experience_bullets": [],
-        "project_ids": [0], "project_bullets": [[]],
-        "skill_categories": [], "reasoning": "",
+        "experience_ids": [], "experience_scores": [],
+        "project_ids": [0], "project_scores": [[]],
+        "skill_scores": [], "reasoning": "",
     })
     job = Job(source="x", external_id="1", title="ML Engineer", company="Acme", description="machine learning")
     tex = engine.tailor_tex(job)  # incomplete result -> deterministic fallback, not a half-empty CV
@@ -330,133 +330,46 @@ def test_tailor_job_auto_false_default_skips_page_gate(tmp_path, monkeypatch):
     assert captured["expected_pages"] is None
 
 
-def test_last_page_fill_ratio_none_without_pdftotext(tmp_path, monkeypatch):
+def test_page_layout_is_none_without_pdftotext(tmp_path, monkeypatch):
     monkeypatch.setattr(engine, "_pdftotext_path", lambda: None)
-    assert engine._last_page_fill_ratio(tmp_path / "cv.pdf", 2) is None
+    assert engine._page_layout(tmp_path / "cv.pdf") is None
 
 
-def test_missing_pdftotext_is_tracked_so_the_skipped_sparse_check_is_visible(tmp_path, monkeypatch):
-    monkeypatch.setattr(engine, "_pdftotext_path", lambda: None)
-    with fetch_diag.run_tracking() as tracker:
-        assert engine._last_page_fill_ratio(tmp_path / "cv.pdf", 2) is None
-    assert dict(tracker.counts) == {("tailor", "", "tailor_fill_check_unavailable"): 1}
+def test_page_layout_is_none_when_pdftotext_fails(tmp_path, monkeypatch):
+    monkeypatch.setattr(engine, "_pdftotext_path", lambda: "/usr/bin/pdftotext")
+    monkeypatch.setattr(engine.subprocess, "run", lambda *a, **k: _FakeProc(1, ""))
+    assert engine._page_layout(tmp_path / "cv.pdf") is None
 
 
-def test_a_single_page_or_a_working_pdftotext_is_not_tracked(tmp_path, monkeypatch):
-    monkeypatch.setattr(engine, "_page_text", lambda pdf, page: "line\n" * 10)
-    with fetch_diag.run_tracking() as tracker:
-        engine._last_page_fill_ratio(tmp_path / "cv.pdf", 1)
-        engine._last_page_fill_ratio(tmp_path / "cv.pdf", 2)
-    assert dict(tracker.counts) == {}
-
-
-def test_last_page_fill_ratio_none_for_single_page(tmp_path):
-    assert engine._last_page_fill_ratio(tmp_path / "cv.pdf", 1) is None
-
-
-def test_last_page_fill_ratio_computes_relative_density(tmp_path, monkeypatch):
-    pages = {1: "line\n" * 20, 2: "line\n" * 5}
-    monkeypatch.setattr(engine, "_page_text", lambda pdf, page: pages[page])
-    ratio = engine._last_page_fill_ratio(tmp_path / "cv.pdf", 2)
-    assert ratio == 0.25
-
-
-def test_retry_feedback_none_when_fill_ratio_is_healthy(tmp_path, monkeypatch):
-    monkeypatch.setattr(engine, "_last_page_fill_ratio", lambda pdf, n: 0.8)
-    pdf = tmp_path / "cv.pdf"
-    pdf.write_bytes(b"%PDF")
-    assert engine._retry_feedback(pdf, tmp_path) is None
-
-
-def test_retry_feedback_requests_more_content_when_sparse(tmp_path, monkeypatch):
-    monkeypatch.setattr(engine, "_last_page_fill_ratio", lambda pdf, n: 0.1)
-    pdf = tmp_path / "cv.pdf"
-    pdf.write_bytes(b"%PDF")
-    feedback = engine._retry_feedback(pdf, tmp_path)
-    assert feedback is not None and "sparse" in feedback
-
-
-def test_retry_feedback_requests_trim_when_compile_rejected_for_too_many_pages(tmp_path):
-    (tmp_path / "cv.compile.log").write_text(
-        "Compiled to 3 page(s), expected exactly 2. PDF kept for review.\n")
-    feedback = engine._retry_feedback(None, tmp_path)
-    assert feedback is not None and "Trim" in feedback
-
-
-def test_retry_feedback_none_on_a_real_compile_error_not_a_length_issue(tmp_path):
-    (tmp_path / "cv.compile.log").write_text("! Undefined control sequence.\nl.42 \\foo\n")
-    assert engine._retry_feedback(None, tmp_path) is None
-
-
-def test_tailor_job_retries_once_when_first_attempt_is_sparse(tmp_path, monkeypatch):
-    monkeypatch.setattr(engine, "CV_OUT_DIR", tmp_path)
-    monkeypatch.setattr(engine.provider, "available", lambda: False)  # deterministic fallback is fine here
-    calls = []
-
-    def fake_compile(tex, out_dir, name="cv", expected_pages=None):
-        calls.append(tex)
-        return out_dir / "cv.pdf"   # "succeeds" both times -- retry is driven by fill ratio, not page count
-
-    monkeypatch.setattr(engine, "compile_tex", fake_compile)
-    # Sparse on the first check, healthy on the second, so exactly one retry happens.
-    ratios = iter([0.1, 0.9])
-    monkeypatch.setattr(engine, "_last_page_fill_ratio", lambda pdf, n: next(ratios))
-
-    job = Job(source="x", external_id="1", title="ML Engineer", company="Acme", description="machine learning")
-    tex_path, pdf_path, note, _lang = engine.tailor_job(job, 1, auto=True)
-
-    assert len(calls) == 2   # first attempt + exactly one retry, not an unbounded loop
-    assert pdf_path == tmp_path / "1-acme" / "cv.pdf"
-
-
-def test_page_fit_retry_reuses_the_summary_and_repeats_only_the_selection(tmp_path, monkeypatch):
-    monkeypatch.setattr(engine, "CV_OUT_DIR", tmp_path)
-    _llm_ok(monkeypatch)
-    summary_calls, select_calls = [], []
-    monkeypatch.setattr(engine.summary, "generate_summary",
-                        lambda *a, **k: summary_calls.append(1) or None)
-    real_select = engine.llm_select.select
-    monkeypatch.setattr(engine.llm_select, "select",
-                        lambda *a, **k: select_calls.append(1) or real_select(*a, **k))
-    monkeypatch.setattr(engine, "compile_tex", lambda tex, out_dir, name="cv", expected_pages=None: out_dir / "cv.pdf")
-    ratios = iter([0.1, 0.9])   # sparse, then healthy: exactly one retry
-    monkeypatch.setattr(engine, "_last_page_fill_ratio", lambda pdf, n: next(ratios))
-
-    job = Job(source="x", external_id="1", title="ML Engineer", company="Acme", description="machine learning")
-    engine.tailor_job(job, 1, auto=True)
-
-    assert len(select_calls) == 2 and len(summary_calls) == 1
-
-
-def test_tailor_job_does_not_retry_when_first_attempt_is_already_healthy(tmp_path, monkeypatch):
-    monkeypatch.setattr(engine, "CV_OUT_DIR", tmp_path)
-    monkeypatch.setattr(engine.provider, "available", lambda: False)
-    calls = []
-    monkeypatch.setattr(engine, "compile_tex", lambda tex, out_dir, name="cv", expected_pages=None:
-                        calls.append(tex) or out_dir / "cv.pdf")
-    monkeypatch.setattr(engine, "_last_page_fill_ratio", lambda pdf, n: 0.85)
-
-    job = Job(source="x", external_id="1", title="ML Engineer", company="Acme", description="machine learning")
-    engine.tailor_job(job, 1, auto=True)
-
-    assert len(calls) == 1
+def test_page_layout_parses_pdftotext_bbox_output(tmp_path, monkeypatch):
+    out = ('<doc><page width="612.0" height="792.0">'
+           '<word xMin="50" yMin="40" xMax="90" yMax="50">Name</word>'
+           '<word xMin="50" yMin="53" xMax="90" yMax="63">Next</word></page></doc>')
+    monkeypatch.setattr(engine, "_pdftotext_path", lambda: "/usr/bin/pdftotext")
+    monkeypatch.setattr(engine.subprocess, "run", lambda *a, **k: _FakeProc(0, out))
+    layout = engine._page_layout(tmp_path / "cv.pdf")
+    assert layout.pages == 1 and layout.line_counts == [2] and layout.bottoms == [63.0]
 
 
 def _llm_ok(monkeypatch):
     """LLM block selection succeeds with a minimal valid pick, so no keyword fallback."""
     monkeypatch.setattr(engine.provider, "available", lambda: True)
-    monkeypatch.setattr(engine.llm_select, "select", lambda job, e, p, s, feedback=None, judge_context=None: {
-        "experience_ids": [0], "experience_bullets": [[]], "project_ids": [0], "project_bullets": [[]],
-        "skill_categories": ["Technical Skills"], "reasoning": ""})
+    monkeypatch.setattr(engine.llm_select, "select", lambda job, e, p, s, judge_context=None: {
+        "experience_ids": [0], "experience_scores": [[]], "project_ids": [0], "project_scores": [[]],
+        "skill_scores": [], "reasoning": ""})
 
 
-def _tailor_with_tracking(tmp_path, monkeypatch, compile_fn, ratios=None, auto=True):
+def _two_page_layout(monkeypatch, free_lines=1.0):
+    """Pretend every compile measured as a full two-page CV (so no trimming or adding back)."""
+    layout = engine.fit.Layout(2, 792.0, 12.0, [756 - 36 - free_lines * 12 + 36] * 2, [55, 55], ["Name", "PROJECTS"])
+    monkeypatch.setattr(engine, "_page_layout", lambda pdf: layout)
+
+
+def _tailor_with_tracking(tmp_path, monkeypatch, compile_fn, auto=True):
     monkeypatch.setattr(engine, "CV_OUT_DIR", tmp_path)
     _llm_ok(monkeypatch)
+    _two_page_layout(monkeypatch)
     monkeypatch.setattr(engine, "compile_tex", compile_fn)
-    if ratios is not None:
-        it = iter(ratios)
-        monkeypatch.setattr(engine, "_last_page_fill_ratio", lambda pdf, n: next(it))
     job = Job(source="x", external_id="1", title="ML Engineer", company="Acme", description="machine learning")
     with fetch_diag.run_tracking() as tracker:
         result = engine.tailor_job(job, 1, auto=auto)
@@ -472,7 +385,7 @@ def _failing_compile(log_text):
     return fake
 
 
-def test_tailor_job_records_a_page_count_failure_after_the_retry(tmp_path, monkeypatch):
+def test_tailor_job_records_a_page_count_failure(tmp_path, monkeypatch):
     log = "Compiled to 3 page(s), expected exactly 2. PDF kept at x for review.\n"
     result, tracker = _tailor_with_tracking(tmp_path, monkeypatch, _failing_compile(log))
 
@@ -494,16 +407,6 @@ def test_tailor_job_records_failures_for_the_interactive_path_too(tmp_path, monk
     assert result.note and ("tailor", "Acme", "tailor_latex_error") in tracker.counts
 
 
-def test_tailor_job_flags_a_still_sparse_page_two_after_the_retry_but_keeps_the_pdf(tmp_path, monkeypatch):
-    result, tracker = _tailor_with_tracking(
-        tmp_path, monkeypatch, lambda tex, out_dir, name="cv", expected_pages=None: out_dir / "cv.pdf",
-        ratios=[0.1, 0.2])   # sparse on the first check, still sparse after the retry
-
-    assert result.pdf_path is not None                     # a valid 2-page PDF stays usable
-    assert "sparse" in result.note and "20%" in result.note
-    assert dict(tracker.counts) == {("tailor", "Acme", "tailor_sparse_after_retry"): 1}
-
-
 def _writing_compile(tex, out_dir, name="cv", expected_pages=None):
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / f"{name}.tex").write_text(tex, encoding="utf-8")
@@ -515,7 +418,7 @@ def test_each_tailoring_gets_its_own_files_and_cv_tex_pdf_mirror_the_latest(tmp_
     monkeypatch.setattr(engine, "CV_OUT_DIR", tmp_path)
     _no_llm(monkeypatch)
     monkeypatch.setattr(engine, "compile_tex", _writing_compile)
-    monkeypatch.setattr(engine, "_last_page_fill_ratio", lambda pdf, n: 0.9)
+    _two_page_layout(monkeypatch)
     stamps = iter(["20260101-000000-000", "20260102-000000-000"])
     monkeypatch.setattr(engine, "_version_stamp", lambda: next(stamps))
     job = Job(source="x", external_id="1", title="ML Engineer", company="Acme", description="machine learning")
@@ -537,7 +440,7 @@ def test_cv_compile_log_mirrors_a_failure_and_is_cleared_by_the_next_success(tmp
     assert "Compiled to 3" in (tmp_path / "1-acme" / "cv.compile.log").read_text()
 
     monkeypatch.setattr(engine, "compile_tex", _writing_compile)
-    monkeypatch.setattr(engine, "_last_page_fill_ratio", lambda pdf, n: 0.9)
+    _two_page_layout(monkeypatch)
     job = Job(source="x", external_id="1", title="ML Engineer", company="Acme", description="machine learning")
     engine.tailor_job(job, 1, auto=True)
 
@@ -552,7 +455,7 @@ def test_cv_compile_log_mirrors_a_failure_and_is_cleared_by_the_next_success(tmp
 def test_keyword_fallback_is_tracked_and_marked_on_the_cv(tmp_path, monkeypatch, setup, reason):
     monkeypatch.setattr(engine, "CV_OUT_DIR", tmp_path)
     monkeypatch.setattr(engine, "compile_tex", _writing_compile)
-    monkeypatch.setattr(engine, "_last_page_fill_ratio", lambda pdf, n: 0.9)
+    _two_page_layout(monkeypatch)
     monkeypatch.setattr(engine.provider, "available", lambda: setup != "unavailable")
     if setup == "raises":
         def boom(*a, **k):
@@ -560,8 +463,8 @@ def test_keyword_fallback_is_tracked_and_marked_on_the_cv(tmp_path, monkeypatch,
         monkeypatch.setattr(engine.llm_select, "select", boom)
     elif setup == "incomplete":
         monkeypatch.setattr(engine.llm_select, "select", lambda *a, **k: {
-            "experience_ids": [], "experience_bullets": [], "project_ids": [0],
-            "project_bullets": [[]], "skill_categories": [], "reasoning": ""})
+            "experience_ids": [], "experience_scores": [], "project_ids": [0],
+            "project_scores": [[]], "skill_scores": [], "reasoning": ""})
     job = Job(source="x", external_id="1", title="ML Engineer", company="Acme", description="machine learning")
 
     with fetch_diag.run_tracking() as tracker:
@@ -584,14 +487,5 @@ def test_fallback_marker_is_kept_alongside_a_compile_failure_note(tmp_path, monk
 
 
 def test_llm_selection_success_is_not_marked_as_fallback(tmp_path, monkeypatch):
-    result, tracker = _tailor_with_tracking(
-        tmp_path, monkeypatch, _writing_compile, ratios=[0.9])
+    result, tracker = _tailor_with_tracking(tmp_path, monkeypatch, _writing_compile)
     assert not result.fallback and dict(tracker.counts) == {}
-
-
-def test_tailor_job_has_no_note_when_the_retry_fixes_it(tmp_path, monkeypatch):
-    result, tracker = _tailor_with_tracking(
-        tmp_path, monkeypatch, lambda tex, out_dir, name="cv", expected_pages=None: out_dir / "cv.pdf",
-        ratios=[0.1, 0.9])
-
-    assert result.note == "" and dict(tracker.counts) == {}

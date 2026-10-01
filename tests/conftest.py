@@ -30,3 +30,10 @@ def tmp_db(tmp_path, monkeypatch):
 def config():
     from jobhunter.config import load_search_config
     return load_search_config()
+
+
+@pytest.fixture
+def two_page_layout(monkeypatch):
+    """Every compile measures as a full two-page CV, so the fit step neither trims nor adds back."""
+    layout = cv_engine_mod.fit.Layout(2, 792.0, 12.0, [744.0, 744.0], [55, 55], ["Name", "PROJECTS"])
+    monkeypatch.setattr(cv_engine_mod, "_page_layout", lambda pdf: layout)

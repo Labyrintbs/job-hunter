@@ -154,6 +154,54 @@ class SkillCategory:
     tags: set[str]
 
 
+_ITEM_SEPARATOR_RE = re.compile(r"\s*[,;]\s+")
+
+
+@dataclass
+class SkillItems:
+    prefix: str        # e.g. "\textbf{Name:} "
+    items: list[str]
+    seps: list[str]    # the separator written before each item ("" for the first)
+
+
+def split_skill_items(line: str) -> SkillItems | None:
+    """A skills line as its individual items. Items are separated by ", " or "; " (the
+    latter groups related tools); separators inside parentheses or braces don't split."""
+    m = SKILL_LINE_RE.match(line)
+    if not m:
+        return None
+    body, prefix = m.group(2), line[:m.start(2)]
+    items, seps, start, sep, depth, i = [], [], 0, "", 0, 0
+    while i < len(body):
+        ch = body[i]
+        depth += (ch in "({") - (ch in ")}")
+        sm = _ITEM_SEPARATOR_RE.match(body, i) if depth == 0 and ch in " ,;" else None
+        if sm:
+            items.append(body[start:i])
+            seps.append(sep)
+            sep, start, i = sm.group(0), sm.end(), sm.end()
+            continue
+        i += 1
+    items.append(body[start:])
+    seps.append(sep)
+    return SkillItems(prefix, items, seps)
+
+
+def join_skill_items(parts: SkillItems, keep: list[bool]) -> str:
+    """The line with only the kept items. A group's ';' separator moves to the next kept
+    item when the item that began the group is dropped, so groups stay separated."""
+    out, pending = [], ""
+    for item, sep, kept in zip(parts.items, parts.seps, keep):
+        if not kept:
+            if sep.strip() == ";" and not pending:
+                pending = sep
+            continue
+        sep = pending or sep if out else ""
+        pending = ""
+        out.append(sep + item)
+    return parts.prefix + "".join(out)
+
+
 @dataclass
 class ParsedCV:
     document: str          # full .tex source
@@ -259,29 +307,6 @@ def reassemble(doc: str, section_title_regex: str, ordered_items: list[Block]) -
     start, end, _ = span
     new_body = "\n" + "\n".join(b.text.rstrip() for b in ordered_items) + "\n    "
     return doc[:start] + new_body + doc[end:]
-
-
-MIN_PROJECTS = 2
-
-
-def drop_last_project_bullet(doc: str, lang: str = "en") -> str | None:
-    """`doc` with a little less project content: the last bullet of the last project
-    that has more than one, else (every project down to one bullet) the last whole
-    project, never going below MIN_PROJECTS. None when there is nothing left to drop.
-    The last-resort way to win back a few lines when a CV runs onto a third page."""
-    names = SECTIONS[lang]
-    span = _section_body(doc, names["projects"])
-    if not span:
-        return None
-    items = _split_items(span[2], PROJECT_MACRO)
-    for i in range(len(items) - 1, -1, -1):
-        count = len(_bullet_contents(items[i]))
-        if count > 1:
-            items[i] = filter_bullets(items[i], list(range(count - 1)))
-            return reassemble(doc, names["projects"], [Block(t) for t in items])
-    if len(items) > MIN_PROJECTS:
-        return reassemble(doc, names["projects"], [Block(t) for t in items[:-1]])
-    return None
 
 
 SUMMARY_BLOCK_RE = re.compile(r"%SUMMARY-BEGIN\n.*?%SUMMARY-END", re.S)

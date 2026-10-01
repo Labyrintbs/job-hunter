@@ -1,19 +1,18 @@
-"""LLM-driven selection of which CV blocks (and which bullets within them) to
-keep for one job.
+"""LLM-driven choice of which CV entries to keep for one job, and a relevance
+score for every bullet and every skills item inside them.
 
-Mirrors templates/cv_tailoring_workflow.md's Step 2 rules (the same rules
-applied when tailoring by hand in conversation): cap Professional Experience
-and Projects & Research, default to reverse-chronological order unless
-relevance is clearly argued, trim bullets that don't earn their space, keep
-Skills reuse-only. The LLM only ever chooses IDs/indices/names from a fixed
-menu of the candidate's real, existing content, it never writes new bullets or
-invents an entry, so there is no fabrication risk even when it's wrong about
-relevance.
+Mirrors templates/cv_tailoring_workflow.md's Step 2 rules: cap Professional
+Experience and Projects & Research, default to reverse-chronological order
+unless relevance is clearly argued. The LLM does not decide how much fits on
+the page: it only ranks. tailor/fit.py builds the full CV and removes the
+lowest-scored items until it measurably fits two pages. The LLM only ever
+returns ids/indices/scores for the candidate's real, existing content, it
+never writes new text, so there is no fabrication risk even when it's wrong
+about relevance.
 
-engine.py falls back to a deterministic keyword-overlap heuristic (whole
-blocks, no bullet trimming) when the LLM backend is unavailable or returns
-something unusable -- tailoring should never hard-fail just because this call
-did.
+engine.py falls back to deterministic keyword scores when the LLM backend is
+unavailable or returns something unusable -- tailoring should never hard-fail
+just because this call did.
 """
 from __future__ import annotations
 
@@ -21,9 +20,9 @@ from ..llm import provider
 from ..models import Job
 
 SYSTEM = (
-    "You tailor a CV by choosing which of the candidate's REAL, EXISTING entries and "
-    "bullets to keep for one job posting. You never invent content and never rewrite a "
-    "bullet's wording, you only select and order from the ids/indices/names given to you.\n\n"
+    "You rank a candidate's REAL, EXISTING CV content for one job posting. You never invent "
+    "content and never rewrite wording: you only choose entries by id and score what is "
+    "already there.\n\n"
     "Rules:\n"
     "- Professional Experience: keep exactly 2 entries, unless the job clearly calls for "
     "all of them (rare) -- pick whichever are most relevant to this specific job.\n"
@@ -35,18 +34,13 @@ SYSTEM = (
     "others, and say so in `reasoning` -- otherwise keep date order. When two entries are "
     "comparably relevant, prefer the more recent one rather than an older one that happens "
     "to touch the job's domain.\n"
-    "- Bullets: for each kept entry, also choose which of its own numbered bullets to keep. "
-    "Drop a bullet that doesn't earn its space for this specific job (redundant with "
-    "another kept bullet, or clearly the least relevant of the set) rather than keeping "
-    "every bullet by default. A entry with no numbered bullets (description-only) has "
-    "nothing to choose, return an empty list for it.\n"
-    "- Aim for a CV that fills its second page well without a large empty area at the "
-    "bottom, favor keeping slightly more bullets over leaving a page visibly sparse, but "
-    "never re-add a bullet you'd otherwise cut just to fill space -- a full page of "
-    "genuinely relevant content beats a full page of filler.\n"
-    "- Skills: keep every category unless it is clearly irrelevant to this job (e.g. "
-    "medical-imaging skills for a role with no vision/health angle at all). When genuinely "
-    "unsure, keep it, dropping a relevant category is worse than keeping an irrelevant one.\n"
+    "- Scores: for every numbered bullet of each kept entry, and every numbered item of each "
+    "skills category, give an integer 0-100 for how much it helps THIS application: 100 = "
+    "directly what the posting asks for, 50 = useful background, 0-20 = unrelated to this "
+    "job. Use the whole range so the weakest items stand out. Do not worry about length or "
+    "page space: a separate step removes the lowest-scored items until the CV fits. Return "
+    "one score per bullet and per item, in the order given. An entry with no numbered "
+    "bullets (description-only) gets an empty list.\n"
     "- Never invent a skill item, a project, an experience, or a bullet that isn't already "
     "given to you."
 )
@@ -56,33 +50,35 @@ Title: {title}
 Company: {company}
 Description:
 {description}
-{judge_block}{feedback_block}
+{judge_block}
 AVAILABLE PROFESSIONAL EXPERIENCE ENTRIES:
 {experiences}
 
 AVAILABLE PROJECTS & RESEARCH ENTRIES:
 {projects}
 
-AVAILABLE SKILL CATEGORIES:
+AVAILABLE SKILL CATEGORIES (items numbered within each):
 {skills}
 
-Return the experience ids to keep (ordered as they should appear), a same-length list of \
-bullet-index lists (one per kept experience, in the same order), the project ids to keep \
-(ordered as they should appear), a same-length list of bullet-index lists for those \
-projects, and the skill category names to keep."""
+Return the experience ids to keep (ordered as they should appear) and a same-length list of \
+score lists (one score per bullet of that entry, in the same order), the project ids to keep \
+(ordered as they should appear) with their score lists, and for each skill category, in the \
+order given, one score per item."""
+
+_SCORES = {"type": "array", "items": {"type": "array", "items": {"type": "integer"}}}
 
 RESULT_SCHEMA = {
     "type": "object",
     "properties": {
         "experience_ids": {"type": "array", "items": {"type": "integer"}},
-        "experience_bullets": {"type": "array", "items": {"type": "array", "items": {"type": "integer"}}},
+        "experience_scores": _SCORES,
         "project_ids": {"type": "array", "items": {"type": "integer"}},
-        "project_bullets": {"type": "array", "items": {"type": "array", "items": {"type": "integer"}}},
-        "skill_categories": {"type": "array", "items": {"type": "string"}},
+        "project_scores": _SCORES,
+        "skill_scores": _SCORES,
         "reasoning": {"type": "string"},
     },
-    "required": ["experience_ids", "experience_bullets", "project_ids", "project_bullets",
-                 "skill_categories", "reasoning"],
+    "required": ["experience_ids", "experience_scores", "project_ids", "project_scores",
+                 "skill_scores", "reasoning"],
 }
 
 
@@ -98,14 +94,18 @@ def _menu(blocks_bullets: list[tuple[str, list[str]]]) -> str:
     return "\n\n".join(entries)
 
 
+def _skills_menu(skills: list[tuple[str, list[str]]]) -> str:
+    return "\n".join(
+        f"{name}: " + "; ".join(f"[{j}] {item}" for j, item in enumerate(items))
+        for name, items in skills)
+
+
 def select(job: Job, experiences: list[tuple[str, list[str]]], projects: list[tuple[str, list[str]]],
-           skill_names: list[str], feedback: str | None = None, judge_context: str | None = None) -> dict:
+           skills: list[tuple[str, list[str]]], judge_context: str | None = None) -> dict:
     """`experiences`/`projects` are [(block text, [bullet strings])] pairs, see
-    engine._menu_pairs. `feedback` (optional) is a hint from a previous attempt
-    that didn't fit the page, e.g. "compiled to 3 pages, trim more content".
+    engine._menu_pairs; `skills` is [(category name, [item strings])].
     `judge_context` (optional) is the fit-judge's own verdict/reasons for this
     posting, passed through as background (see pipeline._judge_context)."""
-    feedback_block = f"\nNOTE: {feedback}\n" if feedback else "\n"
     judge_block = f"\nFIT-JUDGE'S OWN ASSESSMENT OF THIS POSTING (background only, don't quote it back):\n{judge_context}\n" if judge_context else ""
     prompt = PROMPT.format(
         title=job.title,
@@ -113,10 +113,9 @@ def select(job: Job, experiences: list[tuple[str, list[str]]], projects: list[tu
         # 16000 matches judge.py/enrich.py's cap -- the full stored JD, not half of it.
         description=(job.description or "")[:16000],
         judge_block=judge_block,
-        feedback_block=feedback_block,
         experiences=_menu(experiences),
         projects=_menu(projects),
-        skills="\n".join(f"- {n}" for n in skill_names),
+        skills=_skills_menu(skills),
     )
-    return provider.generate_json(prompt, system=SYSTEM, max_tokens=1000, json_schema=RESULT_SCHEMA,
+    return provider.generate_json(prompt, system=SYSTEM, max_tokens=1500, json_schema=RESULT_SCHEMA,
                                   model=provider.FAST_MODEL)
