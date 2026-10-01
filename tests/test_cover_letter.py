@@ -56,3 +56,67 @@ def test_draft_without_judge_context_omits_the_block(monkeypatch):
                         lambda prompt, **kw: captured.update(prompt=prompt) or "cover letter body")
     CL.draft(_job())
     assert "FIT-JUDGE'S OWN ASSESSMENT" not in captured["prompt"]
+
+
+FR_LETTER = ("Je vous écris au sujet du poste d'ingénieur Machine Learning dans votre équipe. Mon stage "
+             "chez DiliTrust m'a permis de travailler sur l'extraction d'entités juridiques avec des "
+             "prompts structurés, et je souhaite mettre cette expérience au service de vos projets. "
+             "Je suis disponible immédiatement à Paris.") * 2
+EN_LETTER = ("I am applying for the Machine Learning Engineer role in your team. My internship at DiliTrust "
+             "let me work on legal entity extraction with structured prompts, and I would like to bring "
+             "this experience to your projects. I am available immediately in Paris.") * 2
+
+
+def test_the_prompt_asks_for_the_requested_language(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(CL.provider, "generate",
+                        lambda prompt, system=None, **kw: seen.update(system=system, prompt=prompt) or "x")
+    CL.draft(_job(), language="fr")
+    assert "written in French" in seen["system"] and "vous" in seen["system"]
+    CL.draft(_job(), language="en")
+    assert "written in English" in seen["system"]
+
+
+def test_the_feedback_of_a_rejected_attempt_reaches_the_prompt(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(CL.provider, "generate", lambda prompt, **kw: seen.update(prompt=prompt) or "x")
+    CL.draft(_job(), language="fr", feedback="the letter reads as EN")
+    assert "previous attempt was rejected: the letter reads as EN" in seen["prompt"]
+    assert "Write the whole letter in French" in seen["prompt"]
+
+
+def test_language_problem_only_counts_function_words():
+    assert CL.language_problem(FR_LETTER, "fr") == ""
+    assert CL.language_problem(EN_LETTER, "en") == ""
+    assert "reads as EN" in CL.language_problem(EN_LETTER, "fr")
+    assert "reads as FR" in CL.language_problem(FR_LETTER, "en")
+    mixed = FR_LETTER + " The fine-tuning of LLM pipelines with LangGraph agents."   # a little English is fine
+    assert CL.language_problem(mixed, "fr") == ""
+
+
+def test_a_wrong_language_draft_is_retried_once_then_kept(monkeypatch, tmp_path):
+    from jobhunter import fetch_diag
+    answers = iter([EN_LETTER, FR_LETTER])
+    calls = []
+    monkeypatch.setattr(CL.provider, "generate", lambda prompt, **kw: calls.append(prompt) or next(answers))
+    with fetch_diag.run_tracking() as tracker:
+        path = CL.draft_to_file(_job(), tmp_path, language="fr")
+    assert len(calls) == 2 and "previous attempt was rejected" in calls[1]
+    assert "Je vous écris" in path.read_text(encoding="utf-8")
+    assert dict(tracker.counts) == {}
+
+
+def test_a_letter_still_in_the_wrong_language_is_tracked(monkeypatch, tmp_path):
+    from jobhunter import fetch_diag
+    monkeypatch.setattr(CL.provider, "generate", lambda prompt, **kw: EN_LETTER)
+    with fetch_diag.run_tracking() as tracker:
+        path = CL.draft_to_file(_job(), tmp_path, language="fr")
+    assert path.exists()
+    assert dict(tracker.counts) == {("cover", "Acme", "cover_language_mismatch"): 1}
+
+
+def test_a_correct_first_draft_costs_one_call(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(CL.provider, "generate", lambda prompt, **kw: calls.append(1) or FR_LETTER)
+    CL.draft_to_file(_job(), tmp_path, language="fr")
+    assert len(calls) == 1

@@ -1168,9 +1168,19 @@ def _cv_text_for_letter(conn, job_id: int) -> str | None:
     return None
 
 
+def _letter_language(conn, job_id: int, job) -> str:
+    """The letter follows the CV it accompanies; without one, the posting's language."""
+    for art in db.list_cv_artifacts(conn, job_id):
+        tex = Path(art["tex_path"]) if art["tex_path"] else None
+        if art["pdf_path"] and tex and tex.exists():
+            return art["lang"] or "en"
+    return lang.job_language(job.title, job.description, job.language)
+
+
 def cover_one(job_id: int) -> dict:
     """Draft a cover letter for one job, grounded in its tailored CV when there is
-    one (else the full base CV); store the file path on the application."""
+    one (else the full base CV), in that CV's language; store the file path on the
+    application."""
     db.init_db()
     with db.connect() as conn:
         row = db.get_job(conn, job_id)
@@ -1178,11 +1188,15 @@ def cover_one(job_id: int) -> dict:
             return {"job_id": job_id, "error": "not found"}
         job = db.job_from_row(row)
         cv_text = _cv_text_for_letter(conn, job_id)
+        language = _letter_language(conn, job_id, job)
     out_dir = cv_engine.CV_OUT_DIR / f"{job_id}-{cv_engine._slug(job.company)}"
-    path = cover_letter.draft_to_file(job, out_dir, judge_context=_judge_context(row), cv_text=cv_text)
+    with fetch_diag.run_tracking() as tracker:
+        path = cover_letter.draft_to_file(job, out_dir, judge_context=_judge_context(row),
+                                          cv_text=cv_text, language=language)
     with db.connect() as conn:
         db.set_cover_letter(conn, job_id, str(path))
-    return {"job_id": job_id, "cover_letter": str(path)}
+        tracker.flush(conn)
+    return {"job_id": job_id, "cover_letter": str(path), "lang": language}
 
 
 def tailor_one(job_id: int, auto: bool = False, language: str | None = None) -> dict:
