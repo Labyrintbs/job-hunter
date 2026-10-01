@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import db, enrich, fetch_diag, jd_store, lang, match
+from . import db, dupes, enrich, fetch_diag, jd_store, lang, match
 from .apply import cover_letter
 from .config import DATA_DIR, add_company, load_companies, load_search_config
 from .llm import dedup as llm_dedup
@@ -388,6 +388,10 @@ def daily_run(judge: bool = True, judge_min_score: int = 15, judge_limit: int = 
             except Exception as exc:
                 print(f"  judge warn: job {jid} failed: {exc}")
 
+    if auto_tailor and qualified:
+        check_duplicates()   # a duplicate of a job already in play must not get a CV or a letter
+        with db.connect() as conn:
+            qualified = [jid for jid in qualified if not (db.get_job(conn, jid) or {"filtered": 1})["filtered"]]
     tailored = _auto_tailor_jobs(qualified, auto_tailor_limit) if auto_tailor else 0
 
     with db.connect() as conn:
@@ -425,11 +429,12 @@ def process_backlog(judge_min_score: int = 15, judge_limit: int = 10,
 
     judge_stats = judge_all(min_score=judge_min_score, limit=judge_limit)
 
+    # Before tailoring: a duplicate gets hidden here, so it never gets a CV or a letter.
+    dup_stats = check_duplicates(limit=dedup_limit)
+
     with db.connect() as conn:
         candidates = [r["id"] for r in db.jobs_ready_for_auto_tailor(conn, tailor_limit)]
     tailored = _auto_tailor_jobs(candidates, tailor_limit)
-
-    dup_stats = check_duplicates(limit=dedup_limit)
 
     return {"enriched": enriched, "judged": judge_stats["judged"],
             "skipped_no_description": judge_stats["skipped_no_description"],
@@ -714,53 +719,156 @@ def run_backfill(force: bool = False, day: str | None = None) -> dict:
     return results
 
 
-def check_duplicates(limit: int = 10) -> dict:
-    """LLM-compare heuristically-flagged possible-duplicate pairs (db.find_possible_duplicates)
-    using their JD text, cache the verdict so a pair is never re-checked, and auto-filter
-    the older side of a high-confidence 'same' verdict (the newer listing is more likely
-    still open). Skips any pair where either side still lacks real JD content -- a
-    title-only guess isn't reliable enough for a call this consequential."""
-    db.init_db()
-    if not provider.available():
-        return {"checked": 0, "same": 0, "filtered": 0}
+def _same_groups(pairs) -> list[set[int]]:
+    """Connected groups of listings that are the same opening (union of the 'same' pairs)."""
+    parent: dict[int, int] = {}
 
+    def find(x):
+        parent.setdefault(x, x)
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+    for a, b in pairs:
+        parent[find(a)] = find(b)
+    groups: dict[int, set[int]] = {}
+    for x in list(parent):
+        groups.setdefault(find(x), set()).add(x)
+    return list(groups.values())
+
+
+def _group_hides(rows: list[dict]) -> tuple[int | None, list[int]]:
+    """(original, ids to hide) for one group of the same opening. Only listings still visible
+    take part, so a copy hidden earlier stays hidden and never becomes the original. The
+    original is the one you acted on, then one with a CV, then the better location, then the
+    newest (dupes.choose_original); a listing you acted on is never hidden, and nothing is
+    hidden when no listing would stay visible."""
+    visible = [r for r in rows if not r["filtered"]]
+    if len(visible) < 2:
+        return None, []
+    original = dupes.choose_original(visible)
+    return original, [r["id"] for r in visible if r["id"] != original and r["status"] not in dupes.ENGAGED]
+
+
+def _job_rows(conn, ids) -> list[dict]:
+    return [dict(db.get_job(conn, i)) for i in ids]
+
+
+def _hide_duplicates_of(conn, seed: int, reason: str) -> int:
+    """Hide every non-original copy in the group that `seed` belongs to (all 'same / high'
+    pairs). Returns how many were hidden."""
+    pairs = [(r["job_id_a"], r["job_id_b"]) for r in conn.execute(
+        "SELECT job_id_a, job_id_b FROM duplicate_checks WHERE verdict = 'same' AND confidence = 'high'")]
+    group = next((g for g in _same_groups(pairs) if seed in g), {seed})
+    rows = _job_rows(conn, group)
+    original, hide = _group_hides(rows)
+    status = {r["id"]: r["status"] for r in rows}
+    for jid in hide:
+        db.set_llm_filter(conn, jid, f"duplicate of #{original} ({status[original]}) -- {reason}")
+    return len(hide)
+
+
+_AUTO_DEDUP_REASON = re.compile(r"^(llm dedup|duplicate of #\d+ \(\w+\) --)")
+
+
+def plan_duplicate_repair(conn) -> dict:
+    """What a one-off repair of earlier duplicate decisions would do, without doing it. Every
+    copy that an automatic rule hid is treated as visible again, each group of the same
+    opening (an LLM "same / high" verdict, or identical text) is resolved afresh by
+    _group_hides, and the difference is the plan: `restore` is what comes back (jobs you acted
+    on, copies whose original was hidden too) and `hide` maps each newly hidden copy to its
+    original. A reason written by hand, or after a rule-based one, is never touched."""
+    jobs = {r["id"]: dict(r) for r in conn.execute(
+        "SELECT j.id, j.filtered, j.filter_reason, j.geo_tier, j.fetched_at, a.status "
+        "FROM jobs j JOIN applications a ON a.job_id = j.id")}
+    auto_hidden = {i for i, j in jobs.items() if j["filtered"] and _AUTO_DEDUP_REASON.match(j["filter_reason"] or "")}
+    fresh = {i: {**j, "filtered": 0 if i in auto_hidden else j["filtered"]} for i, j in jobs.items()}
+
+    same = {(r["job_id_a"], r["job_id_b"]) for r in conn.execute(
+        "SELECT job_id_a, job_id_b FROM duplicate_checks WHERE verdict = 'same' AND confidence = 'high'")}
+    checked = {(r["job_id_a"], r["job_id_b"]) for r in conn.execute("SELECT job_id_a, job_id_b FROM duplicate_checks")}
+    for p in db.find_possible_duplicates(conn, with_overlap=True):
+        pair = (min(p["a"], p["b"]), max(p["a"], p["b"]))
+        if p["overlap"] >= dupes.SAME_OVERLAP and pair not in checked:
+            same.add(pair)
+
+    hidden_after: dict[int, int] = {}
+    for group in _same_groups(same):
+        original, hide = _group_hides([fresh[i] for i in group if i in fresh])
+        hidden_after.update({jid: original for jid in hide})
+    return {"restore": {i: jobs[i]["filter_reason"] for i in auto_hidden if i not in hidden_after},
+            "hide": {i: o for i, o in hidden_after.items() if not jobs[i]["filtered"]},
+            "retarget": {i: o for i, o in hidden_after.items() if i in auto_hidden},
+            "status": {i: j["status"] for i, j in jobs.items()}}
+
+
+def repair_duplicates(apply: bool = False) -> dict:
+    """Plan (and with `apply`, carry out) the duplicate repair described in plan_duplicate_repair."""
+    db.init_db()
     with db.connect() as conn:
-        pairs = db.find_possible_duplicates(conn)
+        plan = plan_duplicate_repair(conn)
+        if apply:
+            status = plan["status"]
+            for jid in plan["restore"]:
+                db.set_filtered(conn, jid, False, "")
+            for jid, original in plan["hide"].items():
+                db.set_llm_filter(conn, jid, f"duplicate of #{original} ({status[original]}) "
+                                             f"-- same posting, listed more than once")
+            for jid, original in plan["retarget"].items():     # still hidden, now pointing at the right original
+                db.set_filtered(conn, jid, True, f"duplicate of #{original} ({status[original]}) "
+                                                 f"-- same posting, listed more than once")
+    return plan
+
+
+def check_duplicates(limit: int = 10) -> dict:
+    """Settle possible-duplicate pairs (db.find_possible_duplicates with description overlap),
+    caching each verdict so a pair is never re-checked, and hide the copy that is not the
+    original. Identical text (dupes.SAME_OVERLAP) is the same posting without asking anyone;
+    the rest goes to the LLM, `limit` pairs per run, pairs involving a job you act on first.
+    Skips a pair where either side still lacks real JD content -- a title-only guess isn't
+    reliable enough for a call this consequential. Run before tailoring, so a duplicate
+    never gets a CV or a letter."""
+    db.init_db()
+    with db.connect() as conn:
+        status = {r["job_id"]: r["status"] for r in conn.execute("SELECT job_id, status FROM applications")}
         todo = []
-        seen = set()
-        for p in pairs:
+        for p in db.find_possible_duplicates(conn, with_overlap=True):
             a, b = sorted((p["a"], p["b"]))
-            if (a, b) in seen or db.get_duplicate_check(conn, a, b) is not None:
+            if db.get_duplicate_check(conn, a, b) is not None:
                 continue
-            seen.add((a, b))
             row_a, row_b = db.get_job(conn, a), db.get_job(conn, b)
             if not row_a or not row_b:
                 continue
             if (len((row_a["description"] or "").strip()) < _MIN_DESCRIPTION_CHARS or
                     len((row_b["description"] or "").strip()) < _MIN_DESCRIPTION_CHARS):
                 continue
-            todo.append((a, b))
-    todo = todo[:limit]
+            live = any(status.get(i) in (*dupes.ENGAGED, "cv_ready", "shortlisted") for i in (a, b))
+            todo.append((not live, -p["overlap"], a, b, p["overlap"]))
+    todo.sort()
 
-    checked = same = filtered = 0
-    for a, b in todo:
-        with db.connect() as conn:
-            job_a = db.job_from_row(db.get_job(conn, a))
-            job_b = db.job_from_row(db.get_job(conn, b))
-        try:
-            result = llm_dedup.compare(job_a, job_b)
-        except Exception as exc:
-            print(f"  dedup warn: #{a} vs #{b} failed: {exc}")
+    checked = same = filtered = llm_calls = 0
+    for _, _, a, b, ov in todo:
+        if ov >= dupes.SAME_OVERLAP:
+            result = {"verdict": "same", "confidence": "high",
+                      "reason": f"the descriptions are {ov:.0%} identical"}
+        elif llm_calls >= limit or not provider.available():
             continue
+        else:
+            llm_calls += 1
+            with db.connect() as conn:
+                job_a = db.job_from_row(db.get_job(conn, a))
+                job_b = db.job_from_row(db.get_job(conn, b))
+            try:
+                result = llm_dedup.compare(job_a, job_b)
+            except Exception as exc:
+                print(f"  dedup warn: #{a} vs #{b} failed: {exc}")
+                continue
         checked += 1
         with db.connect() as conn:
             db.record_duplicate_check(conn, a, b, result["verdict"], result["confidence"], result["reason"])
             if result["verdict"] == "same" and result["confidence"] == "high":
                 same += 1
-                row_a, row_b = db.get_job(conn, a), db.get_job(conn, b)
-                older, newer = (a, b) if row_a["fetched_at"] <= row_b["fetched_at"] else (b, a)
-                db.set_llm_filter(conn, older, f"llm dedup: same posting as #{newer} -- {result['reason']}")
-                filtered += 1
+                filtered += _hide_duplicates_of(conn, a, result["reason"])
     return {"checked": checked, "same": same, "filtered": filtered}
 
 

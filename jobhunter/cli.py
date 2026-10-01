@@ -10,7 +10,7 @@ from .llm import provider
 from .notify import dispatch as notify_dispatch
 from .pipeline import (backfill_languages, cover_one, daily_run, enrich_one, enrich_pending, import_revised_cv,
                        judge_all, judge_one, process_backlog, rejudge_category, rejudge_juniors,
-                       rescreen_all, run_backfill, run_fetch, tailor_one)
+                       repair_duplicates, rescreen_all, run_backfill, run_fetch, tailor_one)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -102,6 +102,11 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("languages", help="one-off catch-up: set each job's French/English language "
                                      "from its own text (source labels are unreliable)")
+
+    p_dedup_repair = sub.add_parser("dedup-repair", help="one-off: un-hide jobs you acted on that the old "
+                                    "duplicate rule hid, and hide open copies of known duplicates "
+                                    "(prints the plan; changes nothing without --apply)")
+    p_dedup_repair.add_argument("--apply", action="store_true")
 
     sub.add_parser("rescreen-all", help="one-off catch-up: re-run rule-based screening for "
                                         "every stored job against the current config (e.g. "
@@ -293,6 +298,17 @@ def main(argv: list[str] | None = None) -> int:
         summary = backfill_languages()
         print(f"checked={summary['checked']} newly_set={summary['newly_set']} "
               f"label_overridden={summary['label_overridden']}")
+        return 0
+
+    if args.command == "dedup-repair":
+        plan = repair_duplicates(apply=args.apply)
+        status = plan["status"]
+        print(f"{'restored' if args.apply else 'would restore'} {len(plan['restore'])} job(s) you acted on:")
+        for jid in sorted(plan["restore"]):
+            print(f"  #{jid} ({status[jid]})")
+        print(f"{'hid' if args.apply else 'would hide'} {len(plan['hide'])} open copy(ies) of a known duplicate:")
+        for jid, original in sorted(plan["hide"].items()):
+            print(f"  #{jid} ({status[jid]}) -> duplicate of #{original} ({status[original]})")
         return 0
 
     if args.command == "rescreen-all":

@@ -7,8 +7,10 @@ from ..models import Job
 from . import provider
 
 SYSTEM = (
-    "You compare two job postings that a heuristic (same company, same city, "
-    "near-identical title) has already flagged as possibly the same real opening. "
+    "You compare two job postings that a heuristic (same company and either a "
+    "near-identical title in the same city, or largely overlapping description text) "
+    "has already flagged as possibly the same real opening. The same role listed once "
+    "per city, or on two job boards under a reworded title, is one opening. "
     "Decide from the actual description text whether they describe the same role, "
     "or two genuinely distinct openings (different team, seniority, specialization, "
     "or an unrelated repost). Be conservative: at the same employer a near-identical "
@@ -52,7 +54,8 @@ def compare(job_a: Job, job_b: Job) -> dict:
         title_b=job_b.title, company_b=job_b.company, location_b=job_b.location,
         description_b=(job_b.description or "")[:8000],
     )
-    data = provider.generate_json(prompt, system=SYSTEM, max_tokens=300, json_schema=RESULT_SCHEMA)
+    data = provider.generate_json(prompt, system=SYSTEM, max_tokens=300, json_schema=RESULT_SCHEMA,
+                                  model=provider.FAST_MODEL)
     return {
         "verdict": str(data.get("verdict", "")),
         "confidence": str(data.get("confidence", "")),

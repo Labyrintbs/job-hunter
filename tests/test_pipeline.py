@@ -1212,6 +1212,185 @@ def test_check_duplicates_does_not_filter_on_low_confidence_same_verdict(tmp_db,
         assert db.get_job(conn, b)["filtered"] == 0
 
 
+_SAME_POSTING = ("We build a production LLM platform and need an engineer to design agentic pipelines, "
+                 "evaluate models, fine-tune them and ship them to customers with a small team. ") * 3
+
+
+def _insert_listings(conn, config, cities=("Nantes", "Lyon"), **kw):
+    """The same opening listed once per city (identical text, near-identical title)."""
+    ids = [_insert(conn, config, external_id=f"{cities[0]}-{i}", company="MultiCo", location=city,
+                   title="AI Engineer" if i == 0 else "AI Engineer (H/F)", description=_SAME_POSTING, **kw)
+           for i, city in enumerate(cities)]
+    conn.execute("UPDATE jobs SET filtered = 0, filter_reason = '' WHERE id IN (%s)" % ",".join(map(str, ids)))
+    return ids
+
+
+def test_identical_text_is_the_same_posting_without_asking_the_llm(tmp_db, config, monkeypatch):
+    monkeypatch.setattr(pipeline.provider, "available", lambda: False)     # no LLM at all
+    monkeypatch.setattr(pipeline.llm_dedup, "compare", lambda a, b: 1 / 0)
+    with db.connect() as conn:
+        first, second = _insert_listings(conn, config)
+        conn.execute("UPDATE jobs SET fetched_at = '2020-01-01 00:00:00' WHERE id = ?", (first,))
+        conn.execute("UPDATE jobs SET fetched_at = '2030-01-01 00:00:00' WHERE id = ?", (second,))
+
+    stats = pipeline.check_duplicates()
+
+    assert stats == {"checked": 1, "same": 1, "filtered": 1}
+    with db.connect() as conn:
+        assert db.get_job(conn, first)["filtered"] == 1 and db.get_job(conn, second)["filtered"] == 0
+        reason = db.get_job(conn, first)["filter_reason"]
+        assert f"duplicate of #{second}" in reason and "identical" in reason
+        assert db.get_duplicate_check(conn, first, second)["verdict"] == "same"
+
+
+def test_a_job_you_applied_to_is_the_original_and_the_newer_copy_is_hidden(tmp_db, config, monkeypatch):
+    monkeypatch.setattr(pipeline.provider, "available", lambda: True)
+    with db.connect() as conn:
+        applied, fresh = _insert_listings(conn, config)
+        db.update_status(conn, applied, "applied")
+        conn.execute("UPDATE jobs SET fetched_at = '2020-01-01 00:00:00' WHERE id = ?", (applied,))
+        conn.execute("UPDATE jobs SET fetched_at = '2030-01-01 00:00:00' WHERE id = ?", (fresh,))
+
+    pipeline.check_duplicates()
+
+    with db.connect() as conn:
+        assert db.get_job(conn, applied)["filtered"] == 0                  # never hidden, although older
+        assert db.get_job(conn, fresh)["filtered"] == 1
+        assert f"duplicate of #{applied} (applied)" in db.get_job(conn, fresh)["filter_reason"]
+
+
+def test_two_listings_you_both_acted_on_are_both_kept(tmp_db, config, monkeypatch):
+    monkeypatch.setattr(pipeline.provider, "available", lambda: True)
+    with db.connect() as conn:
+        a, b = _insert_listings(conn, config)
+        db.update_status(conn, a, "applied")
+        db.update_status(conn, b, "rejected")
+
+    stats = pipeline.check_duplicates()
+
+    assert stats["same"] == 1 and stats["filtered"] == 0
+    with db.connect() as conn:
+        assert db.get_job(conn, a)["filtered"] == 0 and db.get_job(conn, b)["filtered"] == 0
+
+
+def test_pairs_involving_a_job_in_play_are_checked_first_when_the_limit_is_tight(tmp_db, config, monkeypatch):
+    monkeypatch.setattr(pipeline.provider, "available", lambda: True)
+    asked = []
+    monkeypatch.setattr(pipeline.llm_dedup, "compare", lambda a, b: asked.append(a.company) or
+                        {"verdict": "different", "confidence": "high", "reason": "x"})
+    with db.connect() as conn:
+        _insert_dup_pair(conn, config)                                      # DupCo: nobody acted on it
+        for i in range(2):
+            j = _insert(conn, config, external_id=f"p{i}", company="PlayCo", description=_LONG_REAL_JD,
+                        title="ML Engineer (H/F)" if i else "ML Engineer")
+            if i:
+                db.update_status(conn, j, "cv_ready")
+
+    pipeline.check_duplicates(limit=1)
+
+    assert asked == ["PlayCo"]
+
+
+def _visible(conn, ids):
+    return sorted(i for i in ids if not db.get_job(conn, i)["filtered"])
+
+
+def test_several_listings_of_one_opening_leave_exactly_one_visible_whatever_the_order(tmp_db, config, monkeypatch):
+    monkeypatch.setattr(pipeline.provider, "available", lambda: False)
+    with db.connect() as conn:
+        ids = _insert_listings(conn, config, cities=("Nantes", "Lyon", "Rennes", "Rouen"))
+        db.update_status(conn, ids[1], "cv_ready")
+
+    pipeline.check_duplicates()
+
+    with db.connect() as conn:
+        assert _visible(conn, ids) == [ids[1]]                  # the one with a CV stays, the rest are hidden
+        for jid in ids:
+            if jid != ids[1]:
+                assert f"duplicate of #{ids[1]} (cv_ready)" in db.get_job(conn, jid)["filter_reason"]
+
+
+def test_a_copy_is_never_hidden_when_its_original_is_already_hidden(tmp_db, config, monkeypatch):
+    monkeypatch.setattr(pipeline.provider, "available", lambda: False)
+    with db.connect() as conn:
+        first, second = _insert_listings(conn, config)
+        db.update_status(conn, first, "cv_ready")                    # would be the original...
+        db.set_filtered(conn, first, True, "outside the target area")  # ...but a rule hid it
+
+    pipeline.check_duplicates()
+
+    with db.connect() as conn:
+        assert db.get_job(conn, second)["filtered"] == 0           # one copy stays visible
+
+
+def test_repair_restores_an_applied_job_hidden_by_the_old_rule_and_hides_the_new_copy(tmp_db, config):
+    with db.connect() as conn:
+        applied, fresh = _insert_listings(conn, config)
+        db.update_status(conn, applied, "applied")
+        db.record_duplicate_check(conn, applied, fresh, "same", "high", "identical")
+        db.set_llm_filter(conn, applied, f"llm dedup: same posting as #{fresh} -- identical")   # the old rule
+
+    plan = pipeline.repair_duplicates()                                    # a dry run changes nothing
+    assert applied not in plan["hide"] and plan["hide"] == {fresh: applied}
+    assert applied in plan["restore"]
+    with db.connect() as conn:
+        assert db.get_job(conn, applied)["filtered"] == 1 and db.get_job(conn, fresh)["filtered"] == 0
+
+    pipeline.repair_duplicates(apply=True)
+
+    with db.connect() as conn:
+        assert db.get_job(conn, applied)["filtered"] == 0
+        assert db.get_job(conn, fresh)["filtered"] == 1
+        assert f"duplicate of #{applied} (applied)" in db.get_job(conn, fresh)["filter_reason"]
+
+
+def test_repair_restores_copies_hidden_when_the_original_was_hidden_too_and_keeps_hand_written_reasons(tmp_db, config):
+    with db.connect() as conn:
+        a, b = _insert_listings(conn, config)
+        db.record_duplicate_check(conn, a, b, "same", "high", "identical")
+        db.set_filtered(conn, a, True, "outside the target area")
+        db.set_llm_filter(conn, b, f"duplicate of #{a} (new) -- same posting")        # both copies now hidden
+        manual, other = _insert_listings(conn, config, cities=("Brest", "Tours"))
+        db.set_filtered(conn, manual, True, "duplicate of #999 -- same role, applied elsewhere")   # by hand
+
+    plan = pipeline.repair_duplicates(apply=True)
+
+    assert b in plan["restore"] and manual not in plan["restore"]
+    with db.connect() as conn:
+        assert db.get_job(conn, b)["filtered"] == 0
+        assert db.get_job(conn, manual)["filtered"] == 1
+
+
+def test_process_backlog_settles_duplicates_before_it_tailors(tmp_db, config, monkeypatch):
+    monkeypatch.setattr(pipeline.provider, "available", lambda: True)
+    order = []
+    monkeypatch.setattr(pipeline, "judge_all", lambda **k: {"judged": 0, "skipped_no_description": 0})
+    monkeypatch.setattr(pipeline, "check_duplicates", lambda limit=10: order.append("dedup") or
+                        {"checked": 0, "same": 0, "filtered": 0})
+    monkeypatch.setattr(pipeline, "_auto_tailor_jobs", lambda ids, limit: order.append("tailor") or 0)
+
+    pipeline.process_backlog()
+
+    assert order == ["dedup", "tailor"]
+
+
+def test_a_duplicate_hidden_before_tailoring_never_gets_a_cv(tmp_db, config, monkeypatch):
+    monkeypatch.setattr(pipeline.provider, "available", lambda: True)
+    with db.connect() as conn:
+        applied, fresh = _insert_listings(conn, config)
+        db.update_status(conn, applied, "applied")
+        for jid in (applied, fresh):
+            db.set_llm_judgment(conn, jid, 80, "good", "r")
+    tailored = []
+    monkeypatch.setattr(pipeline, "tailor_one", lambda jid, auto=False, language=None:
+                        tailored.append(jid) or {"compiled": False})
+    monkeypatch.setattr(pipeline, "judge_all", lambda **k: {"judged": 0, "skipped_no_description": 0})
+
+    pipeline.process_backlog()
+
+    assert fresh not in tailored
+
+
 def test_tailor_one_and_cover_one_pass_the_judge_context_through(tmp_db, config, monkeypatch):
     with db.connect() as conn:
         jid = _insert(conn, config, description=_REAL_JD)
