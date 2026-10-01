@@ -403,7 +403,7 @@ def test_tailor_job_retries_once_when_first_attempt_is_sparse(tmp_path, monkeypa
     monkeypatch.setattr(engine, "_last_page_fill_ratio", lambda pdf, n: next(ratios))
 
     job = Job(source="x", external_id="1", title="ML Engineer", company="Acme", description="machine learning")
-    tex_path, pdf_path, note = engine.tailor_job(job, 1, auto=True)
+    tex_path, pdf_path, note, _lang = engine.tailor_job(job, 1, auto=True)
 
     assert len(calls) == 2   # first attempt + exactly one retry, not an unbounded loop
     assert pdf_path == tmp_path / "1-acme" / "cv.pdf"

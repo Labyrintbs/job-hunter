@@ -13,7 +13,7 @@ from typing import NamedTuple
 from .. import fetch_diag
 from ..config import DATA_DIR, REPO_ROOT
 from ..db import CV_FALLBACK_NOTE
-from ..lang import job_language
+from ..lang import counts, job_language
 from ..llm import provider
 from ..models import Job
 from . import select as llm_select
@@ -188,9 +188,10 @@ def _slug(text: str) -> str:
 
 def _tailor(job: Job, parsed: ParsedCV | None = None, feedback: str | None = None,
             judge_context: str | None = None, role_category: str = "",
-            language: str = "en") -> tuple[str, bool]:
-    """(tex, used_keyword_fallback). `language` picks the master CV ("en" or "fr");
-    an already parsed CV carries its own."""
+            language: str = "en") -> tuple[str, bool, list[str]]:
+    """(tex, used_keyword_fallback, review_notes). `language` picks the master CV
+    ("en" or "fr"); an already parsed CV carries its own. A review note is a
+    non-fatal problem worth a look, e.g. the summary fell back to its fixed text."""
     parsed = parsed or snippet_bank.parse(base_cv_path(language), language)
     lang = parsed.lang
     names = snippet_bank.SECTIONS[lang]
@@ -205,17 +206,34 @@ def _tailor(job: Job, parsed: ParsedCV | None = None, feedback: str | None = Non
     if parsed.heading_line:
         doc = doc.replace(parsed.heading_line, _tagline(role_category, lang), 1)
     summ = summary.build(job, role_category, parsed.document, lang)
+    notes = []
     if summ.reason:
         fetch_diag.track("tailor", summ.reason, detail=summ.detail, company=job.company)
+        notes.append(f"summary fell back to the standard text ({summ.detail})")
     doc = snippet_bank.set_summary(doc, summary.latex_escape(summ.text))
     doc = courses.apply(doc, f"{job.title} {job.description}")
-    return doc, used_fallback
+    return doc, used_fallback, notes
+
+
+_LATEX_COMMAND = re.compile(r"\\[A-Za-z]+\*?|[{}\\$]|%[^\n]*")
+
+
+def cv_language_problem(tex: str, expected: str) -> str:
+    """"" when the assembled CV reads in `expected` ("en" or "fr"), else a note.
+    Counts function words over the whole body, so technical terms in the other
+    language don't matter; the expected language must clearly dominate."""
+    fr_hits, en_hits = counts(_LATEX_COMMAND.sub(" ", tex.split(r"\begin{document}")[-1]))
+    mine, other = (fr_hits, en_hits) if expected == "fr" else (en_hits, fr_hits)
+    if mine >= 2 * other:
+        return ""
+    return (f"language check: the CV text reads as {'EN' if expected == 'fr' else 'FR'} "
+            f"({other} vs {mine} function words), expected {expected.upper()}")
 
 
 def tailor_tex(job: Job, parsed: ParsedCV | None = None, feedback: str | None = None,
                judge_context: str | None = None, role_category: str = "",
                language: str = "en") -> str:
-    return _tailor(job, parsed, feedback, judge_context, role_category, language)[0]
+    return _tailor(job, parsed, feedback, judge_context, role_category, language)[0]  # (tex, fallback, notes)
 
 
 # MacTeX's latexmk/pdflatex live here but aren't on PATH for non-interactive
@@ -376,6 +394,7 @@ class TailorResult(NamedTuple):
     tex_path: Path
     pdf_path: Path | None
     note: str = ""   # why the CV failed or needs review; "" when fine
+    lang: str = "en"
 
     @property
     def fallback(self) -> bool:
@@ -436,16 +455,16 @@ def tailor_job(job: Job, job_id: int, auto: bool = False,
     name = f"cv-{_version_stamp()}"
 
     language = language or job_language(job.title, job.description, job.language)
-    tex, used_fallback = _tailor(job, judge_context=judge_context, role_category=role_category,
-                                 language=language)
+    tex, used_fallback, notes = _tailor(job, judge_context=judge_context, role_category=role_category,
+                                        language=language)
     pdf = compile_tex(tex, out_dir, name=name, expected_pages=2 if auto else None)
 
     retried = False
     if auto:
         feedback = _retry_feedback(pdf, out_dir, name)
         if feedback:
-            tex, used_fallback = _tailor(job, feedback=feedback, judge_context=judge_context,
-                                         role_category=role_category, language=language)
+            tex, used_fallback, notes = _tailor(job, feedback=feedback, judge_context=judge_context,
+                                                role_category=role_category, language=language)
             pdf = compile_tex(tex, out_dir, name=name, expected_pages=2)
             retried = True
 
@@ -458,9 +477,14 @@ def tailor_job(job: Job, job_id: int, auto: bool = False,
         ratio = _last_page_fill_ratio(pdf, 2)
         if ratio is not None and ratio < _MIN_LAST_PAGE_FILL_RATIO:
             reason, note = "tailor_sparse_after_retry", f"page 2 sparse ({ratio:.0%} of page 1) -- review before use"
+    wrong_language = cv_language_problem(tex, language)
+    if wrong_language and not reason:
+        reason, note = summary.LANGUAGE_REASON, wrong_language
     if reason:
         fetch_diag.track("tailor", reason, detail=note, company=job.company)
+    if notes:   # summary fallbacks: already tracked by the summary itself, shown as a review note
+        note = "; ".join(x for x in (note, *notes) if x)
     if used_fallback:
         note = f"{CV_FALLBACK_NOTE}; {note}" if note else CV_FALLBACK_NOTE
     _publish_latest(out_dir, name)
-    return TailorResult(out_dir / f"{name}.tex", pdf, note)
+    return TailorResult(out_dir / f"{name}.tex", pdf, note, language)

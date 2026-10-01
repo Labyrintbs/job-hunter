@@ -186,3 +186,49 @@ def test_tailor_job_picks_the_master_from_the_postings_language(tmp_path, monkey
     assert r"\section{FORMATION}" in seen[0]
     assert r"\section{EDUCATION}" in seen[1]
     assert r"\section{EDUCATION}" in seen[2]
+
+
+# --- review notes and the final language check ----------------------------------------
+
+def _fake_compile(tex, out_dir, name="cv", expected_pages=None):
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / f"{name}.tex").write_text(tex, encoding="utf-8")
+    pdf = out_dir / f"{name}.pdf"
+    pdf.write_bytes(b"%PDF")
+    return pdf
+
+
+def test_the_assembled_cv_language_check(no_llm):
+    en_tex = engine.tailor_tex(_job(description="machine learning"), language="en")
+    fr_tex = engine.tailor_tex(_job(description="machine learning"), language="fr")
+    assert engine.cv_language_problem(en_tex, "en") == ""
+    assert engine.cv_language_problem(fr_tex, "fr") == ""
+    assert "reads as EN" in engine.cv_language_problem(en_tex, "fr")
+    assert "reads as FR" in engine.cv_language_problem(fr_tex, "en")
+
+
+def test_a_cv_in_the_wrong_language_gets_a_review_note_and_is_tracked(tmp_path, monkeypatch, no_llm):
+    from jobhunter import fetch_diag
+    monkeypatch.setattr(engine, "CV_OUT_DIR", tmp_path)
+    monkeypatch.setattr(engine, "compile_tex", _fake_compile)
+    french = engine.tailor_tex(_job(), language="fr")
+    monkeypatch.setattr(engine, "_tailor", lambda *a, **k: (french, False, []))
+    with fetch_diag.run_tracking() as tracker:
+        res = engine.tailor_job(_job(), 1, language="en")
+    assert res.pdf_path is not None and res.note.startswith("language check")
+    assert dict(tracker.counts) == {("tailor", "Acme", "tailor_language_mismatch"): 1}
+
+
+def test_a_matching_language_leaves_no_note(tmp_path, monkeypatch, no_llm):
+    monkeypatch.setattr(engine, "CV_OUT_DIR", tmp_path)
+    monkeypatch.setattr(engine, "compile_tex", _fake_compile)
+    res = engine.tailor_job(_job(description=FR_JD), 1)
+    assert res.lang == "fr" and "language check" not in res.note   # (the keyword fallback note is expected here)
+
+
+def test_a_summary_that_fell_back_shows_as_a_review_note(tmp_path, monkeypatch, no_llm):
+    monkeypatch.setattr(engine, "CV_OUT_DIR", tmp_path)
+    monkeypatch.setattr(engine, "compile_tex", _fake_compile)
+    monkeypatch.setattr(summary, "generate_summary", lambda *a, **k: "Too short.")
+    res = engine.tailor_job(_job(), 1)
+    assert "summary fell back to the standard text (" in res.note
