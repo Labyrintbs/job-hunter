@@ -1,0 +1,270 @@
+%-------------------------
+% Resume in LaTeX -- French master, mirrors templates/cv_base.tex block for block
+% (same entries, bullets and dates; tests/test_cv_base_fr.py checks it).
+% Based on Jake Gutierrez template, customized for Hongming Fang
+% MASTER VERSION — full content, trim per application
+%------------------------
+
+\documentclass[letterpaper,12pt]{article}
+
+\usepackage{latexsym}
+\usepackage{titlesec}
+\usepackage{marvosym}
+\usepackage[usenames,dvipsnames]{color}
+\usepackage{verbatim}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+\usepackage{fancyhdr}
+\usepackage[french]{babel}
+\frenchbsetup{StandardLists=true}
+\usepackage{tabularx}
+\usepackage{fontawesome5}
+\usepackage{multicol}
+\usepackage{ragged2e}
+\usepackage{needspace}
+\usepackage[
+  top=0.3in,
+  bottom=0.5in,
+  left=0.55in,
+  right=0.55in
+]{geometry}
+
+\setlength{\multicolsep}{-3.0pt}
+\setlength{\columnsep}{-1pt}
+\input{glyphtounicode}
+
+%----------HEADER / FOOTER----------
+\pagestyle{fancy}
+\fancyhf{} % clear all header and footer fields
+\fancyfoot{}
+\renewcommand{\headrulewidth}{0pt}
+\renewcommand{\footrulewidth}{0pt}
+
+\urlstyle{same}
+
+\raggedbottom
+\justifying
+\setlength{\tabcolsep}{0in}
+
+%----------SECTION FORMATTING----------
+\titleformat{\section}{
+  \vspace{-4pt}\scshape\raggedright\large\bfseries
+}{}{0em}{}[\color{black}\titlerule \vspace{-5pt}]
+
+% Ensure that generated pdf is machine readable/ATS parsable
+\pdfgentounicode=1
+
+%-------------------------
+% Custom commands
+\newcommand{\resumeItem}[1]{
+  \item\small{
+    {#1 \vspace{-1pt}}
+  }
+}
+
+\newcommand{\classesList}[4]{
+    \item\small{
+        {#1 #2 #3 #4 \vspace{-2pt}}
+  }
+}
+
+\newcommand{\resumeSubheading}[4]{
+  \vspace{-2pt}\item
+    \begin{tabular*}{1.0\textwidth}[t]{l@{\extracolsep{\fill}}r}
+      \textbf{#1} & \textbf{#2} \\
+      {#3} & \textnormal{#4} \\
+    \end{tabular*}\vspace{-7pt}
+}
+
+\newcommand{\resumeSubSubheading}[2]{
+    \item
+    \begin{tabular*}{0.97\textwidth}{l@{\extracolsep{\fill}}r}
+      \textit{\small#1} & \textit{\small #2} \\
+    \end{tabular*}\vspace{-7pt}
+}
+
+\newcommand{\resumeProjectHeading}[2]{
+    \item
+    \begin{tabular*}{1.001\textwidth}{l@{\extracolsep{\fill}}r}
+      \small#1 & \textbf{\small #2}\\
+    \end{tabular*}\vspace{-7pt}
+}
+
+\newcommand{\resumeProjectHeadingFourItemResearch}[4]{
+    \item
+    \begin{tabular*}{1.001\textwidth}{l@{\extracolsep{\fill}}r}
+      #1 & \textbf{#2}\\
+      {#3} & \textnormal{#4} \\
+    \end{tabular*}\vspace{-7pt}
+}
+
+\newcommand{\resumeSubItem}[1]{\resumeItem{#1}\vspace{-4pt}}
+
+\renewcommand\labelitemi{$\vcenter{\hbox{\tiny$\bullet$}}$}
+\renewcommand\labelitemii{$\vcenter{\hbox{\tiny$\bullet$}}$}
+
+\newcommand{\resumeSubHeadingListStart}{\begin{itemize}[leftmargin=0.0in, label={}]}
+\newcommand{\resumeSubHeadingListEnd}{\end{itemize}}
+\newcommand{\resumeItemListStart}{\begin{itemize}}
+\newcommand{\resumeItemListEnd}{\end{itemize}\vspace{-5pt}}
+
+\newcommand{\projectdesc}[1]{%
+  {\fontsize{11pt}{12pt}\selectfont #1}\vspace{-6pt}%
+}
+
+%-------------------------------------------
+%%%%%%  RESUME STARTS HERE  %%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+\begin{document}
+
+%----------HEADING----------
+\vspace*{-0.15in}
+\begin{center}
+    {\LARGE \scshape Hongming Fang} \\[2pt]
+    \small Paris, France $|$ (+33) 07 75 77 55 06 $|$
+    \href{mailto:hongming.marius.fang@gmail.com}{hongming.marius.fang@gmail.com} $|$
+    \href{https://linkedin.com/in/hongming-fang}{\raisebox{-0.2\height}\faLinkedin\ linkedin.com/in/hongming-fang} \\
+    {Ingénieur Machine Learning (CDI/CDD), disponible immédiatement — Île-de-France, ouvert à la mobilité}
+    \vspace{-5pt}
+\end{center}
+
+%SUMMARY-BEGIN
+\noindent\small{Ingénieur Machine Learning avec une expérience concrète de l'ingénierie LLM et de la segmentation d'images médicales, acquise lors de stages ML à Paris et à Pékin.}\par
+\vspace{-4pt}
+%SUMMARY-END
+
+%-----------EDUCATION-----------
+\section{FORMATION}
+  \resumeSubHeadingListStart
+    \resumeSubheading
+    {Master Informatique, parcours DIGIT, spécialité Image}{09/2024 -- 09/2026}
+    {Sorbonne Université}{Paris, France}
+    \resumeItemListStart
+     \resumeItem{\textit{Enseignements principaux} : Traitement d'images, Algorithmes d'informatique graphique 3D, Science des données, Architecture des ordinateurs, Imagerie biologique et médicale, Reconnaissance des formes pour l'analyse et l'interprétation des images, Techniques avancées de vision par ordinateur}
+     \resumeItem{Diplômé avec mention Très Bien (16,3/20 de moyenne générale).}
+    \resumeItemListEnd
+
+    \resumeSubheading
+      {Diplôme d'Ingénieur en Électronique et Informatique}{09/2017 -- 06/2024}
+      {École Centrale de Pékin, Université de Beihang}{Pékin, Chine}
+    \resumeItemListStart
+        \resumeItem{Diplôme d'ingénieur français accrédité par la CTI, issu d'un programme conjoint entre l'Université de Beihang et le Groupe des Écoles Centrales, conférant également les diplômes chinois de licence et de master en sciences.}
+    \resumeItemListEnd
+  \resumeSubHeadingListEnd
+
+%-----------PROFESSIONAL EXPERIENCE-----------
+\section{EXPÉRIENCE PROFESSIONNELLE}
+  \resumeSubHeadingListStart
+
+    \resumeSubheading
+      {DiliTrust}{03/2026 -- 08/2026}
+      {Stagiaire ingénieur Machine Learning}{Paris, France}
+      \resumeItemListStart
+        \resumeItem{Évaluation de Qwen3.5-4B comme remplaçant possible d'un LLM en production pour l'extraction d'entités juridiques multilingues. L'écart de précision avec le modèle de référence a été comblé grâce à un cadre de prompts structuré, enrichi de métadonnées propres à chaque champ (+1,6 point d'extraction precision, +8,4 points de context accuracy).}
+        \resumeItem{Conception d'un pipeline agentique automatisé avec LangGraph, où un LLM-as-a-judge, dans le rôle de critique, évalue la qualité des extractions selon une failure taxonomy de 9 catégories, puis affine itérativement les prompts d'un autre modèle. Résultat : une context accuracy de 96,8\,\% et un temps d'inférence réduit de 40,8\,\% par rapport au modèle de production.}
+        \resumeItem{Fine-tuning de Qwen3.5-4B par SFT avec le prompt optimisé, puis diagnostic d'un surapprentissage : de bons gains in-distribution, mais une généralisation aux labels jamais vus inférieure à celle du modèle de base. Correction en fusionnant plusieurs sources de données et en passant à l'apprentissage par renforcement (GRPO), avec une fonction de récompense sur mesure combinant exact match et scoring par LLM-as-a-judge : l'accuracy in-distribution dépasse de 8 points celle du modèle de base, avec la meilleure généralisation aux labels jamais vus de toutes les variantes fine-tunées.}
+        \resumeItem{Conception et implémentation d'un pipeline de génération de métadonnées qui exploite l'historique d'annotations des utilisateurs pour améliorer automatiquement les consignes d'extraction de chaque champ, avec un garde-fou d'évaluation held-out qui bloque toute régression.}
+      \resumeItemListEnd
+
+    \needspace{8\baselineskip}
+    \resumeSubheading
+      {DeepWise}{03/2023 -- 09/2023}
+      {Stagiaire en algorithmes d'IA (imagerie médicale)}{Pékin, Chine}
+      \resumeItemListStart
+        \resumeItem{Amélioration d'un modèle de segmentation de la table d'examen et des objets externes, d'abord entraîné sur des données CTA des membres inférieurs, grâce à l'ajout de scans CTA de l'aorte nouvellement annotés, avec des scores Dice de 0,88/0,72.}
+        \resumeItem{Extension du modèle au CT du corps entier : après le diagnostic d'une baisse de performance sur une anatomie out-of-distribution, annotation manuelle de plus de 300 CTA de la tête, puis pré-annotation de plus de 1\,000 CT sans injection avec le modèle, nécessitant moins de 5\,\% de corrections manuelles.}
+        \resumeItem{Réentraînement d'un modèle de segmentation unifié sur des données CTA et CT sans injection, à partir des cas d'échec observés, avec des scores Dice de 0,93/0,76 et une bonne généralisation à des régions du corps jamais vues. Ajout d'un post-traitement qui supprime les petites composantes connexes isolées selon les taux de calcification et la position des vaisseaux.}
+      \resumeItemListEnd
+
+    \needspace{7\baselineskip}
+    \resumeSubheading
+      {Orange Labs International Center Beijing}{06/2022 -- 09/2022}
+      {Stagiaire en algorithmes d'IA (modélisation de la parole auto-supervisée)}{Pékin, Chine}
+      \resumeItemListStart
+        \resumeItem{Étude de la génération de parole sans texte (GSLM), avec comparaison d'encoders de représentations auto-supervisés (CPC, wav2vec, HuBERT) et de vocoders neuronaux (Tacotron2, WaveGlow) sur l'ensemble du pipeline.}
+        \resumeItem{Entraînement d'un encoder auto-supervisé HuBERT en distributed data parallel (DDP), sur un corpus bilingue de 30 Go constitué à partir de CommonVoice et de Librispeech.}
+        \resumeItem{Évaluation des performances inter-langues (anglais et français), avec identification de modes d'échec précis, notamment le traitement incorrect des sons uvulaires, qui limitait la généralisation au français.}
+      \resumeItemListEnd
+
+  \resumeSubHeadingListEnd
+
+%-----------PROJECTS & RESEARCH-----------
+\section{PROJETS ET RECHERCHE}
+    \vspace{-5pt}
+    \resumeSubHeadingListStart
+
+    \resumeProjectHeadingFourItemResearch
+    {\textbf{Job Hunter : recherche d'emploi et adaptation de CV automatisées par LLM}}{08/2026 -- 09/2026}
+    {Projet personnel}{Paris, France}
+
+    \projectdesc{Système qui collecte des offres d'emploi en France et dans l'UE, évalue leur adéquation avec un profil candidat grâce à un LLM et adapte le CV à chaque offre.}
+    \resumeItemListStart
+      \resumeItem{Mise en place de la collecte d'offres auprès de 17 sources (environ 120 pages carrières d'entreprises sur des plateformes de recrutement ATS, jobboards, LinkedIn, API France Travail), soit plus de 3\,000 offres. Une source en échec n'interrompt pas les autres, et la déduplication inter-sources combine comparaison exacte et vérification par LLM.}
+      \resumeItem{Développement d'un score par règles, bilingue (FR/EN), qui pondère le type de poste, la localisation et la séniorité pour écarter les offres inadaptées avant l'évaluation par le LLM-as-a-judge.}
+      \resumeItem{Ajout d'un LLM-as-a-judge qui note chaque offre (fiche de poste complète) par rapport au profil du candidat. Sa décision masque les offres peu pertinentes et déclenche l'adaptation automatique du CV pour les autres : le LLM se limite à sélectionner parmi les expériences et les bullet points existants du CV, et ne peut donc rien inventer. À ce jour, plus de 1\,000 offres évaluées et 200 CV adaptés.}
+      \resumeItem{Automatisation du pipeline par des tâches planifiées (collecte quotidienne, traitement horaire des offres en attente, rattrapage hebdomadaire) et un watchdog qui relance les exécutions manquées. Un tableau de bord FastAPI et un tableau d'historique Streamlit, sur SQLite, permettent de suivre chaque candidature et de mesurer la conversion à chaque étape de la recherche.}
+    \resumeItemListEnd
+
+    \resumeProjectHeadingFourItemResearch
+    {\textbf{Analyse d'images et de nuages de points pour l'histoire de l'art}}{11/2025 -- 02/2026}{Sorbonne Université, projet PRAT}{Paris, France}
+
+    \projectdesc{Étude comparative de descripteurs géométriques (FPFH) et appris (SpinNet) pour le recalage de nuages de points 3D issus de modalités différentes, afin d'aligner des scans photogrammétriques et des scans laser d'un relief de dragon japonais en bois de 12 mètres, conservé au musée Cernuschi.}
+    \resumeItemListStart
+      \resumeItem{Construction d'un pipeline de recalage coarse-to-fine sous Open3D (normalisation d'échelle, sous-échantillonnage par voxels, feature extraction FPFH et SpinNet, alignement global RANSAC, raffinement ICP), conçu pour gérer les différences entre modalités (densité, échelle, recouvrement) sans correspondances de vérité terrain.}
+      \resumeItem{Comparaison des descripteurs géométriques et appris à l'aide de métriques tenant compte du recouvrement : SpinNet, pretrained uniquement sur des scènes d'intérieur (3DMatch), se généralise aux scans de patrimoine culturel et réussit sur 5 fragments sur 7 où FPFH échoue complètement, pour 6,6 fois plus de temps d'exécution.}
+    \resumeItemListEnd
+
+    \resumeProjectHeadingFourItemResearch
+    {\textbf{Reproduction de NeRF sous PyTorch}}{04/2025 -- 05/2025}
+    {Sorbonne Université, projet du cours IG3D}{Paris, France}
+
+    \projectdesc{Reproduction du modèle NeRF sous PyTorch, validée par des ablation studies sur des jeux de données standard, puis appliquée à un jeu de données Blender personnalisé, où l'ajustement des sampling bounds a permis de corriger des distorsions géométriques.}
+
+    \resumeProjectHeadingFourItemResearch
+    {\textbf{What Makes a Great City to Live in France}}{02/2025 -- 05/2025}
+    {Sorbonne Université, projet du cours DALAS}{Paris, France}
+
+    \projectdesc{Analyse de données urbaines de natures diverses pour identifier les facteurs qui déterminent la population prédite en 2025 des grandes villes françaises.}
+    \resumeItemListStart
+      \resumeItem{Collecte et fusion de données par ville issues de plusieurs sources (web scraping et API), puis conversion en indicateurs par habitant comparables.}
+      \resumeItem{Visualisation de la distribution et des corrélations de chaque famille de variables pour caractériser les différences structurelles entre 20 grandes villes françaises.}
+      \resumeItem{Combinaison d'une ACP, d'un hierarchical clustering et d'une analyse des contributions des variables par SHAP, montrant que la qualité de vie urbaine résulte d'un équilibre entre activité économique et facteurs liés au mode de vie.}
+    \resumeItemListEnd
+
+    \resumeProjectHeadingFourItemResearch
+    {\textbf{Apprentissage profond pour la classification des polypes colorectaux}}{02/2025 -- 05/2025}
+    {Sorbonne Université, projet DIGIT}{Paris, France}
+
+    \projectdesc{Développement d'un système de classification binaire des polypes colorectaux (adénomateux ou hyperplasiques) par CNN sur le jeu de données clinique POLAR.}
+    \resumeItemListStart
+      \resumeItem{Revue de l'état de l'art des approches CNN pour la classification des polypes colorectaux, choix de VGG-19 comme backbone, puis prétraitement et restructuration du jeu POLAR pour garantir la cohérence des labels.}
+      \resumeItem{Application du transfer learning avec data augmentation pour atténuer le déséquilibre des classes, ce qui a fait passer le F1 des polypes hyperplasiques de 0,148 à 0,351.}
+    \resumeItemListEnd
+
+    \resumeProjectHeadingFourItemResearch
+     {\textbf{Interpretability Based Dialog Policy Optimization of TOD}}{12/2022 -- 06/2024}{Université de Beihang}{Mémoire de Master}
+    \resumeItemListStart
+        \resumeItem{Modélisation d'un pipeline de task-oriented dialogue à l'aide de structural causal models, avec construction de counterfactual belief states pour atténuer les corrélations fallacieuses.}
+        \resumeItem{Entraînement d'une dialogue policy par apprentissage par renforcement hors ligne (BCQ) avec des récompenses causales, sur le jeu de données MultiWOZ 2.0.}
+        \resumeItem{Résultats compétitifs (Inform 96,3\,\%, Success 83,4\,\%), avec une robustesse et une interprétabilité supérieures à celles des modèles de référence.}
+    \resumeItemListEnd
+
+    % Retired from default rotation, see templates/cv_base.tex (Data Joker, 10/2021 -- 05/2022).
+
+    \resumeSubHeadingListEnd
+
+%-----------SKILLS-----------
+\section{COMPÉTENCES}
+ \begin{itemize}[leftmargin=0.2in, label={}]
+    \small{\item{
+    \textbf{Compétences techniques :} Python, C/C++ ; PyTorch, NumPy, pandas, scikit-learn, OpenCV, Open3D ; FastAPI, SQLite, Pydantic, API REST, pytest ; Linux, Git, GitLab CI/CD, Docker\\
+    \textbf{IA générative et systèmes agentiques :} prompt engineering, RAG, fine-tuning LoRA SFT et GRPO avec custom reward design, pipelines agentiques LangGraph (tool orchestration, iterative refinement), structured LLM output, sélection de modèles selon des contraintes coût/performance, vLLM\\
+    \textbf{Évaluation et monitoring des LLM :} évaluation LLM-as-a-judge, conception de failure taxonomies, diagnostic des hallucinations et de la généralisation, optimisation du coût et de la latence d'inférence, continuous evaluation pipelines\\
+    \textbf{Deep Learning :} CNN, Transformers, self-supervised representation learning, transfer learning, distributed training (DDP), conception de pipelines d'entraînement, reproductibilité des expériences\\
+    \textbf{Vision par ordinateur et imagerie médicale :} traitement d'images, segmentation, recalage de nuages de points 2D/3D, classification, segmentation CT/CTA, workflows d'annotation clinique, gestion du déséquilibre des classes, filtrage, FFT\\
+    \textbf{Langues :} mandarin (langue maternelle), anglais (courant), français (niveau professionnel)
+    }}
+ \end{itemize}
+
+\end{document}

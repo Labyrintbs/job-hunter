@@ -30,7 +30,22 @@ EXPERIENCE_MACRO = r"\resumeSubheading"
 LIST_START = r"\resumeSubHeadingListStart"
 LIST_END = r"\resumeSubHeadingListEnd"
 
-SKILLS_BLOCK_RE = re.compile(r"(\\section\{SKILLS\}.*?\\item\{)(.*?)(\}\}\s*\\end\{itemize\})", re.S)
+# Per base-CV language: the section titles and the tagline (as regexes), which is
+# how the parser finds each part. templates/cv_base_fr.tex mirrors the English
+# file under these names.
+SECTIONS = {
+    "en": {"projects": r"PROJECTS[^}]*", "experience": r"PROFESSIONAL EXPERIENCE",
+           "skills": "SKILLS", "tagline": r"\{Seeking[^\n]*\}"},
+    "fr": {"projects": r"PROJETS[^}]*", "experience": r"EXPÉRIENCE PROFESSIONNELLE",
+           "skills": "COMPÉTENCES", "tagline": r"\{[^\n{}]*\(CDI/CDD\)[^\n]*\}"},
+}
+
+
+def _skills_block_re(title: str) -> re.Pattern:
+    return re.compile(r"(\\section\{" + re.escape(title) + r"\}.*?\\item\{)(.*?)(\}\}\s*\\end\{itemize\})", re.S)
+
+
+SKILLS_BLOCK_RE = _skills_block_re(SECTIONS["en"]["skills"])
 SKILL_LINE_RE = re.compile(r"\\textbf\{([^:]+):\}\s*(.*)")
 
 # A block's own trailing date range, e.g. "{03/2026 -- 08/2026}" -- used to sort
@@ -142,6 +157,7 @@ class ParsedCV:
     projects: list[Block]
     experiences: list[Block]
     skills: list[SkillCategory]
+    lang: str = "en"
 
 
 def terms_in(text: str) -> set[str]:
@@ -190,8 +206,8 @@ def _section_body(document: str, title_regex: str) -> tuple[int, int, str] | Non
     return start + len(LIST_START), end, document[start + len(LIST_START):end]
 
 
-def _parse_skills(doc: str) -> list[SkillCategory]:
-    m = SKILLS_BLOCK_RE.search(doc)
+def _parse_skills(doc: str, lang: str = "en") -> list[SkillCategory]:
+    m = _skills_block_re(SECTIONS[lang]["skills"]).search(doc)
     if not m:
         return []
     cats = []
@@ -204,30 +220,31 @@ def _parse_skills(doc: str) -> list[SkillCategory]:
         lm = SKILL_LINE_RE.match(line)
         if not lm:
             continue
-        cats.append(SkillCategory(name=lm.group(1), line=line, tags=_tag(line)))
+        cats.append(SkillCategory(name=lm.group(1).strip(), line=line, tags=_tag(line)))
     return cats
 
 
-def parse(base_path: Path) -> ParsedCV:
+def parse(base_path: Path, lang: str = "en") -> ParsedCV:
     doc = base_path.read_text(encoding="utf-8")
+    names = SECTIONS[lang]
 
     heading = ""
-    hm = re.search(r"\{Seeking[^\n]*\}", doc)
+    hm = re.search(names["tagline"], doc)
     if hm:
         heading = hm.group(0)
 
     projects: list[Block] = []
-    proj = _section_body(doc, r"PROJECTS[^}]*")
+    proj = _section_body(doc, names["projects"])
     if proj:
         projects = [Block(t, _tag(t)) for t in _split_items(proj[2], PROJECT_MACRO)]
 
     experiences: list[Block] = []
-    exp = _section_body(doc, r"PROFESSIONAL EXPERIENCE")
+    exp = _section_body(doc, names["experience"])
     if exp:
         experiences = [Block(t, _tag(t)) for t in _split_items(exp[2], EXPERIENCE_MACRO)]
 
     return ParsedCV(document=doc, heading_line=heading, projects=projects,
-                     experiences=experiences, skills=_parse_skills(doc))
+                     experiences=experiences, skills=_parse_skills(doc, lang), lang=lang)
 
 
 def reassemble(doc: str, section_title_regex: str, ordered_items: list[Block]) -> str:
@@ -253,10 +270,10 @@ def set_summary(doc: str, latex_text: str) -> str:
     return SUMMARY_BLOCK_RE.sub(lambda _: block, doc, count=1)
 
 
-def reassemble_skills(doc: str, categories: list[SkillCategory]) -> str:
+def reassemble_skills(doc: str, categories: list[SkillCategory], lang: str = "en") -> str:
     """Replace the SKILLS item lines with a filtered subset, keeping every
     existing line verbatim (reuse-only -- never invents an item)."""
-    m = SKILLS_BLOCK_RE.search(doc)
+    m = _skills_block_re(SECTIONS[lang]["skills"]).search(doc)
     if not m or not categories:
         return doc
     suffix = "\\\\"
