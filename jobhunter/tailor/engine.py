@@ -6,7 +6,7 @@ import re
 import shutil
 import subprocess
 import tempfile
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import NamedTuple
 
@@ -28,6 +28,13 @@ CV_OUT_DIR = DATA_DIR / "cv"
 def base_cv_path(language: str = "en"):
     """The master CV for a language; English unless the job's text is French."""
     return BASE_CV_FR if language == "fr" else BASE_CV
+
+
+def master_edited_at(language: str = "en") -> str:
+    """When the master CV was last edited, as a UTC 'YYYY-MM-DD HH:MM:SS' string
+    comparable with cv_artifacts.generated_at. A CV older than this predates the master."""
+    mtime = base_cv_path(language).stat().st_mtime
+    return datetime.fromtimestamp(mtime, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _job_terms(job: Job) -> set[str]:

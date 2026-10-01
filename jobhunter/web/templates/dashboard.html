@@ -140,6 +140,8 @@
         {% if j["cv_note"] and not j["cv_latest_failed"] %}<span style="color:var(--warn)" title="{{ j['cv_note'] }}">⚠ review</span>{% endif %}
         {% if j["cv_pdf"] %}<a href="file://{{ j['cv_pdf'] }}" target="_blank">CV</a>{% if j["cv_origin"] == "revised" %}<span title="human-revised, {{ j['cv_versions'] }} version(s)">✎</span>{% elif j["cv_origin"] == "ai" %}<span class="muted" title="auto-tailored, {{ j['cv_versions'] }} version(s)">🤖</span>{% endif %}{% endif %}
         {% if j["cv_pdf"] and j["cv_lang"] %}<span class="pill" style="font-size:10px; padding:1px 6px" title="language of this CV">{{ j["cv_lang"]|upper }}</span>{% endif %}
+        {% if j["cv_pdf"] and j["cv_generated_at"] %}<span class="muted" style="font-size:10px" title="CV generated {{ j['cv_generated_at'] }} UTC">{{ j["cv_generated_at"][5:10] }}</span>
+        {% if j["cv_origin"] == "ai" and j["cv_generated_at"] < cv_master_edited[j["cv_lang"] or "en"] %}<span class="pill" style="font-size:10px; padding:1px 6px; color:var(--muted)" title="generated before the master CV's last edit; re-tailor to refresh">old master</span>{% endif %}{% endif %}
         <button class="ghost" style="padding:4px 7px; font-size:12px;" onclick="tailorCV(this, {{ j['id'] }})">
           {% if j["cv_pdf"] %}↻{% else %}CV{% endif %}
         </button>

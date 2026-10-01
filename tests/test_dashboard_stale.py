@@ -99,6 +99,25 @@ def test_dashboard_shows_the_cv_language_and_a_switch_to_the_other_one(tmp_db):
     assert ">FR</span>" in html and ">EN</span>" in html
 
 
+def test_dashboard_shows_the_cv_date_and_flags_a_cv_older_than_the_master(tmp_db, monkeypatch):
+    monkeypatch.setattr("jobhunter.web.app.master_edited_at", lambda lang: "2026-10-01 10:00:00")
+    with db.connect() as conn:
+        old, _ = db.upsert_job(conn, J("40", title="Old Master Job"), 60, "r")
+        db.add_cv_artifact(conn, old, "/tmp/o.tex", "/tmp/o.pdf", lang="en")
+        new, _ = db.upsert_job(conn, J("41", title="Fresh Master Job"), 60, "r")
+        db.add_cv_artifact(conn, new, "/tmp/n.tex", "/tmp/n.pdf", lang="fr")
+        revised, _ = db.upsert_job(conn, J("42", title="Hand Revised Old Job"), 60, "r")
+        db.add_cv_artifact(conn, revised, "", "/tmp/r.pdf", origin="revised")
+        conn.execute("UPDATE cv_artifacts SET generated_at = '2026-09-30 08:00:00' WHERE job_id IN (?, ?)",
+                     (old, revised))
+        conn.execute("UPDATE cv_artifacts SET generated_at = '2026-10-01 12:00:00' WHERE job_id = ?", (new,))
+
+    html = TestClient(app).get("/").text
+
+    assert html.count(">old master</span>") == 1       # only the AI CV from before the master's edit
+    assert "09-30" in html and "10-01" in html          # generation dates shown
+
+
 def test_review_pill_counts_and_lists_cvs_with_a_note(tmp_db):
     with db.connect() as conn:
         noted, _ = db.upsert_job(conn, J("30", title="Noted CV Job"), 60, "r")

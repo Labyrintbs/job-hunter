@@ -9,6 +9,7 @@ from fastapi.templating import Jinja2Templates
 from .. import db, export as export_mod, learn
 from ..config import load_search_config
 from ..llm import provider
+from ..tailor.engine import master_edited_at
 from ..pipeline import cover_one, enrich_one, import_revised_cv, judge_one, run_fetch, tailor_one
 
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -114,6 +115,7 @@ def dashboard(request: Request, status: str | None = None, min_score: int = 0,
             "dismiss_reasons": db.DISMISS_REASONS,
             "total": sum(counts.values()),
             "llm_available": provider.available(),
+            "cv_master_edited": {lang: master_edited_at(lang) for lang in ("en", "fr")},
             "dup_map": dup_map,
             "dup_jobs": dup_jobs,
             "dup_checks": dup_checks,
