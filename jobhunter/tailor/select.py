@@ -29,6 +29,8 @@ SYSTEM = (
     "- Projects & Research: keep exactly 3 entries (or all of them if fewer than 3 exist), "
     "chosen for relevance to this job. A project that's obviously filler for this job "
     "reads worse than a shorter CV, don't pad just to hit 3 if nothing else fits.\n"
+    "- Spare projects: also list up to 2 `extra_project_ids`, your next best projects after the "
+    "ones you keep, with scores. They are only used if the page turns out to have room.\n"
     "- Order both lists reverse-chronologically (most recent entry first) by default. Only "
     "reorder by relevance if one entry is clearly more relevant to this job than the "
     "others, and say so in `reasoning` -- otherwise keep date order. When two entries are "
@@ -62,8 +64,8 @@ AVAILABLE SKILL CATEGORIES (items numbered within each):
 
 Return the experience ids to keep (ordered as they should appear) and a same-length list of \
 score lists (one score per bullet of that entry, in the same order), the project ids to keep \
-(ordered as they should appear) with their score lists, and for each skill category, in the \
-order given, one score per item."""
+(ordered as they should appear) with their score lists, up to 2 spare project ids with their \
+score lists, and for each skill category, in the order given, one score per item."""
 
 _SCORES = {"type": "array", "items": {"type": "array", "items": {"type": "integer"}}}
 
@@ -74,11 +76,13 @@ RESULT_SCHEMA = {
         "experience_scores": _SCORES,
         "project_ids": {"type": "array", "items": {"type": "integer"}},
         "project_scores": _SCORES,
+        "extra_project_ids": {"type": "array", "items": {"type": "integer"}},
+        "extra_project_scores": _SCORES,
         "skill_scores": _SCORES,
         "reasoning": {"type": "string"},
     },
     "required": ["experience_ids", "experience_scores", "project_ids", "project_scores",
-                 "skill_scores", "reasoning"],
+                 "extra_project_ids", "extra_project_scores", "skill_scores", "reasoning"],
 }
 
 

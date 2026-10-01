@@ -157,6 +157,7 @@ class Cut:
     b: int = 0         # bullet / item index
     eff: float = 0.0
     lines: float = 0.0
+    keep: tuple | None = None    # a project added back with only some of its bullets
 
     @property
     def key(self) -> tuple:
@@ -221,6 +222,8 @@ def apply_cut(plan: Plan, cut: Cut, add: bool = False) -> None:
         plan.skills[cut.a].keep[cut.b] = add
     elif cut.kind == "project":
         plan.projects[cut.a].kept = add
+        if add and cut.keep is not None:
+            plan.projects[cut.a].keep = list(cut.keep)
     else:
         entries = plan.experiences if cut.kind == "exp_bullet" else plan.projects
         entries[cut.a].keep[cut.b] = add
@@ -246,6 +249,20 @@ class FitResult:
     note: str = ""                 # worth a look on the board; "" for routine trimming
 
 
+def _shrunk_project(plan: Plan, cut: Cut, limit: float) -> Cut | None:
+    """A project that does not fit whole, added with only its best-scored bullets (at least
+    one) that do; None when even that is too big."""
+    e = plan.projects[cut.a]
+    keep, used = [False] * len(e.keep), e.base_lines
+    for j in sorted(range(len(e.keep)), key=lambda j: -e.scores[j]):
+        if used + e.lines[j] <= limit or not any(keep):
+            keep[j] = True
+            used += e.lines[j]
+    if used > limit + 0.25:
+        return None
+    return Cut("project", cut.a, 0, cut.eff, used, tuple(keep))
+
+
 def _next_addition(plan: Plan, layout: Layout, failed: set) -> Cut | None:
     free = [layout.free_lines(p) for p in range(2)]
     biggest, total = max(free), sum(free)
@@ -256,6 +273,8 @@ def _next_addition(plan: Plan, layout: Layout, failed: set) -> Cut | None:
         for c in options:
             if c.lines <= limit + 0.25:
                 return c
+            if c.kind == "project" and (shrunk := _shrunk_project(plan, c, limit)):
+                return shrunk
     return None
 
 
@@ -320,6 +339,6 @@ def fit(plan: Plan, render: Callable[[Plan], str], compile_: Callable[[str], Pat
     note = ""
     if any(not k for e in cur.experiences for k in e.keep):
         note = "to fit two pages, a work-experience bullet was removed"
-    elif any(not e.kept for e in cur.projects):
+    elif any(before.kept and not now.kept for before, now in zip(plan.projects, cur.projects)):
         note = "to fit two pages, a whole project was removed"
     return FitResult("fit", cur, tex, layout, compiles, log, note)

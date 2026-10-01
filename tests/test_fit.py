@@ -260,6 +260,48 @@ def test_a_page_two_that_starts_with_a_bullet_is_logged_as_a_split_entry():
     assert res.status == "fit" and any("starts mid-entry" in line for line in res.log)
 
 
+def _plan_with_spare(bullets=3):
+    plan = _plan()
+    spare = fit.Entry([2.0] * bullets, [60] * bullets, [True] * bullets, 3.0, kept=False)
+    plan.projects.append(spare)
+    return plan
+
+
+def test_a_spare_project_is_added_when_the_page_has_room_for_it():
+    plan = _plan_with_spare()
+    spare_size = 3.0 + 3 * 2.0
+    res, cv = _run(plan, capacity=FakeCV().size(plan) + spare_size + 1)
+    assert res.status == "fit" and res.plan.projects[-1].kept
+    assert res.note == ""                                  # an unused or added spare is routine, not a removal
+    assert any("added back project 3" in line for line in res.log)
+
+
+def test_a_spare_project_is_added_with_fewer_bullets_when_it_does_not_fit_whole():
+    plan = _plan_with_spare(bullets=4)
+    room = 3.0 + 2.0 + 0.5                                  # its heading and one bullet, not four
+    res, cv = _run(plan, capacity=FakeCV().size(plan) + room + 2.0)
+    spare = res.plan.projects[-1]
+    assert res.status == "fit" and spare.kept and 1 <= spare.kept_count() < 4
+    assert cv.size(res.plan) <= cv.capacity
+
+
+def test_a_spare_project_stays_out_when_there_is_no_room_and_is_not_reported_as_removed():
+    plan = _plan_with_spare()
+    res, _ = _run(plan, capacity=FakeCV().size(plan) + 0.5)
+    assert res.status == "fit" and not res.plan.projects[-1].kept and res.note == ""
+
+
+def test_a_spare_is_slotted_in_by_date_and_never_chosen_ahead_of_the_primary_picks():
+    from jobhunter.tailor.snippet_bank import Block
+    newer = Block("{x}{09/2025 -- 10/2025}")
+    older = Block("{x}{01/2020 -- 02/2020}")
+    primary = [(Block("{x}{05/2025 -- 06/2025}"), [1]), (Block("{x}{03/2024 -- 04/2024}"), [1])]
+    out = engine._with_spares(primary, [(newer, [1]), (older, [1]), (newer, [1]), (Block("{x}{01/2019 -- 02/2019}"), [1])])
+    dates = [b.end_date() for b, _, _ in out]
+    assert dates == sorted(dates, reverse=True)
+    assert [shown for _, _, shown in out].count(True) == 2 and len(out) == 2 + engine.MAX_EXTRA_PROJECTS
+
+
 def test_the_input_plan_is_not_modified():
     plan = _plan()
     before = fit.removals(plan)

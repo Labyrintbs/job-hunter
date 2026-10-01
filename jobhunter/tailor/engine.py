@@ -107,17 +107,35 @@ def _keyword_bullet_scores(text: str, terms: set[str]) -> int:
     return min(100, 30 + 15 * len(snippet_bank.terms_in(text) & terms))
 
 
+MAX_EXTRA_PROJECTS = 2     # spare projects, shown only when the page turns out to have room
+
+
+def _with_spares(primary: list, extras: list) -> list[tuple[Block, list, bool]]:
+    """[(Block, scores, shown)]: the chosen projects in their order, with each spare slotted in
+    by date so it reads in place if the fit step adds it."""
+    out = [(b, s, True) for b, s in primary]
+    taken = {id(b) for b, _, _ in out}
+    for b, s in extras[:MAX_EXTRA_PROJECTS]:
+        if id(b) in taken:
+            continue
+        pos = next((i for i, (o, _, _) in enumerate(out) if o.end_date() < b.end_date()), len(out))
+        out.insert(pos, (b, s, False))
+    return out
+
+
 def _plan_for(experiences, projects, skills, lang: str) -> fit.Plan:
-    """`experiences`/`projects` are [(Block, bullet scores)]; `skills` is
-    [(SkillCategory, item scores or None)]."""
-    def entry(block, scores):
-        return fit.Entry.build(block.text, block.bullets(), scores)
+    """`experiences` is [(Block, bullet scores)], `projects` is [(Block, scores, shown)] and
+    `skills` is [(SkillCategory, item scores or None)]."""
+    def entry(block, scores, shown=True):
+        e = fit.Entry.build(block.text, block.bullets(), scores)
+        e.kept = shown
+        return e
     lines = []
     for cat, scores in skills:
         parts = snippet_bank.split_skill_items(cat.line)
         fixed = cat.name == _FIXED_SKILL_CATEGORY[lang] or parts is None
         lines.append(fit.SkillLine.build(parts.items if parts else [], scores, trimmable=not fixed))
-    return fit.Plan([entry(b, s) for b, s in experiences], [entry(b, s) for b, s in projects], lines)
+    return fit.Plan([entry(b, s) for b, s in experiences], [entry(b, s, k) for b, s, k in projects], lines)
 
 
 def _select_blocks(job: Job, parsed: ParsedCV, terms: set[str],
@@ -147,7 +165,10 @@ def _select_blocks(job: Job, parsed: ParsedCV, terms: set[str],
                          MAX_EXPERIENCES)
             projs = _pick(parsed.projects, result.get("project_ids"), result.get("project_scores"),
                           MAX_PROJECTS)
+            extras = _pick(parsed.projects, result.get("extra_project_ids"),
+                           result.get("extra_project_scores"), MAX_EXTRA_PROJECTS)
             if exps and projs:
+                projs = _with_spares(projs, extras)
                 raw = result.get("skill_scores")
                 raw = raw if isinstance(raw, list) else []
                 by_cat = {c.name: (raw[i] if i < len(raw) and isinstance(raw[i], list) else None)
@@ -158,7 +179,7 @@ def _select_blocks(job: Job, parsed: ParsedCV, terms: set[str],
                     if c.name == conditional and scores and max(scores) < _CONDITIONAL_MAX_SCORE:
                         continue
                     skills.append((c, scores))
-                return Selection([b for b, _ in exps], [b for b, _ in projs], [c for c, _ in skills],
+                return Selection([b for b, _ in exps], [b for b, _, _ in projs], [c for c, _ in skills],
                                  _plan_for(exps, projs, skills, lang), False)
             reason, detail = "tailor_llm_unusable", "LLM selection was empty or incomplete"
         except Exception as exc:
@@ -167,8 +188,12 @@ def _select_blocks(job: Job, parsed: ParsedCV, terms: set[str],
     fetch_diag.track("tailor", reason, detail=detail, company=job.company)
     exps = [(b, [_keyword_bullet_scores(x, terms) for x in b.bullets()])
             for b in _fallback_select(parsed.experiences, terms, MAX_EXPERIENCES)]
-    projs = [(b, [_keyword_bullet_scores(x, terms) for x in b.bullets()])
-             for b in _fallback_select(parsed.projects, terms, MAX_PROJECTS)]
+    def keyword_scored(blocks):
+        return [(b, [_keyword_bullet_scores(x, terms) for x in b.bullets()]) for b in blocks]
+    chosen = _fallback_select(parsed.projects, terms, MAX_PROJECTS)
+    spare = [b for b in _fallback_select(parsed.projects, terms, MAX_PROJECTS + MAX_EXTRA_PROJECTS)
+             if all(b is not c for c in chosen)]
+    projs = _with_spares(keyword_scored(chosen), keyword_scored(spare))
     skills = []
     for c in parsed.skills:
         if c.name == conditional and not (c.tags & terms):
@@ -177,7 +202,7 @@ def _select_blocks(job: Job, parsed: ParsedCV, terms: set[str],
         scores = None if c.name == _FIXED_SKILL_CATEGORY[lang] or not split else [
             _keyword_bullet_scores(i, terms) for i in split.items]
         skills.append((c, scores))
-    return Selection([b for b, _ in exps], [b for b, _ in projs], [c for c, _ in skills],
+    return Selection([b for b, _ in exps], [b for b, _, _ in projs], [c for c, _ in skills],
                      _plan_for(exps, projs, skills, lang), True)
 
 
