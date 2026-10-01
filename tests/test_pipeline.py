@@ -1388,6 +1388,33 @@ def test_tailor_one_records_a_keyword_fallback_cv_with_its_marker(tmp_db, config
         assert db.needs_tailoring(conn, jid)                       # ...but still due an upgrade
 
 
+@pytest.mark.parametrize("status", ["applied", "rejected", "unavailable", "interview"])
+def test_re_tailoring_keeps_a_job_past_cv_ready_where_it_is(tmp_db, config, tmp_path, monkeypatch, status):
+    with db.connect() as conn:
+        jid = _insert(conn, config, description=_REAL_JD)
+        db.update_status(conn, jid, status)
+    monkeypatch.setattr(pipeline.cv_engine, "tailor_job", _fake_tailor_job(tmp_path))
+
+    result = pipeline.tailor_one(jid, auto=False)
+
+    assert result["compiled"]
+    with db.connect() as conn:
+        assert db.get_job(conn, jid)["status"] == status
+        assert len(db.list_cv_artifacts(conn, jid)) == 1          # the new version is still recorded
+
+
+def test_re_tailoring_a_shortlisted_job_makes_it_cv_ready(tmp_db, config, tmp_path, monkeypatch):
+    with db.connect() as conn:
+        jid = _insert(conn, config, description=_REAL_JD)
+        db.update_status(conn, jid, "shortlisted")
+    monkeypatch.setattr(pipeline.cv_engine, "tailor_job", _fake_tailor_job(tmp_path))
+
+    pipeline.tailor_one(jid, auto=False)
+
+    with db.connect() as conn:
+        assert db.get_job(conn, jid)["status"] == "cv_ready"
+
+
 def test_tailor_one_upgrades_a_fallback_cv_when_the_llm_is_back(tmp_db, config, tmp_path, monkeypatch):
     with db.connect() as conn:
         jid = _insert(conn, config, description=_REAL_JD)

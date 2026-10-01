@@ -963,6 +963,14 @@ def update_status(conn: sqlite3.Connection, job_id: int, status: str) -> None:
     _log_event(conn, job_id, "status", old["status"] if old else "", status)
 
 
+def mark_cv_ready(conn: sqlite3.Connection, job_id: int) -> None:
+    """A job becomes cv_ready once it has a CV, but only from the early statuses: a
+    re-tailor of an applied/rejected/unavailable job must not move it back."""
+    row = conn.execute("SELECT status FROM applications WHERE job_id = ?", (job_id,)).fetchone()
+    if row and row["status"] in ("new", "shortlisted"):
+        update_status(conn, job_id, "cv_ready")
+
+
 def job_from_row(row: sqlite3.Row) -> Job:
     """Reconstruct a Job from a stored row. The nullable TEXT columns are
     coalesced to "" -- Job's fields are non-optional strings, but a handful of

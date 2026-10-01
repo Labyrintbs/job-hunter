@@ -1258,7 +1258,7 @@ def _tailor_and_record(job_id: int, auto: bool, row, job, language: str | None =
                                base_version=cv_engine.base_cv_path(result.lang).name,
                                origin="ai", note=note, lang=result.lang)
             if pdf_path:
-                db.update_status(conn, job_id, "cv_ready")
+                db.mark_cv_ready(conn, job_id)
         tracker.flush(conn)
     if repeat_fallback:
         for stale in (tex_path, pdf_path, tex_path.with_suffix(".compile.log")):
@@ -1306,7 +1306,7 @@ def import_revised_cv(job_id: int, pdf: "Path | bytes", tex: "Path | None" = Non
     with db.connect() as conn:
         db.add_cv_artifact(conn, job_id, tex_dest, str(pdf_dest),
                            base_version="revised", origin="revised")
-        db.update_status(conn, job_id, "cv_ready")
+        db.mark_cv_ready(conn, job_id)
     return {"job_id": job_id, "pdf": str(pdf_dest), "tex": tex_dest or None, "origin": "revised"}
 
 
