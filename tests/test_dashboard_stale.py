@@ -56,7 +56,29 @@ def test_dashboard_flags_a_failed_retailor_next_to_the_older_good_cv(tmp_db):
     html = TestClient(app).get("/").text
 
     assert "⚠ re-tailor failed" in html
-    assert 'href="file:///tmp/cv-1.pdf"' in html      # the earlier good CV stays linked
+    assert f'href="/cv/{jid}.pdf"' in html            # the earlier good CV stays linked
+
+
+def test_cv_and_letter_links_are_served_over_http_from_the_data_dir_only(tmp_db, tmp_path, monkeypatch):
+    monkeypatch.setattr("jobhunter.web.app.DATA_DIR", tmp_path)
+    good_pdf, good_letter, outside = tmp_path / "cv.pdf", tmp_path / "cover_letter.md", tmp_path.parent / "secret.pdf"
+    good_pdf.write_bytes(b"%PDF-1.4 mine")
+    good_letter.write_text("Dear team")
+    outside.write_bytes(b"%PDF-1.4 secret")
+    with db.connect() as conn:
+        ok, _ = db.upsert_job(conn, J("50", title="Has Docs"), 60, "r")
+        db.add_cv_artifact(conn, ok, "", str(good_pdf))
+        conn.execute("UPDATE applications SET cover_letter_path = ? WHERE job_id = ?", (str(good_letter), ok))
+        bad, _ = db.upsert_job(conn, J("51", title="Path Outside"), 60, "r")
+        db.add_cv_artifact(conn, bad, "", str(outside))
+        none, _ = db.upsert_job(conn, J("52", title="No Docs"), 60, "r")
+
+    client = TestClient(app)
+    pdf, letter = client.get(f"/cv/{ok}.pdf"), client.get(f"/letter/{ok}")
+    assert pdf.status_code == 200 and pdf.content.startswith(b"%PDF") and pdf.headers["content-type"] == "application/pdf"
+    assert letter.status_code == 200 and letter.text == "Dear team"
+    assert client.get(f"/cv/{bad}.pdf").status_code == 404      # stored path outside data/ is never served
+    assert client.get(f"/cv/{none}.pdf").status_code == 404 and client.get(f"/letter/{none}").status_code == 404
 
 
 def test_stuck_pill_shows_unenrichable_jobs_even_when_filtered_or_dismissed(tmp_db):

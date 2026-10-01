@@ -3,11 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from .. import db, export as export_mod, learn
-from ..config import load_search_config
+from ..config import DATA_DIR, load_search_config
 from ..llm import provider
 from ..tailor.engine import master_edited_at
 from ..pipeline import cover_one, enrich_one, import_revised_cv, judge_one, run_fetch, tailor_one
@@ -203,6 +203,31 @@ async def cv_upload_route(job_id: int, pdf: UploadFile = File(...)):
     result = import_revised_cv(job_id, data)
     status = 404 if result.get("error") else 200
     return JSONResponse(result, status_code=status)
+
+
+def _serve_local(path: str | None, media_type: str):
+    """Serve a stored file over HTTP (browsers refuse file:// links from a web page).
+    The path comes from the DB, and only files under data/ are served."""
+    if not path:
+        return PlainTextResponse("not found", status_code=404)
+    p = Path(path).resolve()
+    if not p.is_file() or DATA_DIR.resolve() not in p.parents:
+        return PlainTextResponse("not found", status_code=404)
+    return FileResponse(p, media_type=media_type, content_disposition_type="inline")
+
+
+@app.get("/cv/{job_id}.pdf")
+def cv_file(job_id: int):
+    with db.connect() as conn:
+        latest = next((a for a in db.list_cv_artifacts(conn, job_id) if a["pdf_path"]), None)
+    return _serve_local(latest["pdf_path"] if latest else None, "application/pdf")
+
+
+@app.get("/letter/{job_id}")
+def letter_file(job_id: int):
+    with db.connect() as conn:
+        row = conn.execute("SELECT cover_letter_path FROM applications WHERE job_id = ?", (job_id,)).fetchone()
+    return _serve_local(row["cover_letter_path"] if row else None, "text/plain; charset=utf-8")
 
 
 @app.get("/companies", response_class=HTMLResponse)
