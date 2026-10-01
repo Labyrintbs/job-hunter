@@ -890,3 +890,17 @@ def test_v_market_trend_is_exportable(tmp_db):
         rows = conn.execute("SELECT * FROM v_market_trend").fetchall()
         assert len(rows) == 1
         assert rows[0]["category"] == "AI engineering"
+
+
+def test_cv_artifacts_remember_their_language_and_list_jobs_exposes_the_newest(tmp_db):
+    with db.connect() as conn:
+        jid, _ = db.upsert_job(conn, Job(source="wttj", external_id="lang1", title="ML Engineer",
+                                         company="Acme", url="http://x/lang1"), 60, "r")
+        db.add_cv_artifact(conn, jid, "/tmp/a.tex", "/tmp/a.pdf")                 # default: en
+        assert db.list_cv_artifacts(conn, jid)[0]["lang"] == "en"
+        db.add_cv_artifact(conn, jid, "/tmp/b.tex", "/tmp/b.pdf", lang="fr")
+        row = next(r for r in db.list_jobs(conn, min_score=0) if r["id"] == jid)
+        assert row["cv_lang"] == "fr"
+        db.add_cv_artifact(conn, jid, "/tmp/c.tex", "", lang="en")                  # a failed attempt
+        row = next(r for r in db.list_jobs(conn, min_score=0) if r["id"] == jid)
+        assert row["cv_lang"] == "fr"                       # still the newest CV that exists

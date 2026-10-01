@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS cv_artifacts (
     base_version TEXT DEFAULT '',
     origin       TEXT DEFAULT 'ai',      -- base | ai | revised (human-uploaded)
     note         TEXT DEFAULT '',        -- why it failed / needs review, '' when fine
+    lang         TEXT DEFAULT 'en',      -- language of the CV: en | fr
     generated_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -278,6 +279,7 @@ MIGRATIONS = {
     "cv_artifacts": {
         "origin": "TEXT DEFAULT 'ai'",
         "note": "TEXT DEFAULT ''",
+        "lang": "TEXT DEFAULT 'en'",
     },
     "fetch_runs": {
         "new_major_city": "INTEGER DEFAULT 0",
@@ -678,6 +680,8 @@ def list_jobs(conn: sqlite3.Connection, status: str | None = None, min_score: in
                 ORDER BY c.generated_at DESC, c.id DESC LIMIT 1) AS cv_pdf,
                (SELECT origin FROM cv_artifacts c WHERE c.job_id = j.id AND c.pdf_path != ''
                 ORDER BY c.generated_at DESC, c.id DESC LIMIT 1) AS cv_origin,
+               (SELECT lang FROM cv_artifacts c WHERE c.job_id = j.id AND c.pdf_path != ''
+                ORDER BY c.generated_at DESC, c.id DESC LIMIT 1) AS cv_lang,
                (SELECT note FROM cv_artifacts c WHERE c.job_id = j.id
                 ORDER BY c.generated_at DESC, c.id DESC LIMIT 1) AS cv_note,
                (SELECT c.pdf_path = '' FROM cv_artifacts c WHERE c.job_id = j.id
@@ -879,6 +883,16 @@ def stale_count(conn: sqlite3.Connection, staleness_days: int = 14) -> int:
     ).fetchone()[0]
 
 
+def review_count(conn: sqlite3.Connection) -> int:
+    """Jobs whose newest CV carries a note: it failed, fell back or needs a look (a
+    wrong language, a summary that fell back to its fixed text, a sparse page...)."""
+    return conn.execute(
+        """SELECT COUNT(*) FROM jobs j WHERE COALESCE(
+               (SELECT c.note FROM cv_artifacts c WHERE c.job_id = j.id
+                ORDER BY c.generated_at DESC, c.id DESC LIMIT 1), '') <> ''"""
+    ).fetchone()[0]
+
+
 def stuck_enrichment_count(conn: sqlite3.Connection) -> int:
     """Jobs that exhausted every enrichment retry (see MAX_ENRICH_ATTEMPTS) and still
     have no real JD text -- permanently un-enrichable (delisted, or a JS-rendered
@@ -965,14 +979,15 @@ def job_from_row(row: sqlite3.Row) -> Job:
 
 def add_cv_artifact(conn: sqlite3.Connection, job_id: int, tex_path: str,
                     pdf_path: str, base_version: str = "", origin: str = "ai",
-                    note: str = "") -> int:
+                    note: str = "", lang: str = "en") -> int:
     """Append a CV artifact (append-only; latest-by-generated_at is the active one).
     origin: 'ai' (auto-tailored) | 'revised' (human-uploaded) | 'base'.
-    note: why the CV failed to compile or needs review; '' when it's fine."""
+    note: why the CV failed to compile or needs review; '' when it's fine.
+    lang: 'en' or 'fr', the language the CV was written in."""
     cur = conn.execute(
-        "INSERT INTO cv_artifacts (job_id, tex_path, pdf_path, base_version, origin, note) "
-        "VALUES (?,?,?,?,?,?)",
-        (job_id, tex_path, pdf_path, base_version, origin, note),
+        "INSERT INTO cv_artifacts (job_id, tex_path, pdf_path, base_version, origin, note, lang) "
+        "VALUES (?,?,?,?,?,?,?)",
+        (job_id, tex_path, pdf_path, base_version, origin, note, lang),
     )
     return cur.lastrowid
 

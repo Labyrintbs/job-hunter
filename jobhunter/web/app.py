@@ -24,9 +24,10 @@ def _startup() -> None:
 @app.get("/", response_class=HTMLResponse)
 def dashboard(request: Request, status: str | None = None, min_score: int = 0,
               filtered: int = 0, dismissed: int = 0, stale: int = 0,
-              interested: int = 0, stuck: int = 0, sort: str = "score", q: str = ""):
+              interested: int = 0, stuck: int = 0, review: int = 0, sort: str = "score", q: str = ""):
     days = load_search_config().get("staleness_days", 14)
-    exclude = ("unavailable", "rejected") if not (status or dismissed or interested or filtered or stale or stuck) else ()
+    exclude = ("unavailable", "rejected") if not (
+        status or dismissed or interested or filtered or stale or stuck or review) else ()
     sort = sort if sort in db.SORT_ORDERS else "score"
     q = q.strip()
     with db.connect() as conn:
@@ -47,7 +48,7 @@ def dashboard(request: Request, status: str | None = None, min_score: int = 0,
             # Explicitly picking a status/stale/stuck pill should show every matching
             # job regardless of filtered/dismissed/interested -- otherwise the count
             # badges (computed without those restrictions) wouldn't match what's shown.
-            bypass = bool(status) or bool(stale) or bool(stuck)
+            bypass = bool(status) or bool(stale) or bool(stuck) or bool(review)
             jobs = db.list_jobs(conn, status=status or None, min_score=min_score,
                                 filtered=None if bypass else filtered,
                                 dismissed=None if bypass else False,
@@ -58,7 +59,10 @@ def dashboard(request: Request, status: str | None = None, min_score: int = 0,
         if stuck:
             jobs = [j for j in jobs
                     if not j["description_full"] and j["enrich_attempts"] >= db.MAX_ENRICH_ATTEMPTS]
+        if review:
+            jobs = [j for j in jobs if j["cv_note"]]
         counts = db.status_counts(conn)
+        n_review = db.review_count(conn)
         n_filtered = db.filtered_count(conn)
         n_dismissed = db.dismissed_count(conn)
         n_stale = db.stale_count(conn, days)
@@ -98,6 +102,8 @@ def dashboard(request: Request, status: str | None = None, min_score: int = 0,
             "stale": stale,
             "interested": interested,
             "stuck": stuck,
+            "review": review,
+            "n_review": n_review,
             "sort": sort,
             "q": q,
             "n_filtered": n_filtered,
@@ -162,8 +168,9 @@ def run_fetch_route():
 
 
 @app.post("/tailor/{job_id}")
-def tailor_route(job_id: int):
-    return JSONResponse(tailor_one(job_id))
+def tailor_route(job_id: int, lang: str | None = None):
+    # lang ("en" or "fr") re-tailors in that language instead of the posting's own
+    return JSONResponse(tailor_one(job_id, language=lang if lang in ("en", "fr") else None))
 
 
 @app.post("/judge/{job_id}")

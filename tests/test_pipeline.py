@@ -1219,7 +1219,7 @@ def test_tailor_one_and_cover_one_pass_the_judge_context_through(tmp_db, config,
 
     captured = {}
     monkeypatch.setattr(pipeline.cv_engine, "tailor_job",
-                        lambda job, job_id, auto=False, judge_context=None, role_category="":
+                        lambda job, job_id, auto=False, judge_context=None, role_category="", language=None:
                         captured.update(tailor_ctx=judge_context) or cv_engine.TailorResult(Path("/tmp/cv.tex"), Path("/tmp/cv.pdf")))
     monkeypatch.setattr(pipeline.cover_letter, "draft_to_file",
                         lambda job, out_dir, judge_context=None, cv_text=None:
@@ -1239,7 +1239,7 @@ def test_judge_context_is_none_when_job_not_yet_judged(tmp_db, config, monkeypat
 
     captured = {}
     monkeypatch.setattr(pipeline.cv_engine, "tailor_job",
-                        lambda job, job_id, auto=False, judge_context=None, role_category="":
+                        lambda job, job_id, auto=False, judge_context=None, role_category="", language=None:
                         captured.update(tailor_ctx=judge_context) or cv_engine.TailorResult(Path("/tmp/cv.tex"), Path("/tmp/cv.pdf")))
 
     pipeline.tailor_one(jid)
@@ -1251,7 +1251,7 @@ def _fake_tailor_job(tmp_path, note=""):
     """A tailor_job stand-in that writes real versioned files, like the engine does."""
     calls = []
 
-    def fake(job, job_id, auto=False, judge_context=None, role_category=""):
+    def fake(job, job_id, auto=False, judge_context=None, role_category="", language=None):
         stamp = f"v{len(calls)}"
         tex, pdf = tmp_path / f"cv-{stamp}.tex", tmp_path / f"cv-{stamp}.pdf"
         tex.write_text("tex"); pdf.write_bytes(b"%PDF")
@@ -1738,3 +1738,39 @@ def test_daily_run_does_not_judge_jobs_whose_enriched_text_is_still_short(tmp_db
 
     assert summary["judged"] == 0 and called == []
     assert _drop_reasons() == []
+
+
+def test_tailor_one_passes_the_language_through_and_stores_it_with_the_cv(tmp_db, config, monkeypatch):
+    with db.connect() as conn:
+        jid = _insert(conn, config, description=_REAL_JD)
+    seen = {}
+
+    def fake(job, job_id, auto=False, judge_context=None, role_category="", language=None):
+        seen["language"] = language
+        return cv_engine.TailorResult(Path("/tmp/cv.tex"), Path("/tmp/cv.pdf"), "", "fr")
+    monkeypatch.setattr(pipeline.cv_engine, "tailor_job", fake)
+
+    result = pipeline.tailor_one(jid, language="fr")
+
+    assert seen["language"] == "fr" and result["lang"] == "fr"
+    with db.connect() as conn:
+        artifact = db.list_cv_artifacts(conn, jid)[0]
+    assert artifact["lang"] == "fr" and artifact["base_version"] == "cv_base_fr.tex"
+
+
+def test_tailor_one_without_a_language_lets_the_engine_decide(tmp_db, config, monkeypatch):
+    with db.connect() as conn:
+        jid = _insert(conn, config, description=_REAL_JD)
+    seen = {}
+
+    def fake(job, job_id, auto=False, judge_context=None, role_category="", language=None):
+        seen["language"] = language
+        return cv_engine.TailorResult(Path("/tmp/cv.tex"), Path("/tmp/cv.pdf"))
+    monkeypatch.setattr(pipeline.cv_engine, "tailor_job", fake)
+
+    pipeline.tailor_one(jid)
+
+    assert seen["language"] is None
+    with db.connect() as conn:
+        artifact = db.list_cv_artifacts(conn, jid)[0]
+    assert artifact["lang"] == "en" and artifact["base_version"] == "cv_base.tex"

@@ -1185,10 +1185,11 @@ def cover_one(job_id: int) -> dict:
     return {"job_id": job_id, "cover_letter": str(path)}
 
 
-def tailor_one(job_id: int, auto: bool = False) -> dict:
+def tailor_one(job_id: int, auto: bool = False, language: str | None = None) -> dict:
     """Tailor + compile a CV for one job, record it, and mark the job cv_ready.
     `auto=True` (daily_run's unsupervised path) also enforces the exact-2-page
-    rule -- see cv_engine.tailor_job."""
+    rule -- see cv_engine.tailor_job. `language` ("en" or "fr") overrides the
+    language detected from the posting (the dashboard's switch to the other one)."""
     db.init_db()
     with db.connect() as conn:
         row = db.get_job(conn, job_id)
@@ -1206,7 +1207,7 @@ def tailor_one(job_id: int, auto: bool = False) -> dict:
             with db.connect() as conn:
                 if not db.needs_tailoring(conn, job_id):
                     return {"job_id": job_id, "skipped": "already tailored"}
-        return _tailor_and_record(job_id, auto, row, job)
+        return _tailor_and_record(job_id, auto, row, job, language)
 
 
 @contextmanager
@@ -1226,12 +1227,12 @@ def _tailor_lock(out_dir: Path):
             fcntl.flock(lock_file, fcntl.LOCK_UN)
 
 
-def _tailor_and_record(job_id: int, auto: bool, row, job) -> dict:
+def _tailor_and_record(job_id: int, auto: bool, row, job, language: str | None = None) -> dict:
     with fetch_diag.run_tracking() as tracker:
         result = cv_engine.tailor_job(
             job, job_id, auto=auto, judge_context=_judge_context(row),
-            role_category=row["role_category"] or "")
-    tex_path, pdf_path, note = result
+            role_category=row["role_category"] or "", language=language)
+    tex_path, pdf_path, note = result.tex_path, result.pdf_path, result.note
 
     with db.connect() as conn:
         # An auto retry that falls back again would only pile an identical keyword-fallback
@@ -1240,7 +1241,8 @@ def _tailor_and_record(job_id: int, auto: bool, row, job) -> dict:
                            and db.needs_tailoring(conn, job_id))
         if not repeat_fallback:
             db.add_cv_artifact(conn, job_id, str(tex_path), str(pdf_path or ""),
-                               base_version="cv_base.tex", origin="ai", note=note)
+                               base_version=cv_engine.base_cv_path(result.lang).name,
+                               origin="ai", note=note, lang=result.lang)
             if pdf_path:
                 db.update_status(conn, job_id, "cv_ready")
         tracker.flush(conn)
@@ -1254,6 +1256,7 @@ def _tailor_and_record(job_id: int, auto: bool, row, job) -> dict:
         "pdf": str(pdf_path) if pdf_path else None,
         "compiled": pdf_path is not None,
         "note": note,
+        "lang": result.lang,
         "fallback": result.fallback,
         "unchanged": repeat_fallback,
     }

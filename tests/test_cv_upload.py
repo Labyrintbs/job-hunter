@@ -102,7 +102,7 @@ def test_tailor_one_stores_the_failure_note_and_tracks_it(tmp_db, monkeypatch):
     with db.connect() as conn:
         jid = _seed(conn)
 
-    def failing_tailor_job(job, job_id, auto=False, judge_context=None, role_category=""):
+    def failing_tailor_job(job, job_id, auto=False, judge_context=None, role_category="", language=None):
         fetch_diag.track("tailor", "tailor_page_count", detail="compiled to 3 page(s)", company=job.company)
         return cv_engine.TailorResult(Path("/tmp/cv.tex"), None, "compiled to 3 page(s)")
 

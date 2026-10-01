@@ -80,3 +80,45 @@ def test_stuck_pill_shows_unenrichable_jobs_even_when_filtered_or_dismissed(tmp_
     assert "Filtered No-JD Job" in resp.text
     assert "Dismissed No-JD Job" in resp.text
     assert "Fresh Untried Job" not in resp.text   # only exhausted retries, not just untried
+
+
+def test_dashboard_shows_the_cv_language_and_a_switch_to_the_other_one(tmp_db):
+    with db.connect() as conn:
+        fr, _ = db.upsert_job(conn, J("20", title="French CV Job"), 60, "r")
+        db.add_cv_artifact(conn, fr, "/tmp/cv-fr.tex", "/tmp/cv-fr.pdf", lang="fr")
+        en, _ = db.upsert_job(conn, J("21", title="English CV Job"), 60, "r")
+        db.add_cv_artifact(conn, en, "/tmp/cv-en.tex", "/tmp/cv-en.pdf", lang="en")
+        manual, _ = db.upsert_job(conn, J("22", title="Hand Revised Job"), 60, "r")
+        db.add_cv_artifact(conn, manual, "", "/tmp/rev.pdf", origin="revised")
+
+    html = TestClient(app).get("/").text
+
+    assert f"tailorCV(this, {fr}, 'en')" in html and "→EN" in html          # a French CV offers English
+    assert f"tailorCV(this, {en}, 'fr')" in html and "→FR" in html          # an English CV offers French
+    assert f"tailorCV(this, {manual}, 'fr')" not in html and f"tailorCV(this, {manual}, 'en')" not in html
+    assert ">FR</span>" in html and ">EN</span>" in html
+
+
+def test_review_pill_counts_and_lists_cvs_with_a_note(tmp_db):
+    with db.connect() as conn:
+        noted, _ = db.upsert_job(conn, J("30", title="Noted CV Job"), 60, "r")
+        db.add_cv_artifact(conn, noted, "/tmp/a.tex", "/tmp/a.pdf",
+                           note="summary fell back to the standard text (language: 3 English function words)")
+        clean, _ = db.upsert_job(conn, J("31", title="Clean CV Job"), 60, "r")
+        db.add_cv_artifact(conn, clean, "/tmp/b.tex", "/tmp/b.pdf")
+        db.upsert_job(conn, J("32", title="No CV Job"), 60, "r")
+        assert db.review_count(conn) == 1
+
+    client = TestClient(app)
+    assert "CV review · 1" in client.get("/").text
+    listed = client.get("/", params={"review": 1}).text
+    assert "Noted CV Job" in listed and "Clean CV Job" not in listed and "No CV Job" not in listed
+
+
+def test_a_newer_clean_cv_clears_the_review_count(tmp_db):
+    with db.connect() as conn:
+        jid, _ = db.upsert_job(conn, J("40"), 60, "r")
+        db.add_cv_artifact(conn, jid, "/tmp/a.tex", "/tmp/a.pdf", note="language check: ...")
+        assert db.review_count(conn) == 1
+        db.add_cv_artifact(conn, jid, "/tmp/b.tex", "/tmp/b.pdf")
+        assert db.review_count(conn) == 0
