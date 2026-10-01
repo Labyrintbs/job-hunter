@@ -43,6 +43,7 @@
 \urlstyle{same}
 
 \raggedbottom
+\clubpenalty=10000 \widowpenalty=10000   % never leave a single line of a bullet alone on a page
 \justifying
 \setlength{\tabcolsep}{0in}
 
@@ -68,8 +69,9 @@
   }
 }
 
+% Each entry heading needs room for its first bullet, so it never ends a page alone
 \newcommand{\resumeSubheading}[4]{
-  \vspace{-2pt}\item
+  \needspace{5\baselineskip}\vspace{-2pt}\item
     \begin{tabular*}{1.0\textwidth}[t]{l@{\extracolsep{\fill}}r}
       \textbf{#1} & \textbf{#2} \\
       {#3} & \textnormal{#4} \\
@@ -91,7 +93,7 @@
 }
 
 \newcommand{\resumeProjectHeadingFourItemResearch}[4]{
-    \item
+    \needspace{6\baselineskip}\item
     \begin{tabular*}{1.001\textwidth}{l@{\extracolsep{\fill}}r}
       #1 & \textbf{#2}\\
       {#3} & \textnormal{#4} \\
@@ -167,7 +169,6 @@
         \resumeItem{Conception et implémentation d'un pipeline de génération de métadonnées qui exploite l'historique d'annotations des utilisateurs pour améliorer automatiquement les consignes d'extraction de chaque champ, avec un garde-fou d'évaluation held-out qui bloque toute régression.}
       \resumeItemListEnd
 
-    \needspace{8\baselineskip}
     \resumeSubheading
       {DeepWise}{03/2023 -- 09/2023}
       {Stagiaire en algorithmes d'IA (imagerie médicale)}{Pékin, Chine}
@@ -177,7 +178,6 @@
         \resumeItem{Réentraînement d'un modèle de segmentation unifié sur des données CTA et CT sans injection, à partir des cas d'échec observés, avec des scores Dice de 0,93/0,76 et une bonne généralisation à des régions du corps jamais vues. Ajout d'un post-traitement qui supprime les petites composantes connexes isolées selon les taux de calcification et la position des vaisseaux.}
       \resumeItemListEnd
 
-    \needspace{7\baselineskip}
     \resumeSubheading
       {Orange Labs International Center Beijing}{06/2022 -- 09/2022}
       {Stagiaire en algorithmes d'IA (modélisation de la parole auto-supervisée)}{Pékin, Chine}

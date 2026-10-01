@@ -41,6 +41,7 @@
 \urlstyle{same}
 
 \raggedbottom
+\clubpenalty=10000 \widowpenalty=10000   % never leave a single line of a bullet alone on a page
 \justifying
 \setlength{\tabcolsep}{0in}
 
@@ -66,8 +67,9 @@
   }
 }
 
+% Each entry heading needs room for its first bullet, so it never ends a page alone
 \newcommand{\resumeSubheading}[4]{
-  \vspace{-2pt}\item
+  \needspace{5\baselineskip}\vspace{-2pt}\item
     \begin{tabular*}{1.0\textwidth}[t]{l@{\extracolsep{\fill}}r}
       \textbf{#1} & \textbf{#2} \\
       {#3} & \textnormal{#4} \\
@@ -89,7 +91,7 @@
 }
 
 \newcommand{\resumeProjectHeadingFourItemResearch}[4]{
-    \item
+    \needspace{6\baselineskip}\item
     \begin{tabular*}{1.001\textwidth}{l@{\extracolsep{\fill}}r}
       #1 & \textbf{#2}\\
       {#3} & \textnormal{#4} \\
@@ -165,7 +167,6 @@
         \resumeItem{Designed and implemented a metadata-generation pipeline that mines user annotation history to automatically improve per-field extraction guidance, with a held-out evaluation gate that blocks regressions.}
       \resumeItemListEnd
 
-    \needspace{8\baselineskip}
     \resumeSubheading
       {DeepWise}{03/2023 -- 09/2023}
       {AI Algorithm Intern, Medical Imaging}{Beijing, China}
@@ -175,7 +176,6 @@
         \resumeItem{Retrained a unified CTA and non-enhanced CT segmentation model from observed failure patterns, reaching Dice scores of 0.93/0.76 with strong generalization to unseen body regions, and added post-processing that removes small disconnected components using calcification ratios and vessel positions.}
       \resumeItemListEnd
 
-    \needspace{7\baselineskip}
     \resumeSubheading
       {Orange Labs International Center Beijing}{06/2022 -- 09/2022}
       {AI Algorithm Intern, Self-Supervised Speech Modeling}{Beijing, China}
