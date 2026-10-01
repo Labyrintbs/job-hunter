@@ -13,11 +13,11 @@ variants:
   cv:
     categories: [CV]
     core: >-
-      Computer Vision Engineer with clinical CT/CTA segmentation models deployed in
-      a production annotation pipeline, plus research in 3D point cloud
-      registration and medical image classification.
+      Computer Vision Engineer with CT/CTA segmentation models deployed in a
+      production annotation pipeline, plus research in 3D point cloud registration
+      and medical image classification.
   general:
     categories: []
     core: >-
-      Machine Learning Engineer with hands-on LLM engineering and clinical
-      medical-image segmentation experience, from ML internships in Paris and Beijing.
+      Machine Learning Engineer with hands-on LLM engineering and medical-image
+      segmentation experience, from ML internships in Paris and Beijing.
