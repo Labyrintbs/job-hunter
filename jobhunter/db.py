@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from difflib import SequenceMatcher
 from pathlib import Path
 
+from . import dupes
 from .config import DATA_DIR, DB_PATH
 from .models import Job
 
@@ -465,7 +466,8 @@ def _companies_related(a: str, b: str) -> bool:
     return na in nb or nb in na
 
 
-def find_possible_duplicates(conn: sqlite3.Connection, title_ratio: float = 0.80) -> list[dict]:
+def find_possible_duplicates(conn: sqlite3.Connection, title_ratio: float = 0.80,
+                             with_overlap: bool = False) -> list[dict]:
     """Non-destructive 'maybe the same posting' detector: same city + near-identical
     title, gated differently depending on whether the two companies are identical
     or merely related:
@@ -482,16 +484,41 @@ def find_possible_duplicates(conn: sqlite3.Connection, title_ratio: float = 0.80
     often enough that no threshold tells that apart from a real duplicate (see
     git history).
 
+    One more rule, only with `with_overlap` (it reads every description, a few seconds, so the
+    dashboard leaves it off), for the same company in any city or under any title: descriptions
+    that overlap by at least dupes.CANDIDATE_OVERLAP. That is how one opening listed once per
+    city, or under a reworded title, is found; the LLM (or, for identical text, the overlap
+    alone) then decides. Each pair carries its description `overlap` (0.0 when unmeasured).
+
     Surfaces candidates for a human to judge, never auto-merges. Uses only
     difflib -- no embeddings needed at this scale."""
-    rows = conn.execute("SELECT id, company, title, location FROM jobs").fetchall()
+    rows = conn.execute("SELECT id, company, title, location, description FROM jobs").fetchall()
     by_city: dict[str, list[tuple[int, str, str]]] = defaultdict(list)
+    by_company: dict[str, list[int]] = defaultdict(list)
     for r in rows:
         title = _strip_title_junk(_normalize(r["title"]))
         if title:
             by_city[_norm_city(r["location"])].append((r["id"], r["company"], title))
+        if len(_normalize(r["company"])) >= 3 and len((r["description"] or "").strip()) >= dupes.MIN_CHARS:
+            by_company[_normalize(r["company"])].append(r["id"])
 
-    pairs = []
+    texts = {r["id"]: r["description"] for r in rows}
+    shingled: dict[int, frozenset] = {}
+
+    def overlap(a: int, b: int) -> float:
+        for i in (a, b):
+            if i not in shingled:
+                shingled[i] = dupes.shingles(texts[i])
+        return dupes.overlap(shingled[a], shingled[b])
+
+    pairs, seen = [], set()
+
+    def add(a: int, b: int) -> None:
+        key = (min(a, b), max(a, b))
+        if key not in seen:
+            seen.add(key)
+            pairs.append({"a": a, "b": b, "overlap": overlap(a, b) if with_overlap else 0.0})
+
     for bucket in by_city.values():
         n = len(bucket)
         for i in range(n):
@@ -500,21 +527,32 @@ def find_possible_duplicates(conn: sqlite3.Connection, title_ratio: float = 0.80
                 id_b, co_b, tb = bucket[k]
                 if _normalize(co_a) == _normalize(co_b):
                     if ta == tb:
-                        pairs.append({"a": id_a, "b": id_b})
+                        add(id_a, id_b)
                     continue
                 if not _companies_related(co_a, co_b):
                     continue
                 if SequenceMatcher(None, ta, tb).ratio() >= title_ratio:
-                    pairs.append({"a": id_a, "b": id_b})
+                    add(id_a, id_b)
+
+    if with_overlap:
+        for ids in by_company.values():
+            for i, a in enumerate(ids):
+                for b in ids[i + 1:]:
+                    if overlap(a, b) >= dupes.CANDIDATE_OVERLAP:
+                        add(a, b)
     return pairs
 
 
 def possible_duplicates_map(conn: sqlite3.Connection) -> dict[int, list[int]]:
-    """job_id -> ids of its likely duplicates, both directions, for O(1) template lookup."""
+    """job_id -> ids of its likely duplicates, both directions, for O(1) template lookup: the
+    cheap heuristic pairs plus every pair the checks (LLM or identical text) called the same."""
+    pairs = {(min(p["a"], p["b"]), max(p["a"], p["b"])) for p in find_possible_duplicates(conn)}
+    pairs |= {(r["job_id_a"], r["job_id_b"]) for r in
+              conn.execute("SELECT job_id_a, job_id_b FROM duplicate_checks WHERE verdict = 'same'")}
     m: dict[int, list[int]] = defaultdict(list)
-    for p in find_possible_duplicates(conn):
-        m[p["a"]].append(p["b"])
-        m[p["b"]].append(p["a"])
+    for a, b in pairs:
+        m[a].append(b)
+        m[b].append(a)
     return dict(m)
 
 
