@@ -46,6 +46,23 @@ def test_english_technical_terms_do_not_make_a_french_summary_english():
     assert summary.language_problem(GOOD_FR, "fr") == ""
 
 
+def test_hyphenated_names_and_company_names_do_not_count_as_english_words():
+    # real false alarm: "LLM-as-a-judge" (as) and the company "Free-Work" (work) looked English
+    text = ("Ingénieur Machine Learning avec un pipeline LangGraph évalué par un LLM-as-a-judge et du "
+            "fine-tuning, candidat au poste de Data Scientist chez Free-Work.")
+    assert summary.language_problem(text, "fr") == ""
+
+
+def test_french_elision_in_the_closing_line():
+    assert summary.closing_line("Ingénieur IA", "Acme", "fr").endswith("du poste d'Ingénieur IA chez Acme.")
+    assert summary.closing_line("Data Scientist", "Acme", "fr").endswith("du poste de Data Scientist chez Acme.")
+    assert summary._de("Hôte") == "d'Hôte"
+
+
+def test_the_prompt_forbids_seniority_claims_and_present_tense_for_ended_internships():
+    assert "junior" in summary._SYSTEM and "past tense" in summary._SYSTEM
+
+
 def test_an_english_summary_with_a_few_french_proper_names_is_still_english():
     text = ("Machine Learning Engineer with an engineering degree from École Centrale de Pékin, "
             "part of the Groupe des Écoles Centrales, and hands-on LLM experience.")
@@ -65,7 +82,8 @@ def test_build_in_french_retries_after_a_language_mismatch_then_uses_the_french_
 
     def fake(job, anchor, title, company, feedback="", lang="en"):
         calls.append((feedback, lang))
-        return GOOD_FR.replace("Cette expérience correspond", "This experience fits") if not feedback else GOOD_FR
+        return GOOD_FR.replace("Cette expérience correspond au poste de", "This experience fits the role of the") \
+            if not feedback else GOOD_FR
     monkeypatch.setattr(summary, "generate_summary", fake)
     res = summary.build(_job(), "AI", CV_FR, "fr")
     assert res.text == GOOD_FR and res.reason == ""

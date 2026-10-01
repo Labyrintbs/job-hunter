@@ -102,13 +102,18 @@ def clean_company(company: str) -> str:
     return c
 
 
+def _de(word: str) -> str:
+    """French "de" before a name: "de Data Scientist", but "d'Ingénieur" before a vowel or h."""
+    return f"d'{word}" if word[:1] in "AEIOUYHÀÂÉÈÊÎÔÛaeiouyhàâéèêîôû" else f"de {word}"
+
+
 def closing_line(title: str, company: str, lang: str = "en") -> str:
     t, c = clean_title(title), clean_company(company)
     if lang == "fr":
         if t and c:
-            return f"Souhaite mettre cette expérience au service du poste de {t} chez {c}."
+            return f"Souhaite mettre cette expérience au service du poste {_de(t)} chez {c}."
         if t:
-            return f"Souhaite mettre cette expérience au service du poste de {t}."
+            return f"Souhaite mettre cette expérience au service du poste {_de(t)}."
         if c:
             return f"Souhaite mettre cette expérience au service d'un poste chez {c}."
         return ""
@@ -211,7 +216,9 @@ _SYSTEM = (
     "most relevant to what this posting actually asks for; then, naturally, name the target "
     "role and company once. Every claim must come from the CV text given: never add a tool, "
     "employer, number, degree or achievement that is not there, never stretch a claim to fit "
-    "the posting, and skip CV material that is not relevant to it. No first person, no dashes "
+    "the posting, and skip CV material that is not relevant to it. The candidate is a junior "
+    "engineer: never call them senior, seasoned, experienced for years, or an expert, and use "
+    "the past tense for internships that have ended. No first person, no dashes "
     "as connectors, no words like passionate, excited or motivated, no figures, percentages or "
     "counts (names such as 3D are fine). Do not repeat the CV's bullet wording line by "
     "line; write it as one fluent paragraph."
@@ -227,7 +234,7 @@ def generate_summary(job: Job, anchor: str, title: str, company: str, feedback: 
         return None
     from ..llm.profile import profile_text  # profile imports tailor.engine, which imports this module
     if lang == "fr":
-        target = " ".join(x for x in (f"le poste de {title}" if title else "",
+        target = " ".join(x for x in (f"le poste {_de(title)}" if title else "",
                                       f"chez {company}" if company else "") if x)
     else:
         target = " ".join(x for x in (f"the {title} role" if title else "",

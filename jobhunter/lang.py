@@ -11,11 +11,14 @@ _FR = frozenset(
     "le la les des du de un une et est sont pour dans avec sur par au aux nous vous votre vos "
     "notre nos ce cette ces qui que en à il elle ils ont être avoir sera serez rejoindre poste "
     "équipe entreprise missions profil ou où mais donc afin chez vers sans sous".split())
+# Function words only, and none that French also uses ("on", "as", "an", "or"), so
+# English nouns inside French text and French words in English text don't count.
 _EN = frozenset(
-    "the and of to in for with on is are you your our we will be as an or at by this that from "
-    "have has team role experience work join about their who which can into".split())
+    "the and of to in for with is are you your our we will be at by this that from "
+    "have has their who which into would should been were was".split())
 
 _TAGS = re.compile(r"<[^>]+>")
+_COMPOUND = re.compile(r"\w+(?:-\w+)+")    # "LLM-as-a-judge", "Free-Work": names, not prose
 _WORDS = re.compile(r"[a-zàâçéèêëîïôûùüÿœ']+")
 MIN_HITS = 6          # fewer function words than this: not enough text to decide
 DOMINANCE = 1.5       # one language must have this many times the other's hits
@@ -23,7 +26,8 @@ DOMINANCE = 1.5       # one language must have this many times the other's hits
 
 def counts(text: str) -> tuple[int, int]:
     """(French, English) function-word hits in the first 6,000 characters."""
-    words = _WORDS.findall(_TAGS.sub(" ", text or "").lower()[:6000])
+    plain = _COMPOUND.sub(" ", _TAGS.sub(" ", text or ""))
+    words = _WORDS.findall(plain.lower()[:6000])
     return sum(w in _FR for w in words), sum(w in _EN for w in words)
 
 
