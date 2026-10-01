@@ -8,7 +8,7 @@ from . import db, export as export_mod, jd_store, learn, market_trend, schedule
 from .config import DB_PATH, load_search_config
 from .llm import provider
 from .notify import dispatch as notify_dispatch
-from .pipeline import (cover_one, daily_run, enrich_one, enrich_pending, import_revised_cv,
+from .pipeline import (backfill_languages, cover_one, daily_run, enrich_one, enrich_pending, import_revised_cv,
                        judge_all, judge_one, process_backlog, rejudge_category, rejudge_juniors,
                        rescreen_all, run_backfill, run_fetch, tailor_one)
 
@@ -99,6 +99,9 @@ def main(argv: list[str] | None = None) -> int:
                                        "before the junior fit exemptions landed")
     p_rejudge_juniors.add_argument("--limit", type=int, default=None,
                                    help="cap how many already-judged jobs get a fresh LLM call")
+
+    sub.add_parser("languages", help="one-off catch-up: set each job's French/English language "
+                                     "from its own text (source labels are unreliable)")
 
     sub.add_parser("rescreen-all", help="one-off catch-up: re-run rule-based screening for "
                                         "every stored job against the current config (e.g. "
@@ -284,6 +287,12 @@ def main(argv: list[str] | None = None) -> int:
         summary = rejudge_juniors(limit=args.limit)
         print(f"rescreened={summary['rescreened']} rejudged={summary['rejudged']} "
               f"unfiltered={summary['unfiltered']}")
+        return 0
+
+    if args.command == "languages":
+        summary = backfill_languages()
+        print(f"checked={summary['checked']} newly_set={summary['newly_set']} "
+              f"label_overridden={summary['label_overridden']}")
         return 0
 
     if args.command == "rescreen-all":

@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import db, enrich, fetch_diag, jd_store, match
+from . import db, enrich, fetch_diag, jd_store, lang, match
 from .apply import cover_letter
 from .config import DATA_DIR, add_company, load_companies, load_search_config
 from .llm import dedup as llm_dedup
@@ -792,8 +792,11 @@ def enrich_one(job_id: int) -> dict:
     # doesn't already say remote -- wttj already tags this at fetch time.
     if not match.detect_remote_from_text(location) and match.detect_remote_from_text(text):
         location = f"{location} - Remote" if location else "Remote"
+    detected = lang.detect(text) or lang.detect(title, min_hits=2)
     with db.connect() as conn:
         db.set_description(conn, job_id, text)
+        if detected and detected != (row["language"] or ""):
+            db.set_language(conn, job_id, detected)
         if location != (row["location"] or ""):
             conn.execute("UPDATE jobs SET location = ? WHERE id = ?", (location, job_id))
         job = db.job_from_row(db.get_job(conn, job_id))
@@ -1032,6 +1035,26 @@ def rejudge_category(role_category: str, limit: int | None = None) -> dict:
     score-gate flags. Skips dismissed/interested jobs."""
     db.init_db()
     return _rejudge_weak_verdicts("AND role_category = ?", (role_category,), limit)
+
+
+def backfill_languages() -> dict:
+    """One-off catch-up: set jobs.language from each job's own text where the
+    detector is confident, overriding a source label that disagrees (labels are
+    unreliable). Jobs the detector can't decide keep whatever they had."""
+    db.init_db()
+    with db.connect() as conn:
+        rows = conn.execute("SELECT id, title, description, language FROM jobs").fetchall()
+        set_new = changed = 0
+        for r in rows:
+            detected = lang.detect(r["description"] or "") or lang.detect(r["title"] or "", min_hits=2)
+            if not detected or detected == (r["language"] or ""):
+                continue
+            if r["language"]:
+                changed += 1
+            else:
+                set_new += 1
+            db.set_language(conn, r["id"], detected)
+    return {"checked": len(rows), "newly_set": set_new, "label_overridden": changed}
 
 
 def rescreen_all() -> dict:

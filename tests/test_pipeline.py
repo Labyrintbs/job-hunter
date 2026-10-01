@@ -1629,6 +1629,46 @@ def test_enrich_one_success_records_no_drops(tmp_db, config, monkeypatch):
         assert db.recent_fetch_drops(conn, hours=1) == []
 
 
+_FR_JD = ("Nous recherchons un ingénieur pour rejoindre notre équipe. Vous travaillerez avec les "
+          "data scientists sur des projets de machine learning dans une entreprise en forte "
+          "croissance, et vous serez en charge de la mise en production des modèles. ") * 2
+_EN_JD = ("We are looking for an engineer to join our team. You will work with the data scientists "
+          "on machine learning projects in a fast growing company, and you will be in charge of "
+          "putting the models into production. ") * 2
+
+
+def _language_of(jid):
+    with db.connect() as conn:
+        return db.get_job(conn, jid)["language"]
+
+
+def test_enrich_one_stores_the_language_detected_from_the_text(tmp_db, config, monkeypatch):
+    with db.connect() as conn:
+        jid = _insert(conn, config, external_id="fr1", description="", language="en")  # wrong label
+    monkeypatch.setattr(pipeline.enrich, "fetch_full_text", lambda *a, **k: _FR_JD)
+    pipeline.enrich_one(jid)
+    assert _language_of(jid) == "fr"
+
+
+def test_enrich_one_keeps_the_label_when_the_text_cannot_decide(tmp_db, config, monkeypatch):
+    with db.connect() as conn:
+        jid = _insert(conn, config, external_id="x1", description="", language="fr")
+    monkeypatch.setattr(pipeline.enrich, "fetch_full_text", lambda *a, **k: _LONG_REAL_JD)
+    pipeline.enrich_one(jid)
+    assert _language_of(jid) == "fr"
+
+
+def test_backfill_languages_sets_missing_and_overrides_wrong_labels(tmp_db, config):
+    with db.connect() as conn:
+        a = _insert(conn, config, external_id="a", title="Role A", description=_FR_JD)
+        b = _insert(conn, config, external_id="b", title="Role B", description=_EN_JD, language="fr")
+        c = _insert(conn, config, external_id="c", title="Role C", description="short", language="fr")
+        d = _insert(conn, config, external_id="d", title="Role D", description=_EN_JD, language="en")
+    summary = pipeline.backfill_languages()
+    assert (_language_of(a), _language_of(b), _language_of(c), _language_of(d)) == ("fr", "en", "fr", "en")
+    assert summary == {"checked": 4, "newly_set": 1, "label_overridden": 1}
+
+
 def _drop_reasons():
     with db.connect() as conn:
         return [(r["reason"], r["company"]) for r in db.recent_fetch_drops(conn, hours=1)]

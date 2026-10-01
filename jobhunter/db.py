@@ -910,6 +910,10 @@ def set_description(conn: sqlite3.Connection, job_id: int, text: str) -> None:
     )
 
 
+def set_language(conn: sqlite3.Connection, job_id: int, language: str) -> None:
+    conn.execute("UPDATE jobs SET language = ? WHERE id = ?", (language, job_id))
+
+
 def jobs_needing_enrichment(conn: sqlite3.Connection, limit: int = 20) -> list[sqlite3.Row]:
     """Engaged jobs (interested, or moved past 'new') whose description is not yet
     full, excluding ones that already failed MAX_ENRICH_ATTEMPTS times."""
