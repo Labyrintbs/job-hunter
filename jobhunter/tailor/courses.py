@@ -10,20 +10,34 @@ import re
 
 KEEP = 4
 
-_MODULES_RE = re.compile(r"(\\textit\{Major Modules\}:\s*)([^}]*)(\})")
+_MODULES_RE = re.compile(r"(\\textit\{(?:Major Modules|Enseignements principaux)\}\s*:\s*)([^}]*)(\})")
+
+# The French base's course names, mapped to the English ones the keywords below use.
+_FRENCH = {
+    "Traitement d'images": "Image Processing",
+    "Algorithmes d'informatique graphique 3D": "3D Graphics Algorithms",
+    "Science des données": "Data Science",
+    "Architecture des ordinateurs": "Computer Architecture",
+    "Imagerie biologique et médicale": "Biomedical Imaging",
+    "Reconnaissance des formes pour l'analyse et l'interprétation des images":
+        "Pattern Recognition and Machine Learning for Image Understanding",
+    "Techniques avancées de vision par ordinateur": "Advanced Methods for Computer Vision/Image Analysis",
+}
 
 # Course name -> job keywords that make it relevant.
 _KEYWORDS = {
     "Image Processing": ["image", "vision", "opencv", "segmentation", "detection", "imagerie"],
     "3D Graphics Algorithms": ["3d", "point cloud", "mesh", "rendering", "graphics", "nerf", "slam",
-                               "reconstruction", "lidar", "nuage de points"],
+                               "reconstruction", "lidar", "nuage de points", "nuages de points", "informatique graphique",
+                               "synthèse d'images"],
     "Data Science": ["data science", "data scientist", "statistic", "analytics", "pandas", "analyse de données"],
     "Computer Architecture": ["embedded", "hardware", "gpu", "cuda", "c++", "performance", "low-level",
                               "systèmes embarqués"],
     "Biomedical Imaging": ["medical", "clinical", "health", "mri", "radiology", "biomedical", "médical",
                            "santé", "imagerie"],
     "Pattern Recognition and Machine Learning for Image Understanding": [
-        "machine learning", "deep learning", "classification", "recognition", "apprentissage"],
+        "machine learning", "deep learning", "classification", "recognition", "apprentissage",
+        "reconnaissance"],
     "Advanced Methods for Computer Vision/Image Analysis": [
         "computer vision", "image analysis", "vision par ordinateur", "segmentation", "detection"],
 }
@@ -37,6 +51,7 @@ _DEFAULT_ORDER = [
 
 
 def _score(course: str, text: str) -> int:
+    course = _FRENCH.get(course, course)
     return sum(1 for kw in _KEYWORDS.get(course, []) if re.search(r"(?<!\w)" + re.escape(kw), text))
 
 
@@ -46,7 +61,8 @@ def choose(modules: list[str], job_text: str, keep: int = KEEP) -> list[str]:
         return list(modules)
     text = job_text.lower()
     rank = {c: i for i, c in enumerate(_DEFAULT_ORDER)}
-    ordered = sorted(modules, key=lambda c: (-_score(c, text), rank.get(c, len(rank))))
+    ordered = sorted(modules, key=lambda c: (-_score(c, text),
+                                             rank.get(_FRENCH.get(c, c), len(rank))))
     kept = set(ordered[:keep])
     return [c for c in modules if c in kept]
 

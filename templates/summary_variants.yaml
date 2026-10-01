@@ -10,14 +10,26 @@ variants:
       Machine Learning Engineer specialized in LLM systems, from prompt design and
       agentic workflows to fine-tuning and evaluation, with production experience
       from an ML internship on multilingual legal extraction.
+    core_fr: >-
+      Ingénieur Machine Learning spécialisé dans les systèmes LLM, de la conception de
+      prompts et des workflows agentiques au fine-tuning et à l'évaluation, avec une
+      expérience en production acquise lors d'un stage ML sur l'extraction d'entités
+      juridiques multilingues.
   cv:
     categories: [CV]
     core: >-
       Computer Vision Engineer with CT/CTA segmentation models deployed in a
       production annotation pipeline, plus research in 3D point cloud registration
       and medical image classification.
+    core_fr: >-
+      Ingénieur Vision par ordinateur ayant déployé des modèles de segmentation CT/CTA
+      dans une chaîne d'annotation en production, avec des travaux de recherche en
+      recalage de nuages de points 3D et en classification d'images médicales.
   general:
     categories: []
     core: >-
       Machine Learning Engineer with hands-on LLM engineering and medical-image
       segmentation experience, from ML internships in Paris and Beijing.
+    core_fr: >-
+      Ingénieur Machine Learning avec une expérience concrète de l'ingénierie LLM et de
+      la segmentation d'images médicales, acquise lors de stages ML à Paris et à Pékin.

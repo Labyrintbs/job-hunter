@@ -119,7 +119,7 @@ def test_build_uses_a_valid_llm_summary(monkeypatch):
 def test_build_retries_once_with_the_rejection_reason(monkeypatch):
     calls = []
 
-    def fake(job, anchor, title, company, feedback=""):
+    def fake(job, anchor, title, company, feedback="", **k):
         calls.append(feedback)
         return "Too short." if not feedback else GOOD
     monkeypatch.setattr(summary, "generate_summary", fake)

@@ -15,6 +15,7 @@ from typing import NamedTuple
 import yaml
 
 from ..config import REPO_ROOT
+from ..lang import counts
 from ..llm import provider
 from ..models import Job
 
@@ -32,12 +33,24 @@ _ROLE_WORD = re.compile(
     r"\b(?:engineer|scientist|developer|developpeur|développeur|manager|analyst|researcher|"
     r"research|consultant|architect|ingénieur|ingenieur|chercheur|lead|specialist|expert|"
     r"officer|programmer)\b", re.I)
-_FIRST_PERSON = re.compile(r"\b(?:i|my|me|mine|we|our)\b", re.I)
-_HYPE = re.compile(r"\b(?:passionate|excited|thrilled|motivated|dream|eager|enthusiastic)\b", re.I)
-# "one" is left out on purpose: "one of the", "one team" are ordinary prose.
-_SPELLED_NUMBER = re.compile(
-    r"\b(?:two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|twenty|"
-    r"thirty|fifty|hundred|thousand|million|dozen|deux|trois|quatre|cinq|dix)\b", re.I)
+# Per summary language. "one"/"un" are left out of the spelled numbers on purpose:
+# "one of the", "un poste" are ordinary prose.
+_FIRST_PERSON = {
+    "en": re.compile(r"\b(?:i|my|me|mine|we|our)\b", re.I),
+    "fr": re.compile(r"\b(?:je|j'|mon|ma|mes|moi|nous|notre|nos)\b|\bj'", re.I),
+}
+_HYPE = {
+    "en": re.compile(r"\b(?:passionate|excited|thrilled|motivated|dream|eager|enthusiastic)\b", re.I),
+    "fr": re.compile(r"\b(?:passionné\w*|enthousiaste\w*|motivé\w*|ravi\w*|rêve|impatient\w*)\b", re.I),
+}
+_SPELLED_NUMBER = {
+    "en": re.compile(r"\b(?:two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|twenty|"
+                     r"thirty|fifty|hundred|thousand|million|dozen)\b", re.I),
+    "fr": re.compile(r"\b(?:deux|trois|quatre|cinq|six|sept|huit|neuf|dix|onze|douze|vingt|"
+                     r"trente|cinquante|cent|mille|million|douzaine)\b", re.I),
+}
+MAX_WORDS_FR = 64          # French runs a few words longer for the same content
+LANGUAGE_REASON = "tailor_language_mismatch"
 _DASHES = re.compile(r"[—–]| - ")
 # A standalone figure ("40.8%", "17"); names like "3D" or "Qwen3.5-4B" don't match.
 _FIGURE = re.compile(r"(?<![\w.])\d+(?:[.,]\d+)?%?(?![\w])")
@@ -60,12 +73,13 @@ def load_variants(path=VARIANTS_PATH) -> dict:
     return yaml.safe_load(path.read_text(encoding="utf-8"))
 
 
-def pick_core(role_category: str, variants: dict | None = None) -> str:
+def pick_core(role_category: str, variants: dict | None = None, lang: str = "en") -> str:
     variants = variants or load_variants()
+    key = "core_fr" if lang == "fr" else "core"
     for v in variants["variants"].values():
         if role_category and role_category in (v.get("categories") or []):
-            return " ".join(v["core"].split())
-    return " ".join(variants["variants"]["general"]["core"].split())
+            return " ".join(v[key].split())
+    return " ".join(variants["variants"]["general"][key].split())
 
 
 def clean_title(title: str) -> str:
@@ -88,8 +102,16 @@ def clean_company(company: str) -> str:
     return c
 
 
-def closing_line(title: str, company: str) -> str:
+def closing_line(title: str, company: str, lang: str = "en") -> str:
     t, c = clean_title(title), clean_company(company)
+    if lang == "fr":
+        if t and c:
+            return f"Souhaite mettre cette expérience au service du poste de {t} chez {c}."
+        if t:
+            return f"Souhaite mettre cette expérience au service du poste de {t}."
+        if c:
+            return f"Souhaite mettre cette expérience au service d'un poste chez {c}."
+        return ""
     if t and c:
         return f"Looking to bring this to the {t} role at {c}."
     if t:
@@ -112,26 +134,41 @@ def _has(word: str, text: str) -> bool:
     return re.search(r"\b" + re.escape(word) + r"\b", text) is not None
 
 
-def validate_summary(text: object, allowed_text: str, company: str = "") -> str:
+def language_problem(text: str, lang: str) -> str:
+    """"" when `text` is in `lang`, else why not. Only function words count, so
+    English technical terms inside a French summary are fine."""
+    fr_hits, en_hits = counts(text)
+    if lang == "fr" and en_hits > 1:
+        return f"language: {en_hits} English function words in a French text"
+    if lang == "en" and fr_hits > 2:
+        return f"language: {fr_hits} French function words in an English text"
+    return ""
+
+
+def validate_summary(text: object, allowed_text: str, company: str = "", lang: str = "en") -> str:
     """"" when the summary is acceptable, else a short reason. `allowed_text` is
-    everything it may mention: the CV, the job title and the company."""
+    everything it may mention: the CV, the job title and the company. A reason
+    starting "language" is a wrong-language text (see LANGUAGE_REASON)."""
     if not isinstance(text, str) or not text.strip():
         return "empty"
     s = text.strip()
     if "\n" in s:
         return "multi-line"
+    wrong_language = language_problem(s, lang)
+    if wrong_language:
+        return wrong_language
     n = len(s.split())
-    if not MIN_WORDS <= n <= MAX_WORDS:
+    if not MIN_WORDS <= n <= (MAX_WORDS_FR if lang == "fr" else MAX_WORDS):
         return f"{n} words"
     if len(re.findall(r"[.!?](?:\s|$)", s)) > MAX_SENTENCES:
         return "too many sentences"
-    if _SPELLED_NUMBER.search(s):
+    if _SPELLED_NUMBER[lang].search(s):
         return "contains a number"
     if _FIGURE.search(s):
         return "contains a figure"
-    if _FIRST_PERSON.search(s):
+    if _FIRST_PERSON[lang].search(s):
         return "first person"
-    if _HYPE.search(s):
+    if _HYPE[lang].search(s):
         return "hype word"
     if _DASHES.search(s):
         return "dash"
@@ -158,10 +195,18 @@ def validate_summary(text: object, allowed_text: str, company: str = "") -> str:
     return ""
 
 
+_LANGUAGE_RULE = {
+    "en": "plain professional English",
+    "fr": ("polished professional FRENCH (the whole summary in French, with French punctuation; "
+           "keep only standard technical terms in English, as French ML job posts do, e.g. "
+           "fine-tuning, LLM-as-a-judge, pipeline, prompt, workflow; no English function words "
+           "such as the, with, and, for)"),
+}
+
 _SYSTEM = (
     "You write the summary paragraph at the top of a candidate's CV, tailored to one job "
-    "posting. Write 2 or 3 natural, complete sentences (40 to 50 words in total) in plain "
-    "professional English. Open with who the candidate is, in the posting's own role "
+    "posting. Write 2 or 3 natural, complete sentences (40 to 50 words in total) in {language}. "
+    "Open with who the candidate is, in the posting's own role "
     "vocabulary where the CV honestly supports it; then the experience from the CV that is "
     "most relevant to what this posting actually asks for; then, naturally, name the target "
     "role and company once. Every claim must come from the CV text given: never add a tool, "
@@ -175,14 +220,20 @@ _SYSTEM = (
 _SCHEMA = {"type": "object", "properties": {"summary": {"type": "string"}}, "required": ["summary"]}
 
 
-def generate_summary(job: Job, anchor: str, title: str, company: str, feedback: str = "") -> str | None:
+def generate_summary(job: Job, anchor: str, title: str, company: str, feedback: str = "",
+                     lang: str = "en") -> str | None:
     """LLM-written summary text, or None when no backend is available."""
     if not provider.available():
         return None
     from ..llm.profile import profile_text  # profile imports tailor.engine, which imports this module
-    target =" ".join(x for x in (f"the {title} role" if title else "", f"at {company}" if company else "") if x)
+    if lang == "fr":
+        target = " ".join(x for x in (f"le poste de {title}" if title else "",
+                                      f"chez {company}" if company else "") if x)
+    else:
+        target = " ".join(x for x in (f"the {title} role" if title else "",
+                                      f"at {company}" if company else "") if x)
     prompt = (
-        f"CANDIDATE CV:\n{profile_text()}\n\n"
+        f"CANDIDATE CV ({'French' if lang == 'fr' else 'English'} version):\n{profile_text(lang)}\n\n"
         f"EXAMPLE OF THE INTENDED CONTENT AND TONE (for this kind of role; adapt it, do not copy it):\n{anchor}\n\n"
         f"JOB POSTING:\nTitle: {job.title}\nCompany: {job.company}\n"
         f"Description:\n{(job.description or '')[:6000]}\n\n"
@@ -190,26 +241,30 @@ def generate_summary(job: Job, anchor: str, title: str, company: str, feedback: 
            f"posting title (for example: {target}).\n" if target else "")
         + (f"\nYour previous attempt was rejected: {feedback}. Fix that.\n" if feedback else "")
     )
-    return provider.generate_json(prompt, system=_SYSTEM, max_tokens=500, json_schema=_SCHEMA).get("summary")
+    system = _SYSTEM.format(language=_LANGUAGE_RULE[lang])
+    return provider.generate_json(prompt, system=system, max_tokens=500, json_schema=_SCHEMA).get("summary")
 
 
-def build(job: Job, role_category: str, cv_text: str) -> Summary:
-    """The summary text (plain, not yet LaTeX-escaped) for this job."""
-    anchor = pick_core(role_category)
+def build(job: Job, role_category: str, cv_text: str, lang: str = "en") -> Summary:
+    """The summary text (plain, not yet LaTeX-escaped) for this job, in `lang`."""
+    anchor = pick_core(role_category, lang=lang)
     title, company = clean_title(job.title), clean_company(job.company)
-    fallback = f"{anchor} {closing_line(job.title, job.company)}".strip()
+    fallback = f"{anchor} {closing_line(job.title, job.company, lang)}".strip()
     allowed = f"{cv_text} {job.title} {job.company}"
 
     feedback = reason = detail = ""
     for _ in range(2):
         try:
-            text = generate_summary(job, anchor, title, company, feedback)
+            text = generate_summary(job, anchor, title, company, feedback, lang=lang)
         except Exception as exc:
             return Summary(fallback, "tailor_summary_llm_error", f"{type(exc).__name__}: {exc}"[:200])
         if text is None:
             return Summary(fallback)    # the selection call already tracks "no LLM backend"
-        why = validate_summary(text, allowed, company)
+        why = validate_summary(text, allowed, company, lang)
         if not why:
             return Summary(text.strip())
-        feedback, reason, detail = why, "tailor_summary_rejected", why
+        wrong_language = why.startswith("language")
+        feedback = (f"{why}. Write the whole summary in {'French' if lang == 'fr' else 'English'}, "
+                    f"keeping only standard technical terms in the other language") if wrong_language else why
+        reason, detail = (LANGUAGE_REASON if wrong_language else "tailor_summary_rejected"), why
     return Summary(fallback, reason, detail)

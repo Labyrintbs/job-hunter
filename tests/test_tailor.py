@@ -72,7 +72,7 @@ def test_fallback_select_skills_drops_medical_imaging_when_irrelevant():
               description="RAG, LLM agents, retrieval")
     kept = engine._fallback_select_skills(parsed.skills, engine._job_terms(job))
     names = [c.name for c in kept]
-    assert engine._CONDITIONAL_SKILL_CATEGORY not in names
+    assert engine._CONDITIONAL_SKILL_CATEGORY["en"] not in names
     assert "Technical Skills" in names
 
 
@@ -81,7 +81,7 @@ def test_fallback_select_skills_keeps_medical_imaging_when_relevant():
     job = Job(source="x", external_id="1", title="Medical Imaging Engineer", company="A",
               description="clinical CT and CTA segmentation")
     kept = engine._fallback_select_skills(parsed.skills, engine._job_terms(job))
-    assert engine._CONDITIONAL_SKILL_CATEGORY in [c.name for c in kept]
+    assert engine._CONDITIONAL_SKILL_CATEGORY["en"] in [c.name for c in kept]
 
 
 def test_apply_ids_ignores_out_of_range_and_duplicates_and_respects_order():

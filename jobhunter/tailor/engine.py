@@ -13,6 +13,7 @@ from typing import NamedTuple
 from .. import fetch_diag
 from ..config import DATA_DIR, REPO_ROOT
 from ..db import CV_FALLBACK_NOTE
+from ..lang import job_language
 from ..llm import provider
 from ..models import Job
 from . import select as llm_select
@@ -20,7 +21,13 @@ from . import courses, snippet_bank, summary
 from .snippet_bank import Block, ParsedCV, SkillCategory
 
 BASE_CV = REPO_ROOT / "templates" / "cv_base.tex"
+BASE_CV_FR = REPO_ROOT / "templates" / "cv_base_fr.tex"
 CV_OUT_DIR = DATA_DIR / "cv"
+
+
+def base_cv_path(language: str = "en"):
+    """The master CV for a language; English unless the job's text is French."""
+    return BASE_CV_FR if language == "fr" else BASE_CV
 
 
 def _job_terms(job: Job) -> set[str]:
@@ -35,7 +42,8 @@ MAX_PROJECTS = 3
 # Only ever dropped for a job with no vision/medical signal -- the one category
 # every manually-tailored CV this session has actually dropped. See
 # cv_tailoring_workflow.md's "Emphasis" step.
-_CONDITIONAL_SKILL_CATEGORY = r"Computer Vision \& Medical Imaging"
+_CONDITIONAL_SKILL_CATEGORY = {"en": r"Computer Vision \& Medical Imaging",
+                               "fr": "Vision par ordinateur et imagerie médicale"}
 
 
 def _fallback_select(blocks: list[Block], terms: set[str], cap: int) -> list[Block]:
@@ -53,10 +61,12 @@ def _fallback_select(blocks: list[Block], terms: set[str], cap: int) -> list[Blo
     return sorted(chosen, key=lambda b: b.end_date(), reverse=True)
 
 
-def _fallback_select_skills(categories: list[SkillCategory], terms: set[str]) -> list[SkillCategory]:
+def _fallback_select_skills(categories: list[SkillCategory], terms: set[str],
+                            lang: str = "en") -> list[SkillCategory]:
     """Deterministic fallback: only ever drops the one category that's actually
     been dropped in practice, and only when irrelevant."""
-    return [c for c in categories if c.name != _CONDITIONAL_SKILL_CATEGORY or (c.tags & terms)]
+    conditional = _CONDITIONAL_SKILL_CATEGORY[lang]
+    return [c for c in categories if c.name != conditional or (c.tags & terms)]
 
 
 def _apply_ids(blocks: list[Block], ids: object, cap: int) -> list[Block]:
@@ -151,28 +161,25 @@ def _select_blocks(job: Job, parsed: ParsedCV, terms: set[str], feedback: str | 
     fetch_diag.track("tailor", reason, detail=detail, company=job.company)
     return (_fallback_select(parsed.projects, terms, MAX_PROJECTS),
             _fallback_select(parsed.experiences, terms, MAX_EXPERIENCES),
-            _fallback_select_skills(parsed.skills, terms), True)
+            _fallback_select_skills(parsed.skills, terms, parsed.lang), True)
 
 
 # Update when the target start date changes (e.g. back to "from <Month Year>")
-# -- kept as one constant so it's never silently dropped by a re-tailor (see
-# templates/cv_tailoring_workflow.md).
-AVAILABILITY = "available immediately"
+# -- kept as one constant per language so it's never silently dropped by a
+# re-tailor (see templates/cv_tailoring_workflow.md).
+AVAILABILITY = {"en": "available immediately", "fr": "disponible immédiatement"}
 
 
-def _tagline(role_category: str = "") -> str:
+def _tagline(role_category: str = "", lang: str = "en") -> str:
     # Deliberately generic (no per-job targeting clause), two fixed variants
     # only by role_category -- see templates/cv_tailoring_workflow.md. Default
-    # variant matches templates/cv_base.tex's own heading line.
-    if role_category == "PM":
-        return (
-            f"{{Seeking an AI Product Manager role (CDI/CDD), "
-            f"{AVAILABILITY} — Île-de-France, open to mobility}}"
-        )
-    return (
-        f"{{Seeking a Machine Learning role (CDI/CDD), {AVAILABILITY} — "
-        f"Île-de-France, open to mobility}}"
-    )
+    # variant matches the base CV's own heading line (templates/cv_base*.tex).
+    pm = role_category == "PM"
+    if lang == "fr":
+        role = "Product Manager IA" if pm else "Ingénieur Machine Learning"
+        return f"{{{role} (CDI/CDD), {AVAILABILITY['fr']} — Île-de-France, ouvert à la mobilité}}"
+    role = "an AI Product Manager" if pm else "a Machine Learning"
+    return f"{{Seeking {role} role (CDI/CDD), {AVAILABILITY['en']} — Île-de-France, open to mobility}}"
 
 
 def _slug(text: str) -> str:
@@ -180,20 +187,24 @@ def _slug(text: str) -> str:
 
 
 def _tailor(job: Job, parsed: ParsedCV | None = None, feedback: str | None = None,
-            judge_context: str | None = None, role_category: str = "") -> tuple[str, bool]:
-    """(tex, used_keyword_fallback)."""
-    parsed = parsed or snippet_bank.parse(BASE_CV)
+            judge_context: str | None = None, role_category: str = "",
+            language: str = "en") -> tuple[str, bool]:
+    """(tex, used_keyword_fallback). `language` picks the master CV ("en" or "fr");
+    an already parsed CV carries its own."""
+    parsed = parsed or snippet_bank.parse(base_cv_path(language), language)
+    lang = parsed.lang
+    names = snippet_bank.SECTIONS[lang]
     terms = _job_terms(job)
     doc = parsed.document
 
     projects, experiences, skills, used_fallback = _select_blocks(
         job, parsed, terms, feedback=feedback, judge_context=judge_context)
-    doc = snippet_bank.reassemble(doc, r"PROJECTS[^}]*", projects)
-    doc = snippet_bank.reassemble(doc, r"PROFESSIONAL EXPERIENCE", experiences)
-    doc = snippet_bank.reassemble_skills(doc, skills)
+    doc = snippet_bank.reassemble(doc, names["projects"], projects)
+    doc = snippet_bank.reassemble(doc, names["experience"], experiences)
+    doc = snippet_bank.reassemble_skills(doc, skills, lang)
     if parsed.heading_line:
-        doc = doc.replace(parsed.heading_line, _tagline(role_category), 1)
-    summ = summary.build(job, role_category, parsed.document)
+        doc = doc.replace(parsed.heading_line, _tagline(role_category, lang), 1)
+    summ = summary.build(job, role_category, parsed.document, lang)
     if summ.reason:
         fetch_diag.track("tailor", summ.reason, detail=summ.detail, company=job.company)
     doc = snippet_bank.set_summary(doc, summary.latex_escape(summ.text))
@@ -202,8 +213,9 @@ def _tailor(job: Job, parsed: ParsedCV | None = None, feedback: str | None = Non
 
 
 def tailor_tex(job: Job, parsed: ParsedCV | None = None, feedback: str | None = None,
-               judge_context: str | None = None, role_category: str = "") -> str:
-    return _tailor(job, parsed, feedback, judge_context, role_category)[0]
+               judge_context: str | None = None, role_category: str = "",
+               language: str = "en") -> str:
+    return _tailor(job, parsed, feedback, judge_context, role_category, language)[0]
 
 
 # MacTeX's latexmk/pdflatex live here but aren't on PATH for non-interactive
@@ -400,7 +412,8 @@ def _publish_latest(out_dir: Path, name: str) -> None:
 
 
 def tailor_job(job: Job, job_id: int, auto: bool = False,
-              judge_context: str | None = None, role_category: str = "") -> TailorResult:
+              judge_context: str | None = None, role_category: str = "",
+              language: str | None = None) -> TailorResult:
     """Generate + compile a tailored CV for a job. Returns a TailorResult; a failed
     compile, or a still-sparse second page after the retry, sets `note` and is
     recorded via fetch_diag under a `tailor_*` reason.
@@ -422,7 +435,9 @@ def tailor_job(job: Job, job_id: int, auto: bool = False,
     out_dir = CV_OUT_DIR / f"{job_id}-{_slug(job.company)}"
     name = f"cv-{_version_stamp()}"
 
-    tex, used_fallback = _tailor(job, judge_context=judge_context, role_category=role_category)
+    language = language or job_language(job.title, job.description, job.language)
+    tex, used_fallback = _tailor(job, judge_context=judge_context, role_category=role_category,
+                                 language=language)
     pdf = compile_tex(tex, out_dir, name=name, expected_pages=2 if auto else None)
 
     retried = False
@@ -430,7 +445,7 @@ def tailor_job(job: Job, job_id: int, auto: bool = False,
         feedback = _retry_feedback(pdf, out_dir, name)
         if feedback:
             tex, used_fallback = _tailor(job, feedback=feedback, judge_context=judge_context,
-                                         role_category=role_category)
+                                         role_category=role_category, language=language)
             pdf = compile_tex(tex, out_dir, name=name, expected_pages=2)
             retried = True
 

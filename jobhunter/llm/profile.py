@@ -5,7 +5,7 @@ import re
 from functools import lru_cache
 from pathlib import Path
 
-from ..tailor.engine import BASE_CV
+from ..tailor.engine import BASE_CV, base_cv_path  # noqa: F401  (BASE_CV: tests patch it here)
 
 
 def _clean_latex(body: str) -> str:
@@ -31,8 +31,8 @@ def _body_of(raw: str) -> str:
     return raw.split(r"\begin{document}")[-1].split(r"\end{document}")[0]
 
 
-def _document_body() -> str:
-    return _body_of(BASE_CV.read_text(encoding="utf-8"))
+def _document_body(language: str = "en") -> str:
+    return _body_of(base_cv_path(language).read_text(encoding="utf-8"))
 
 
 def tailored_cv_text(tex_path: Path) -> str:
@@ -40,7 +40,7 @@ def tailored_cv_text(tex_path: Path) -> str:
     return _clean_latex(_body_of(tex_path.read_text(encoding="utf-8")))
 
 
-@lru_cache(maxsize=1)
-def profile_text() -> str:
-    return _clean_latex(_document_body())
+@lru_cache(maxsize=2)
+def profile_text(language: str = "en") -> str:
+    return _clean_latex(_document_body(language))
 

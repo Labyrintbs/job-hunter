@@ -64,6 +64,10 @@ VOCAB = {
     "data augmentation", "pytorch", "benchmark",
     "agent", "agentic", "retrieval", "embedding", "orchestration",
     "reranking", "vector database", "langgraph", "langchain",
+    # French counterparts, so the keyword fallback also works on French postings
+    "imagerie", "apprentissage", "vision par ordinateur", "nuage de points", "nuages de points",
+    "recalage", "médical", "clinique", "parole", "déploi", "annotation", "agentique",
+    "récompense", "renforcement", "génération", "extraction",
 }
 
 
