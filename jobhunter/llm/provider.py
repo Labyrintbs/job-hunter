@@ -20,7 +20,7 @@ DEFAULT_TIMEOUT = 180
 MODEL = os.environ.get("JOBHUNTER_MODEL", "claude-sonnet-5-5")
 # Cheaper model for calls that only classify or pick ids (block selection, fit judge);
 # pass model=FAST_MODEL. Anything that writes text for the CV or letter uses MODEL.
-FAST_MODEL = os.environ.get("JOBHUNTER_FAST_MODEL", "claude-haiku-4-5-20251001")
+FAST_MODEL = os.environ.get("JOBHUNTER_FAST_MODEL", "claude-sonnet-5")
 
 # cron runs with a bare minimal PATH that won't include where `claude` actually lives
 # (e.g. ~/.local/bin), so PATH-only lookup silently disables the judge under cron.
