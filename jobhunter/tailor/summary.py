@@ -39,6 +39,9 @@ _FIRST_PERSON = {
     "en": re.compile(r"\b(?:i|my|me|mine|we|our)\b", re.I),
     "fr": re.compile(r"\b(?:je|j'|mon|ma|mes|moi|nous|notre|nos)\b|\bj'", re.I),
 }
+# French summaries use a noun-phrase voice ("Ingénieur ... ayant ...", "Candidat au poste
+# de ..."), not a third-person narrator, so every one reads the same way.
+_THIRD_PERSON_FR = re.compile(r"\b(?:il|elle|ils|elles)\b", re.I)
 _HYPE = {
     "en": re.compile(r"\b(?:passionate|excited|thrilled|motivated|dream|eager|enthusiastic)\b", re.I),
     "fr": re.compile(r"\b(?:passionné\w*|enthousiaste\w*|motivé\w*|ravi\w*|rêve|impatient\w*)\b", re.I),
@@ -173,6 +176,8 @@ def validate_summary(text: object, allowed_text: str, company: str = "", lang: s
         return "contains a figure"
     if _FIRST_PERSON[lang].search(s):
         return "first person"
+    if lang == "fr" and _THIRD_PERSON_FR.search(s):
+        return "third-person pronoun"
     if _HYPE[lang].search(s):
         return "hype word"
     if _DASHES.search(s):
@@ -205,7 +210,8 @@ _LANGUAGE_RULE = {
     "fr": ("polished professional FRENCH (the whole summary in French, with French punctuation; "
            "keep only standard technical terms in English, as French ML job posts do, e.g. "
            "fine-tuning, LLM-as-a-judge, pipeline, prompt, workflow; no English function words "
-           "such as the, with, and, for)"),
+           "such as the, with, and, for; write in a noun-phrase voice like \"Ingénieur ... "
+           "ayant ...\" and \"Candidat au poste de ...\", never with the pronouns il or elle)"),
 }
 
 _SYSTEM = (

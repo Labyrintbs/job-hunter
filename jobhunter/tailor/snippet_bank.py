@@ -261,6 +261,23 @@ def reassemble(doc: str, section_title_regex: str, ordered_items: list[Block]) -
     return doc[:start] + new_body + doc[end:]
 
 
+def drop_last_project_bullet(doc: str, lang: str = "en") -> str | None:
+    """`doc` without the last bullet of the last project that has more than one, so
+    every kept project keeps at least one. None when there is nothing left to drop.
+    The last-resort way to win back a few lines when a CV runs onto a third page."""
+    names = SECTIONS[lang]
+    span = _section_body(doc, names["projects"])
+    if not span:
+        return None
+    items = _split_items(span[2], PROJECT_MACRO)
+    for i in range(len(items) - 1, -1, -1):
+        count = len(_bullet_contents(items[i]))
+        if count > 1:
+            items[i] = filter_bullets(items[i], list(range(count - 1)))
+            return reassemble(doc, names["projects"], [Block(t) for t in items])
+    return None
+
+
 SUMMARY_BLOCK_RE = re.compile(r"%SUMMARY-BEGIN\n.*?%SUMMARY-END", re.S)
 
 

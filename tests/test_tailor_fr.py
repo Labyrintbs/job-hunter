@@ -232,3 +232,130 @@ def test_a_summary_that_fell_back_shows_as_a_review_note(tmp_path, monkeypatch, 
     monkeypatch.setattr(summary, "generate_summary", lambda *a, **k: "Too short.")
     res = engine.tailor_job(_job(), 1)
     assert "summary fell back to the standard text (" in res.note
+
+
+# --- fitting two pages: French length hint, last-resort trimming, voice ------------------
+
+def test_french_selection_is_told_that_french_runs_longer(monkeypatch):
+    monkeypatch.setattr(engine.provider, "available", lambda: True)
+    seen = {}
+
+    def fake(job, e, p, s, feedback=None, judge_context=None):
+        seen["feedback"] = feedback
+        return {"experience_ids": [0], "experience_bullets": [[]], "project_ids": [0],
+                "project_bullets": [[]], "skill_categories": ["Langues"], "reasoning": ""}
+    monkeypatch.setattr(engine.llm_select, "select", fake)
+    parsed = snippet_bank.parse(engine.base_cv_path("fr"), "fr")
+    engine.tailor_tex(_job(), parsed=parsed)
+    assert "French version" in seen["feedback"] and "10% longer" in seen["feedback"]
+    parsed_en = snippet_bank.parse(engine.base_cv_path("en"), "en")
+    engine.tailor_tex(_job(), parsed=parsed_en)
+    assert seen["feedback"] is None                     # English gets no hint
+
+
+def test_the_hint_is_added_to_a_retry_feedback_not_replaced(monkeypatch):
+    monkeypatch.setattr(engine.provider, "available", lambda: True)
+    seen = {}
+    monkeypatch.setattr(engine.llm_select, "select", lambda job, e, p, s, feedback=None, judge_context=None:
+                        seen.update(feedback=feedback) or {})
+    parsed = snippet_bank.parse(engine.base_cv_path("fr"), "fr")
+    engine.tailor_tex(_job(), parsed=parsed, feedback="compiled to 3 pages")
+    assert seen["feedback"].startswith("compiled to 3 pages") and "French version" in seen["feedback"]
+
+
+def test_drop_last_project_bullet_trims_the_last_multi_bullet_project_and_keeps_one_each():
+    parsed = snippet_bank.parse(engine.BASE_CV, "en")
+    doc = parsed.document
+    before = [len(b.bullets()) for b in snippet_bank.parse(engine.BASE_CV, "en").projects]
+    once = snippet_bank.drop_last_project_bullet(doc, "en")
+    after = [len(b.bullets()) for b in _projects_of(once)]
+    assert sum(before) - sum(after) == 1
+    assert after[-1] == before[-1] - 1 and after[:-1] == before[:-1]    # the last project (thesis) lost one
+    doc2 = doc
+    for _ in range(40):
+        nxt = snippet_bank.drop_last_project_bullet(doc2, "en")
+        if nxt is None:
+            break
+        doc2 = nxt
+    assert all(n <= 1 for n in [len(b.bullets()) for b in _projects_of(doc2)])   # nothing left to drop
+    assert snippet_bank.drop_last_project_bullet(doc2, "en") is None
+
+
+def _projects_of(doc, lang="en"):
+    import tempfile
+    from pathlib import Path
+    with tempfile.TemporaryDirectory() as tmp:
+        p = Path(tmp) / "x.tex"
+        p.write_text(doc, encoding="utf-8")
+        return snippet_bank.parse(p, lang).projects
+
+
+def _page_count_log(out_dir, name, pages=3):
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / f"{name}.compile.log").write_text(f"Compiled to {pages} page(s), expected exactly 2.\n")
+
+
+def test_a_cv_still_over_two_pages_after_the_retry_is_trimmed_until_it_fits(tmp_path, monkeypatch, no_llm):
+    monkeypatch.setattr(engine, "CV_OUT_DIR", tmp_path)
+    compiles = []
+
+    def fake_compile(tex, out_dir, name="cv", expected_pages=None):
+        compiles.append(tex)
+        if len(compiles) < 4:                       # first attempt, retry, first trim: still 3 pages
+            _page_count_log(out_dir, name)
+            return None
+        out_dir.mkdir(parents=True, exist_ok=True)
+        (out_dir / f"{name}.tex").write_text(tex)
+        (out_dir / f"{name}.pdf").write_bytes(b"%PDF")
+        return out_dir / f"{name}.pdf"
+    monkeypatch.setattr(engine, "compile_tex", fake_compile)
+    res = engine.tailor_job(_job(), 1, auto=True)
+    assert res.pdf_path is not None
+    assert "auto-trimmed 2 project bullet(s) to fit two pages" in res.note
+    assert len(compiles) == 4
+    assert compiles[3].count(r"\resumeItem{") == compiles[1].count(r"\resumeItem{") - 2
+
+
+def test_trimming_gives_up_after_the_cap_and_leaves_the_page_count_failure(tmp_path, monkeypatch, no_llm):
+    monkeypatch.setattr(engine, "CV_OUT_DIR", tmp_path)
+    compiles = []
+
+    def always_three_pages(tex, out_dir, name="cv", expected_pages=None):
+        compiles.append(tex)
+        _page_count_log(out_dir, name)
+        return None
+    monkeypatch.setattr(engine, "compile_tex", always_three_pages)
+    res = engine.tailor_job(_job(), 1, auto=True)
+    assert res.pdf_path is None and "3 page(s)" in res.note and "auto-trimmed" not in res.note
+    assert len(compiles) == 2 + engine.MAX_AUTOTRIM          # attempt, retry, then the capped trims
+
+
+def test_a_latex_error_is_never_trimmed(tmp_path, monkeypatch, no_llm):
+    monkeypatch.setattr(engine, "CV_OUT_DIR", tmp_path)
+    compiles = []
+
+    def broken(tex, out_dir, name="cv", expected_pages=None):
+        compiles.append(1)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        (out_dir / f"{name}.compile.log").write_text("! Undefined control sequence.\n")
+        return None
+    monkeypatch.setattr(engine, "compile_tex", broken)
+    res = engine.tailor_job(_job(), 1, auto=True)
+    assert res.pdf_path is None and "LaTeX compile error" in res.note and len(compiles) == 1
+
+
+def test_the_interactive_path_is_not_trimmed(tmp_path, monkeypatch, no_llm):
+    monkeypatch.setattr(engine, "CV_OUT_DIR", tmp_path)
+    compiles = []
+    monkeypatch.setattr(engine, "compile_tex", lambda tex, out_dir, name="cv", expected_pages=None:
+                        compiles.append(1) or None)
+    engine.tailor_job(_job(), 1, auto=False)
+    assert len(compiles) == 1
+
+
+def test_the_french_summary_voice_has_no_third_person_pronoun():
+    ok = GOOD_FR
+    assert summary.validate_summary(ok, CV_FR, "Acme", "fr") == ""
+    bad = ok.replace("Cette expérience correspond", "Il vise")
+    assert "third-person pronoun" in summary.validate_summary(bad, CV_FR, "Acme", "fr")
+    assert "noun-phrase voice" in summary._LANGUAGE_RULE["fr"]

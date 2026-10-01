@@ -121,6 +121,11 @@ def _menu_pairs(blocks: list[Block]) -> list[tuple[str, list[str]]]:
     return [(b.text, b.bullets()) for b in blocks]
 
 
+_FRENCH_LENGTH_HINT = ("This CV is the French version, whose text runs about 10% longer than the "
+                       "English one: keep roughly one bullet fewer per entry than you would in "
+                       "English so it still fits exactly two pages.")
+
+
 def _select_blocks(job: Job, parsed: ParsedCV, terms: set[str], feedback: str | None = None,
                     judge_context: str | None = None
                     ) -> tuple[list[Block], list[Block], list[SkillCategory], bool]:
@@ -137,6 +142,8 @@ def _select_blocks(job: Job, parsed: ParsedCV, terms: set[str], feedback: str | 
     background, not re-derived. Returns (projects, experiences, skills, used_fallback);
     each fallback is recorded via fetch_diag under a `tailor_llm_*` reason."""
     reason, detail = "tailor_llm_unavailable", "no LLM backend"
+    if parsed.lang == "fr":
+        feedback = f"{feedback + ' ' if feedback else ''}{_FRENCH_LENGTH_HINT}"
     if provider.available():
         try:
             result = llm_select.select(
@@ -412,6 +419,27 @@ def _compile_failure(out_dir: Path, name: str = "cv") -> tuple[str, str]:
     return "tailor_latex_error", f"LaTeX compile error -- see {name}.compile.log"
 
 
+MAX_AUTOTRIM = 4
+
+
+def _trim_to_fit(tex: str, language: str, out_dir: Path, name: str) -> tuple[str, Path | None, int]:
+    """Last resort for a CV still over two pages after the LLM's own retry: drop the
+    last bullet of the last multi-bullet project, recompile, up to MAX_AUTOTRIM times.
+    Returns (tex, pdf or None, bullets dropped). Never invents anything."""
+    trimmed = 0
+    for _ in range(MAX_AUTOTRIM):
+        smaller = snippet_bank.drop_last_project_bullet(tex, language)
+        if smaller is None:
+            break
+        tex, trimmed = smaller, trimmed + 1
+        pdf = compile_tex(tex, out_dir, name=name, expected_pages=2)
+        if pdf is not None:
+            return tex, pdf, trimmed
+        if _compile_failure(out_dir, name)[0] != "tailor_page_count":
+            break
+    return tex, None, trimmed
+
+
 def _version_stamp() -> str:
     return datetime.now().strftime("%Y%m%d-%H%M%S-%f")[:-3]
 
@@ -467,6 +495,10 @@ def tailor_job(job: Job, job_id: int, auto: bool = False,
                                                 role_category=role_category, language=language)
             pdf = compile_tex(tex, out_dir, name=name, expected_pages=2)
             retried = True
+        if pdf is None and _compile_failure(out_dir, name)[0] == "tailor_page_count":
+            tex, pdf, trimmed = _trim_to_fit(tex, language, out_dir, name)
+            if pdf is not None:
+                notes.append(f"auto-trimmed {trimmed} project bullet(s) to fit two pages")
 
     reason = note = ""
     if pdf is None:
