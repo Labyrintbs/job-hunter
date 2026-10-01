@@ -115,6 +115,25 @@ def test_generate_cli_passes_env_with_extra_paths(monkeypatch):
         assert p in captured["env"]["PATH"]
 
 
+def test_generate_cli_uses_the_given_model_else_the_default(monkeypatch):
+    cmds = []
+
+    def fake_run(cmd, **kw):
+        cmds.append(cmd)
+        class R:
+            returncode = 0
+            stdout = "hi"
+            stderr = ""
+        return R()
+
+    monkeypatch.setattr(provider.subprocess, "run", fake_run)
+    monkeypatch.setattr(provider, "_cli_path", lambda: "/usr/bin/claude")
+    provider._generate_cli("p", None, 30, model="some-model")
+    provider._generate_cli("p", None, 30)
+    assert cmds[0][cmds[0].index("--model") + 1] == "some-model"
+    assert cmds[1][cmds[1].index("--model") + 1] == provider.MODEL
+
+
 def test_generate_cli_passes_json_schema_flag(monkeypatch):
     captured = {}
 

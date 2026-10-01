@@ -7,6 +7,14 @@ def _job():
               description="we build production ML systems")
 
 
+def test_select_uses_the_fast_model(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(S.provider, "generate_json",
+                        lambda prompt, **kw: captured.update(kw) or {})
+    S.select(_job(), [], [], [])
+    assert captured["model"] == S.provider.FAST_MODEL != S.provider.MODEL
+
+
 def test_select_injects_judge_context(monkeypatch):
     captured = {}
     monkeypatch.setattr(S.provider, "generate_json",

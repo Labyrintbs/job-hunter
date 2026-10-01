@@ -409,6 +409,25 @@ def test_tailor_job_retries_once_when_first_attempt_is_sparse(tmp_path, monkeypa
     assert pdf_path == tmp_path / "1-acme" / "cv.pdf"
 
 
+def test_page_fit_retry_reuses_the_summary_and_repeats_only_the_selection(tmp_path, monkeypatch):
+    monkeypatch.setattr(engine, "CV_OUT_DIR", tmp_path)
+    _llm_ok(monkeypatch)
+    summary_calls, select_calls = [], []
+    monkeypatch.setattr(engine.summary, "generate_summary",
+                        lambda *a, **k: summary_calls.append(1) or None)
+    real_select = engine.llm_select.select
+    monkeypatch.setattr(engine.llm_select, "select",
+                        lambda *a, **k: select_calls.append(1) or real_select(*a, **k))
+    monkeypatch.setattr(engine, "compile_tex", lambda tex, out_dir, name="cv", expected_pages=None: out_dir / "cv.pdf")
+    ratios = iter([0.1, 0.9])   # sparse, then healthy: exactly one retry
+    monkeypatch.setattr(engine, "_last_page_fill_ratio", lambda pdf, n: next(ratios))
+
+    job = Job(source="x", external_id="1", title="ML Engineer", company="Acme", description="machine learning")
+    engine.tailor_job(job, 1, auto=True)
+
+    assert len(select_calls) == 2 and len(summary_calls) == 1
+
+
 def test_tailor_job_does_not_retry_when_first_attempt_is_already_healthy(tmp_path, monkeypatch):
     monkeypatch.setattr(engine, "CV_OUT_DIR", tmp_path)
     monkeypatch.setattr(engine.provider, "available", lambda: False)

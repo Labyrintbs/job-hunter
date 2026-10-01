@@ -17,6 +17,15 @@ def test_judge_injects_preferences(monkeypatch):
     assert out["score"] == 72 and out["seniority"] == "junior" and out["min_years"] == 1
 
 
+def test_judge_uses_the_fast_model(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(J.provider, "generate_json",
+                        lambda prompt, system=None, **kw: captured.update(kw)
+                        or {"score": 50, "verdict": "stretch", "reasons": ""})
+    J.judge(Job(source="wttj", external_id="1", title="ML Engineer", company="C", description="d"))
+    assert captured["model"] == J.provider.FAST_MODEL != J.provider.MODEL
+
+
 def test_judge_without_preferences_has_no_pref_block(monkeypatch):
     captured = {}
     monkeypatch.setattr(J.provider, "generate_json",

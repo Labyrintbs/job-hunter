@@ -18,6 +18,9 @@ from pathlib import Path
 
 DEFAULT_TIMEOUT = 180
 MODEL = os.environ.get("JOBHUNTER_MODEL", "claude-sonnet-5-5")
+# Cheaper model for calls that only classify or pick ids (block selection, fit judge);
+# pass model=FAST_MODEL. Anything that writes text for the CV or letter uses MODEL.
+FAST_MODEL = os.environ.get("JOBHUNTER_FAST_MODEL", "claude-haiku-4-5-20251001")
 
 # cron runs with a bare minimal PATH that won't include where `claude` actually lives
 # (e.g. ~/.local/bin), so PATH-only lookup silently disables the judge under cron.
@@ -86,12 +89,12 @@ def backend() -> str:
     return "none"
 
 
-def _generate_api(prompt: str, system: str | None, max_tokens: int) -> str:
+def _generate_api(prompt: str, system: str | None, max_tokens: int, model: str | None = None) -> str:
     import anthropic
 
     client = anthropic.Anthropic()
     msg = client.messages.create(
-        model=MODEL,
+        model=model or MODEL,
         max_tokens=max_tokens,
         system=system or "You are a concise, factual assistant.",
         messages=[{"role": "user", "content": prompt}],
@@ -100,8 +103,8 @@ def _generate_api(prompt: str, system: str | None, max_tokens: int) -> str:
 
 
 def _generate_cli(prompt: str, system: str | None, timeout: int,
-                  json_schema: dict | None = None) -> str:
-    cmd = [_cli_path() or "claude", "-p", prompt, "--model", MODEL]
+                  json_schema: dict | None = None, model: str | None = None) -> str:
+    cmd = [_cli_path() or "claude", "-p", prompt, "--model", model or MODEL]
     if system:
         cmd += ["--append-system-prompt", system]
     if json_schema:
@@ -118,12 +121,13 @@ def _generate_cli(prompt: str, system: str | None, timeout: int,
 
 
 def generate(prompt: str, system: str | None = None, max_tokens: int = 1500,
-             timeout: int = DEFAULT_TIMEOUT, json_schema: dict | None = None) -> str:
+             timeout: int = DEFAULT_TIMEOUT, json_schema: dict | None = None,
+             model: str | None = None) -> str:
     if _has_api_key():
         # max_tokens applies here; the CLI path below has no equivalent knob.
-        return _generate_api(prompt, system, max_tokens)
+        return _generate_api(prompt, system, max_tokens, model)
     if _has_cli():
-        return _generate_cli(prompt, system, timeout, json_schema=json_schema)
+        return _generate_cli(prompt, system, timeout, json_schema=json_schema, model=model)
     raise LLMUnavailable("no ANTHROPIC_API_KEY and no `claude` CLI on PATH")
 
 

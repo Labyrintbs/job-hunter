@@ -118,4 +118,5 @@ def select(job: Job, experiences: list[tuple[str, list[str]]], projects: list[tu
         projects=_menu(projects),
         skills="\n".join(f"- {n}" for n in skill_names),
     )
-    return provider.generate_json(prompt, system=SYSTEM, max_tokens=1000, json_schema=RESULT_SCHEMA)
+    return provider.generate_json(prompt, system=SYSTEM, max_tokens=1000, json_schema=RESULT_SCHEMA,
+                                  model=provider.FAST_MODEL)

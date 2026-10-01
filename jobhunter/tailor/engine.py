@@ -193,12 +193,22 @@ def _slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:40] or "job"
 
 
+def _write_summary(job: Job, role_category: str, parsed: ParsedCV) -> summary.Summary:
+    summ = summary.build(job, role_category, parsed.document, parsed.lang)
+    if summ.reason:
+        fetch_diag.track("tailor", summ.reason, detail=summ.detail, company=job.company)
+    return summ
+
+
 def _tailor(job: Job, parsed: ParsedCV | None = None, feedback: str | None = None,
             judge_context: str | None = None, role_category: str = "",
-            language: str = "en") -> tuple[str, bool, list[str]]:
+            language: str = "en", summ: summary.Summary | None = None
+            ) -> tuple[str, bool, list[str]]:
     """(tex, used_keyword_fallback, review_notes). `language` picks the master CV
     ("en" or "fr"); an already parsed CV carries its own. A review note is a
-    non-fatal problem worth a look, e.g. the summary fell back to its fixed text."""
+    non-fatal problem worth a look, e.g. the summary fell back to its fixed text.
+    `summ` reuses an already written summary (it doesn't depend on the selection),
+    so a page-fit retry only repeats the selection call."""
     parsed = parsed or snippet_bank.parse(base_cv_path(language), language)
     lang = parsed.lang
     names = snippet_bank.SECTIONS[lang]
@@ -212,10 +222,9 @@ def _tailor(job: Job, parsed: ParsedCV | None = None, feedback: str | None = Non
     doc = snippet_bank.reassemble_skills(doc, skills, lang)
     if parsed.heading_line:
         doc = doc.replace(parsed.heading_line, _tagline(role_category, lang), 1)
-    summ = summary.build(job, role_category, parsed.document, lang)
+    summ = summ or _write_summary(job, role_category, parsed)
     notes = []
     if summ.reason:
-        fetch_diag.track("tailor", summ.reason, detail=summ.detail, company=job.company)
         notes.append(f"summary fell back to the standard text ({summ.detail})")
     doc = snippet_bank.set_summary(doc, summary.latex_escape(summ.text))
     doc = courses.apply(doc, f"{job.title} {job.description}")
@@ -484,16 +493,18 @@ def tailor_job(job: Job, job_id: int, auto: bool = False,
     name = f"cv-{_version_stamp()}"
 
     language = language or job_language(job.title, job.description, job.language)
-    tex, used_fallback, notes = _tailor(job, judge_context=judge_context, role_category=role_category,
-                                        language=language)
+    parsed = snippet_bank.parse(base_cv_path(language), language)
+    summ = _write_summary(job, role_category, parsed)   # written once, reused by the retry
+    tex, used_fallback, notes = _tailor(job, parsed, judge_context=judge_context,
+                                        role_category=role_category, language=language, summ=summ)
     pdf = compile_tex(tex, out_dir, name=name, expected_pages=2 if auto else None)
 
     retried = False
     if auto:
         feedback = _retry_feedback(pdf, out_dir, name)
         if feedback:
-            tex, used_fallback, notes = _tailor(job, feedback=feedback, judge_context=judge_context,
-                                                role_category=role_category, language=language)
+            tex, used_fallback, notes = _tailor(job, parsed, feedback=feedback, judge_context=judge_context,
+                                                role_category=role_category, language=language, summ=summ)
             pdf = compile_tex(tex, out_dir, name=name, expected_pages=2)
             retried = True
         if pdf is None and _compile_failure(out_dir, name)[0] == "tailor_page_count":
