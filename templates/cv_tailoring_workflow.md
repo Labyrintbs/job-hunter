@@ -98,11 +98,23 @@ Work from the master version I attach. The master is deliberately over-long; tai
 
 **Honesty.** Never add a tool or technique I haven't actually used. My target companies run live technical interviews and I will be asked to walk through anything on the page. If the JD requires something I lack (RAG implementation, FastAPI, cloud platforms, SQL, Kubernetes, Java, front-end), leave it off and tell me it's a gap so I can decide how to address it in the cover letter or interview. If you notice a claim in the master CV that's no longer accurate, flag it rather than propagating it.
 
+### How the automatic tailoring does Step 2 (`jobhunter/tailor/`)
+
+The daily run and the dashboard's CV button follow the same rules, with the page fit done by measuring instead of judgment:
+
+1. **Language.** The master is chosen from the job text: `cv_base_fr.tex` for French postings, `cv_base.tex` otherwise (`jobhunter/lang.py`).
+2. **One scoring call** (`select.py`, Sonnet 5). It picks 2 experiences and 3 projects (plus up to 2 spare projects), in reverse-chronological order unless it states a reason, and gives a 0-100 relevance score to every bullet of those entries and every item of every Skills line. It never writes or rewords anything and is not told how much fits. Without an LLM, keyword overlap supplies the scores.
+3. **Summary** (`summary.py`, Sonnet 5.5) is written once per tailoring; the header tagline and the Major Modules (`courses.py`) are filled in without the LLM.
+4. **Fit to two pages** (`fit.py`). The full chosen content is compiled and every line's position is read from the PDF. If it overflows, the lowest-scored items are removed until it fits, in this order: Major Modules (down to 2), Skills items (at least 2 per line; the Languages line is never touched), project bullets (at least 1 per project), a whole project (at least 2 stay), and only as a last resort work-experience bullets (at least 2 per entry; this and a removed project are flagged as a review note on the board). If room is left, the best removed items go back, and spare projects are added, shrunk to the room left; every addition is verified by compiling. Everything it did is written to `cv-<stamp>.fit.txt` next to the CV.
+5. **Checks.** Exactly two pages, and the CV and summary read in the right language.
+
+A bullet may continue onto page 2 (the master keeps each entry heading together with its first bullet, and never leaves a single line of a bullet alone on a page).
+
 ## Step 3: Formatting rules
 
 - Two pages exactly. Not 1.4 pages with a half-empty second page, not 2.1 pages.
 - Compile and render using the invocations in Step 0.5 (bare `pdflatex`/`pdftoppm` won't be found on PATH), and actually look at the rendered pages before showing me the result. Report the page count.
-- If a section heading lands at the bottom of a page with its content pushed to the next, add `\needspace{N\baselineskip}` before it.
+- Entry headings already keep their first bullet with them (`\needspace` lives in the `\resumeSubheading` and project heading macros of the masters). If a section heading (e.g. SKILLS) lands at the bottom of a page with its content pushed to the next, add `\needspace{N\baselineskip}` before it.
 - If a page ends with a large gap, the fix is adjusting content volume (add a project back, trim a bullet, tighten a Skills line), not fighting LaTeX.
 - Don't change the preamble, custom commands, geometry, or fonts while tailoring a single CV. Layout changes (margins, header size, spacing) are made once in `templates/cv_base.tex` and checked against a sample of real jobs.
 
