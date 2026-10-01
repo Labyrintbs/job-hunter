@@ -8,6 +8,7 @@ nor the posting's title and company contain.
 """
 from __future__ import annotations
 
+import html
 import re
 from typing import NamedTuple
 
@@ -71,7 +72,7 @@ def clean_title(title: str) -> str:
     """The core role name: gender marks and a leading contract tag are dropped,
     then the title is split at separators (" - ", " | ", a colon, a parenthesis)
     and the first part that names a role (Engineer, Scientist...) is kept."""
-    t = _CONTRACT_TAG.sub("", _TITLE_NOISE.sub(" ", title or ""))
+    t = _CONTRACT_TAG.sub("", _TITLE_NOISE.sub(" ", html.unescape(title or "")))
     parts = [re.sub(r"\s+", " ", p).strip(" -–—,:;|/")
              for p in re.split(r"\s+[-–—|]\s+|\s*[:(|]", t)]
     parts = [p for p in parts if p]
@@ -81,7 +82,7 @@ def clean_title(title: str) -> str:
 
 
 def clean_company(company: str) -> str:
-    c = (company or "").strip()
+    c = html.unescape(company or "").strip()
     if not (2 <= len(c) <= 40) or c.lower() in _NOISE_COMPANIES:
         return ""
     return c

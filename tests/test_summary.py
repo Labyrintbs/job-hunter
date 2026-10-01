@@ -33,6 +33,7 @@ def test_pick_core_follows_the_role_category(category, expected):
     ("Machine Learning - ai Engineer - Industrie & 3D H/F", "AI Engineer"),
     ("Computer Vision Engineer, 3D Perception | Tier 1 VC-backed Startup", "Computer Vision Engineer, 3D Perception"),
     ("Data Scientist: France", "Data Scientist"),
+    ("AI Platform &amp; MLOps Engineer (M/F) (F/H)", "AI Platform & MLOps Engineer"),
     ("Research Engineer – Machine Learning", "Research Engineer"),
     ("Design Develop - Llm Models", "Design Develop"),
     ("x" * 61, ""),
@@ -43,7 +44,7 @@ def test_clean_title(raw, clean):
 
 
 @pytest.mark.parametrize("raw,clean", [
-    ("Doctrine", "Doctrine"), ("Non renseigné", ""), ("Confidential", ""),
+    ("Doctrine", "Doctrine"), ("Non renseigné", ""), ("Confidential", ""), ("AT&amp;T", "AT&T"),
     ("A very long company name that goes on and on Ltd", ""), ("", ""),
 ])
 def test_clean_company(raw, clean):
