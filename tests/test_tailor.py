@@ -189,16 +189,16 @@ def test_tailor_passes_feedback_through_to_the_llm_selection_call(monkeypatch):
 
 def test_tailor_llm_selection_trims_bullets_within_kept_entries(monkeypatch):
     """This is the fix for the demonstrated gap: block-level selection alone
-    kept a whole 5-bullet entry and left page 2 sparse. The LLM call can now
+    kept a whole multi-bullet entry and left page 2 sparse. The LLM call can now
     also choose a subset of a kept entry's own bullets."""
     monkeypatch.setattr(engine.provider, "available", lambda: True)
     parsed = snippet_bank.parse(BASE_CV)
-    deepwise_idx = next(i for i, b in enumerate(parsed.experiences) if "DeepWise" in b.text)
-    assert len(parsed.experiences[deepwise_idx].bullets()) == 5  # sanity: master has 5
+    dilitrust_idx = next(i for i, b in enumerate(parsed.experiences) if "DiliTrust" in b.text)
+    assert len(parsed.experiences[dilitrust_idx].bullets()) == 4  # sanity: master has 4
 
     monkeypatch.setattr(engine.llm_select, "select", lambda job, e, p, s, feedback=None, judge_context=None: {
-        "experience_ids": [deepwise_idx],
-        "experience_bullets": [[0, 2, 3]],   # keep only 3 of DeepWise's 5 bullets
+        "experience_ids": [dilitrust_idx],
+        "experience_bullets": [[0, 2, 3]],   # keep only 3 of DiliTrust's 4 bullets
         "project_ids": [0],
         "project_bullets": [[]],
         "skill_categories": ["Technical Skills"],
@@ -209,9 +209,9 @@ def test_tailor_llm_selection_trims_bullets_within_kept_entries(monkeypatch):
 
     exp_section = tex.split(r"\section{PROFESSIONAL EXPERIENCE}")[1].split(r"\section{PROJECTS")[0]
     assert exp_section.count(r"\resumeItem{") == 3
-    original = parsed.experiences[deepwise_idx].bullets()
+    original = parsed.experiences[dilitrust_idx].bullets()
     assert original[0] in exp_section and original[2] in exp_section and original[3] in exp_section
-    assert original[1] not in exp_section and original[4] not in exp_section
+    assert original[1] not in exp_section
 
 
 def test_tailor_falls_back_when_llm_selection_raises(monkeypatch):

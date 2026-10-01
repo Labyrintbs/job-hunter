@@ -170,11 +170,9 @@
       {DeepWise}{03/2023 -- 09/2023}
       {AI Algorithm Intern, Medical Imaging}{Beijing, China}
       \resumeItemListStart
-        \resumeItem{Developed and validated deep learning segmentation models for clinical CT and CTA imaging, deployed in a production annotation pipeline used by medical annotators.}
-        \resumeItem{Improved the bed and external object segmentation model initially trained on lower-limb CTA data by incorporating newly annotated aorta CTA scans, achieving Dice scores of 0.88/0.72.}
-        \resumeItem{Extended model coverage to full-body CT by manually annotating over 300 head CTA scans after diagnosing performance degradation on out-of-distribution anatomy, then deployed the model to pre-annotate over 1000 non-enhanced CT datasets with less than 5\% manual correction required.}
-        \resumeItem{Combined CTA and non-enhanced CT data to retrain a unified segmentation model based on observed failure patterns, achieving pre-release Dice scores of 0.93/0.76 and demonstrating strong generalization across previously unseen body regions.}
-        \resumeItem{Implemented post-processing algorithms for lower-limb segmentation to remove small disconnected components based on calcification ratios and vessel positions.}
+        \resumeItem{Improved the bed and external-object segmentation model, initially trained on lower-limb CTA data, by incorporating newly annotated aorta CTA scans, achieving Dice scores of 0.88/0.72.}
+        \resumeItem{Extended model coverage to full-body CT by manually annotating over 300 head CTA scans after diagnosing degradation on out-of-distribution anatomy, then used the model to pre-annotate over 1000 non-enhanced CT datasets with under 5\% manual correction.}
+        \resumeItem{Retrained a unified CTA and non-enhanced CT segmentation model from observed failure patterns, reaching Dice scores of 0.93/0.76 with strong generalization to unseen body regions, and added post-processing that removes small disconnected components using calcification ratios and vessel positions.}
       \resumeItemListEnd
 
     \needspace{7\baselineskip}
