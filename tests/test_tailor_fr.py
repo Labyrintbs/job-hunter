@@ -277,8 +277,10 @@ def test_drop_last_project_bullet_trims_the_last_multi_bullet_project_and_keeps_
         if nxt is None:
             break
         doc2 = nxt
-    assert all(n <= 1 for n in [len(b.bullets()) for b in _projects_of(doc2)])   # nothing left to drop
-    assert snippet_bank.drop_last_project_bullet(doc2, "en") is None
+    left = _projects_of(doc2)
+    assert all(len(b.bullets()) <= 1 for b in left)           # bullets first...
+    assert len(left) == snippet_bank.MIN_PROJECTS             # ...then whole projects, down to the floor
+    assert snippet_bank.drop_last_project_bullet(doc2, "en") is None   # nothing left to drop
 
 
 def _projects_of(doc, lang="en"):
@@ -311,7 +313,7 @@ def test_a_cv_still_over_two_pages_after_the_retry_is_trimmed_until_it_fits(tmp_
     monkeypatch.setattr(engine, "compile_tex", fake_compile)
     res = engine.tailor_job(_job(), 1, auto=True)
     assert res.pdf_path is not None
-    assert "auto-trimmed 2 project bullet(s) to fit two pages" in res.note
+    assert "auto-trimmed 2 project item(s) to fit two pages" in res.note
     assert len(compiles) == 4
     assert compiles[3].count(r"\resumeItem{") == compiles[1].count(r"\resumeItem{") - 2
 
@@ -327,7 +329,7 @@ def test_trimming_gives_up_after_the_cap_and_leaves_the_page_count_failure(tmp_p
     monkeypatch.setattr(engine, "compile_tex", always_three_pages)
     res = engine.tailor_job(_job(), 1, auto=True)
     assert res.pdf_path is None and "3 page(s)" in res.note and "auto-trimmed" not in res.note
-    assert len(compiles) == 2 + engine.MAX_AUTOTRIM          # attempt, retry, then the capped trims
+    assert 2 < len(compiles) <= 2 + engine.MAX_AUTOTRIM      # attempt, retry, then trims up to the cap or the floor
 
 
 def test_a_latex_error_is_never_trimmed(tmp_path, monkeypatch, no_llm):

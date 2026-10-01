@@ -419,13 +419,14 @@ def _compile_failure(out_dir: Path, name: str = "cv") -> tuple[str, str]:
     return "tailor_latex_error", f"LaTeX compile error -- see {name}.compile.log"
 
 
-MAX_AUTOTRIM = 4
+MAX_AUTOTRIM = 6
 
 
 def _trim_to_fit(tex: str, language: str, out_dir: Path, name: str) -> tuple[str, Path | None, int]:
     """Last resort for a CV still over two pages after the LLM's own retry: drop the
-    last bullet of the last multi-bullet project, recompile, up to MAX_AUTOTRIM times.
-    Returns (tex, pdf or None, bullets dropped). Never invents anything."""
+    last bullet of the last multi-bullet project (then the last project), recompile,
+    up to MAX_AUTOTRIM times. Returns (tex, pdf or None, steps taken). Never invents
+    anything."""
     trimmed = 0
     for _ in range(MAX_AUTOTRIM):
         smaller = snippet_bank.drop_last_project_bullet(tex, language)
@@ -498,7 +499,7 @@ def tailor_job(job: Job, job_id: int, auto: bool = False,
         if pdf is None and _compile_failure(out_dir, name)[0] == "tailor_page_count":
             tex, pdf, trimmed = _trim_to_fit(tex, language, out_dir, name)
             if pdf is not None:
-                notes.append(f"auto-trimmed {trimmed} project bullet(s) to fit two pages")
+                notes.append(f"auto-trimmed {trimmed} project item(s) to fit two pages")
 
     reason = note = ""
     if pdf is None:
