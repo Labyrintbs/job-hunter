@@ -197,7 +197,7 @@ linkedin:
       - "Normandie, France"
       - "Bourgogne-Franche-Comté, France"
       - "Centre-Val de Loire, France"
-    max_pages: 3
+    max_pages: 6
   # Second pass: location "Europe", f_WT=2 as a coarse noise-reducer only (it lets
   # non-remote postings through) -- real remote status is confirmed later from the
   # JD text (see match.detect_remote_from_text, pipeline.enrich_one).

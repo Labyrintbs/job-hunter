@@ -868,11 +868,12 @@ def check_duplicates(limit: int = 10) -> dict:
     todo.sort()
 
     checked = same = filtered = llm_calls = 0
+    quota_out = False
     for _, _, a, b, ov in todo:
         if ov >= dupes.SAME_OVERLAP:
             result = {"verdict": "same", "confidence": "high",
                       "reason": f"the descriptions are {ov:.0%} identical"}
-        elif llm_calls >= limit or not provider.available():
+        elif llm_calls >= limit or quota_out or not provider.available():
             continue
         else:
             llm_calls += 1
@@ -883,6 +884,7 @@ def check_duplicates(limit: int = 10) -> dict:
                 result = llm_dedup.compare(job_a, job_b)
             except Exception as exc:
                 print(f"  dedup warn: #{a} vs #{b} failed: {exc}")
+                quota_out = "session limit" in str(exc)    # the rest of this run would fail the same way
                 continue
         checked += 1
         with db.connect() as conn:

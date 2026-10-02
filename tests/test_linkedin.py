@@ -196,8 +196,9 @@ def test_region_pass_searches_each_region_with_its_own_queries_and_pages(monkeyp
         (["a", "b"], ["France"], 10), (["a"], ["Occitanie, France"], 3)]
 
 
-def test_wide_backfill_also_sweeps_the_regions(monkeypatch, tmp_db):
+def test_wide_backfill_also_sweeps_the_regions(monkeypatch, tmp_db, tmp_path):
     from jobhunter import pipeline
+    monkeypatch.setattr(pipeline, "BACKFILL_LOG_PATH", tmp_path / "backfill.log")
     calls = []
     monkeypatch.setattr(pipeline.linkedin, "fetch", lambda **kw: calls.append(kw) or [])
     monkeypatch.setattr(pipeline, "load_search_config", lambda: {"query": "q", "linkedin": {

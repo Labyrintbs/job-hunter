@@ -2047,3 +2047,22 @@ def test_the_letter_without_a_cv_follows_the_postings_language(tmp_db, config, m
     pipeline.cover_one(fr)
     pipeline.cover_one(en)
     assert seen == ["fr", "en"]
+
+
+def test_check_duplicates_stops_calling_the_llm_once_the_session_limit_is_hit(tmp_db, config, monkeypatch):
+    monkeypatch.setattr(pipeline.provider, "available", lambda: True)
+    monkeypatch.setattr(pipeline.dupes, "SAME_OVERLAP", 2.0)      # identical text still goes to the LLM
+    with db.connect() as conn:
+        _insert_dup_pair(conn, config)
+        for ext, title in (("o-a", "ML Engineer (H/F)"), ("o-b", "ML Engineer")):
+            _insert(conn, config, external_id=ext, company="OtherCo", title=title,
+                    location="Paris, Ile-de-France, France", description=_LONG_REAL_JD)
+    calls = []
+
+    def fake_compare(job_a, job_b):
+        calls.append(1)
+        raise RuntimeError("claude CLI failed (rc=1): You've hit your session limit")
+
+    monkeypatch.setattr(pipeline.llm_dedup, "compare", fake_compare)
+    assert pipeline.check_duplicates(limit=10) == {"checked": 0, "same": 0, "filtered": 0}
+    assert len(calls) == 1
