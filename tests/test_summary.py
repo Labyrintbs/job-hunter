@@ -187,3 +187,8 @@ def test_tailoring_puts_the_summary_above_education_and_keeps_the_tagline(monkey
     assert tex.index("hands-on LLM engineering experience") < tex.index("\\section{EDUCATION}")
     assert r"Acme \& Co" in tex
     assert tex.count("%SUMMARY-BEGIN") == 1
+
+
+def test_a_summary_naming_the_beijing_school_is_rejected_even_when_the_cv_contains_it():
+    text = _with("Graduated from École Centrale de Pékin.")
+    assert "Sorbonne" in summary.validate_summary(text, f"{CV_TEXT} Centrale Acme", "Acme")
