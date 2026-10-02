@@ -240,6 +240,33 @@ def test_it_gives_up_with_a_note_when_nothing_is_left_to_remove():
     assert res.status == "cannot_fit" and "could not fit two pages" in res.note
 
 
+def _assert_minimums(plan):
+    for line in plan.skills:
+        assert not line.trimmable or sum(line.keep) >= line.min_keep
+    assert all(e.kept_count() >= fit.MIN_EXP_BULLETS for e in plan.experiences)
+    shown = [e for e in plan.projects if e.kept]
+    assert len(shown) >= fit.MIN_PROJECTS and all(e.kept_count() >= fit.MIN_PROJECT_BULLETS for e in shown)
+
+
+def test_a_big_overflow_never_crosses_a_minimum_in_one_step():
+    # Regression: the cuts of one round were taken from a single snapshot, so a skills line
+    # (e.g. 'Python' alone) or a project could be emptied past its minimum.
+    plan = _plan(exp=(4, 4), projects=(4, 4, 4), skill_items=17)
+    res, _ = _run(plan, capacity=FakeCV().size(plan) * 0.35)
+    _assert_minimums(res.plan)
+    assert res.status == "cannot_fit"
+
+
+def test_a_skills_line_keeps_the_larger_of_three_items_and_forty_percent():
+    long_line = fit.SkillLine.build([f"i{k}" for k in range(17)], None)
+    short_line = fit.SkillLine.build(["a", "b", "c", "d", "e"], None)
+    assert long_line.min_keep == 7 and short_line.min_keep == 3
+    plan = fit.Plan([], [], [long_line])
+    while cuts := fit.removals(plan):
+        fit.apply_cut(plan, cuts[0])
+    assert sum(long_line.keep) == 7
+
+
 def test_the_compile_budget_is_respected():
     plan = _plan(exp=(5, 5), projects=(5, 5, 5), skill_items=10)
     res, cv = _run(plan, capacity=FakeCV().size(plan) * 0.4, max_compiles=1)

@@ -29,7 +29,8 @@ MAX_MODULES, MIN_MODULES = 4, 2
 MIN_PROJECTS = 2
 MIN_PROJECT_BULLETS = 1
 MIN_EXP_BULLETS = 2
-MIN_SKILL_ITEMS = 2
+MIN_SKILL_ITEMS = 3          # a skills line never drops below this many items...
+SKILL_KEEP_SHARE = 0.4       # ...or below this share of its items, whichever is more
 MODULE_LINES = 0.4
 
 MAX_COMPILES = 10
@@ -125,12 +126,14 @@ class SkillLine:
     scores: list[int]
     keep: list[bool]
     trimmable: bool = True
+    min_keep: int = MIN_SKILL_ITEMS
 
     @classmethod
     def build(cls, items: list[str], scores: list[int] | None, trimmable: bool = True) -> "SkillLine":
         scores = list(scores or [])[:len(items)]
         scores += [50] * (len(items) - len(scores))
-        return cls([plain_len(i) + 2 for i in items], scores, [True] * len(items), trimmable)
+        return cls([plain_len(i) + 2 for i in items], scores, [True] * len(items), trimmable,
+                   max(MIN_SKILL_ITEMS, math.ceil(SKILL_KEEP_SHARE * len(items))))
 
 
 @dataclass
@@ -145,7 +148,7 @@ class Plan:
             return Entry(e.lines, e.scores, list(e.keep), e.base_lines, e.kept)
 
         def skill(s):
-            return SkillLine(s.chars, s.scores, list(s.keep), s.trimmable)
+            return SkillLine(s.chars, s.scores, list(s.keep), s.trimmable, s.min_keep)
         return Plan([entry(e) for e in self.experiences], [entry(e) for e in self.projects],
                     [skill(s) for s in self.skills], self.modules)
 
@@ -179,7 +182,7 @@ def removals(plan: Plan) -> list[Cut]:
     if plan.modules > MIN_MODULES:
         cuts.append(Cut("module", eff=MODULE_EFF, lines=MODULE_LINES))
     for i, line in enumerate(plan.skills):
-        if line.trimmable and sum(line.keep) > MIN_SKILL_ITEMS:
+        if line.trimmable and sum(line.keep) > line.min_keep:
             cuts += [Cut("skill", i, j, line.scores[j] + PROTECT["skill"], line.chars[j] / SKILL_CHARS_PER_LINE)
                      for j, k in enumerate(line.keep) if k]
     for i, e in enumerate(plan.experiences):
@@ -297,17 +300,17 @@ def fit(plan: Plan, render: Callable[[Plan], str], compile_: Callable[[str], Pat
         if layout.pages > 2:
             need = layout.overflow_lines() + 0.5
             cuts, freed = [], 0.0
-            for c in removals(cur):
-                cuts.append(c)
-                freed += c.lines
-                if freed >= need:
+            while freed < need and compiles < max_compiles:
+                options = removals(cur)       # recomputed after every cut, so no minimum is ever crossed
+                if not options:
                     break
+                cuts.append(options[0])
+                freed += options[0].lines
+                apply_cut(cur, options[0])
             if not cuts or compiles >= max_compiles:
                 log.append(f"could not fit: {layout.pages} pages, {layout.overflow_lines()} line(s) over")
                 return FitResult("cannot_fit", cur, tex, layout, compiles, log,
                                  f"could not fit two pages ({layout.pages} pages); needs a manual pass")
-            for c in cuts:
-                apply_cut(cur, c)
             log.append(f"over by {layout.overflow_lines()} line(s) on page 3+; removed: "
                        + "; ".join(describe(c) for c in cuts))
         else:
