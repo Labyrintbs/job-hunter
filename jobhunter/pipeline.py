@@ -687,6 +687,16 @@ def backfill_linkedin_wide(force: bool = False) -> dict:
             max_retries=li.get("max_retries", 3),
             backoff_base=li.get("backoff_seconds", 2.0),
         )
+        rg = li.get("regions") or {}
+        if rg.get("enabled"):
+            jobs += linkedin.fetch(
+                queries=rg.get("queries") or queries,
+                locations=rg.get("locations") or [],
+                max_pages=rg.get("max_pages", 3),
+                recent_hours=bf.get("wide_recent_hours", 720),
+                max_retries=li.get("max_retries", 3),
+                backoff_base=li.get("backoff_seconds", 2.0),
+            )
 
     with db.connect() as conn:
         kept = _persist_jobs(conn, config, jobs)

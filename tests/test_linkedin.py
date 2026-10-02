@@ -194,3 +194,15 @@ def test_region_pass_searches_each_region_with_its_own_queries_and_pages(monkeyp
     pipeline._fetch_linkedin(cfg)
     assert [(c["queries"], c["locations"], c["max_pages"]) for c in calls] == [
         (["a", "b"], ["France"], 10), (["a"], ["Occitanie, France"], 3)]
+
+
+def test_wide_backfill_also_sweeps_the_regions(monkeypatch, tmp_db):
+    from jobhunter import pipeline
+    calls = []
+    monkeypatch.setattr(pipeline.linkedin, "fetch", lambda **kw: calls.append(kw) or [])
+    monkeypatch.setattr(pipeline, "load_search_config", lambda: {"query": "q", "linkedin": {
+        "enabled": True, "queries": ["a"], "locations": ["France"],
+        "regions": {"enabled": True, "queries": ["a"], "locations": ["Occitanie, France"]}}})
+    pipeline.backfill_linkedin_wide(force=True)
+    assert [c["locations"] for c in calls] == [["France"], ["Occitanie, France"]]
+    assert all(c["recent_hours"] == 720 for c in calls)
