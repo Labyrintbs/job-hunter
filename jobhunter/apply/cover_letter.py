@@ -17,7 +17,7 @@ _LANGUAGE = {
 }
 
 SYSTEM = (
-    "You write cover letters for a junior ML engineer applying to roles in the Paris area, "
+    "You write cover letters for a junior ML engineer applying to roles in France, "
     "following these rules exactly (from templates/cv_tailoring_workflow.md Step 5):\n\n"
     "- Four or five paragraphs, written in {language}.\n"
     "- Open with the most specific connection between the candidate's background and this "
@@ -29,7 +29,8 @@ SYSTEM = (
     "the number.\n"
     "- If the posting has an obvious requirement the profile doesn't meet, name that gap "
     "honestly instead of hiding it.\n"
-    "- Close with availability (available immediately, Paris) and what specifically draws "
+    "- Close with availability (available immediately; based in Paris, and when the job is "
+    "in another French city, open to relocating there) and what specifically draws "
     "the candidate to this company, not a generic closing line.\n"
     "- No em-dashes or en-dashes as sentence connectors, use commas, semicolons, or separate "
     "sentences. Ground every claim in the candidate's real profile below; never invent "
@@ -43,6 +44,7 @@ PROMPT = """CANDIDATE PROFILE:
 JOB POSTING:
 Title: {title}
 Company: {company}
+Location: {location}
 Description:
 {description}
 {judge_block}
@@ -78,6 +80,7 @@ def draft(job: Job, judge_context: str | None = None, cv_text: str | None = None
         profile=profile,
         title=job.title,
         company=job.company,
+        location=job.location or "not stated",
         # 16000 matches judge.py/select.py/enrich.py's cap -- the full stored JD.
         description=(job.description or "")[:16000],
         judge_block=judge_block,

@@ -215,6 +215,7 @@ def _gather(config: dict, force: bool = False) -> list:
             counts[name] = len(got)
             jobs += got
             db.record_source_fetch(conn, name, len(got))
+            conn.commit()    # don't hold the write lock through the next (slow) source
         tracker.flush(conn)
     print(f"  fetched by source: {counts}")
     return jobs
