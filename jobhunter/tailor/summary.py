@@ -54,6 +54,8 @@ _SPELLED_NUMBER = {
 }
 MAX_WORDS_FR = 64          # French runs a few words longer for the same content
 LANGUAGE_REASON = "tailor_language_mismatch"
+# The more recent, better-known school is the one the summary names.
+_OLD_SCHOOL = re.compile(r"\b(?:centrale|beihang|buaa)\b", re.I)
 _DASHES = re.compile(r"[—–]| - ")
 # A standalone figure ("40.8%", "17"); names like "3D" or "Qwen3.5-4B" don't match.
 _FIGURE = re.compile(r"(?<![\w.])\d+(?:[.,]\d+)?%?(?![\w])")
@@ -182,6 +184,8 @@ def validate_summary(text: object, allowed_text: str, company: str = "", lang: s
         return "hype word"
     if _DASHES.search(s):
         return "dash"
+    if _OLD_SCHOOL.search(s):
+        return "names the Beijing school; name Sorbonne University instead"
     allowed, low = allowed_text.lower(), s.lower()
     for tool in _UNCLAIMED_TOOLS:
         if _has(tool, low) and not _has(tool, allowed):
@@ -224,7 +228,8 @@ _SYSTEM = (
     "employer, number, degree or achievement that is not there, never stretch a claim to fit "
     "the posting, and skip CV material that is not relevant to it. The candidate is a junior "
     "engineer: never call them senior, seasoned, experienced for years, or an expert, and use "
-    "the past tense for internships that have ended. No first person, no dashes "
+    "the past tense for internships that have ended. When the education is mentioned, name "
+    "only Sorbonne University (the master), never École Centrale de Pékin or Beihang. No first person, no dashes "
     "as connectors, no words like passionate, excited or motivated, no figures, percentages or "
     "counts (names such as 3D are fine). Do not repeat the CV's bullet wording line by "
     "line; write it as one fluent paragraph."
