@@ -752,7 +752,7 @@ def list_jobs(conn: sqlite3.Connection, status: str | None = None, min_score: in
     elif interested is False:
         sql += " AND COALESCE(j.user_label, '') != 'interested'"
     if status:
-        sql += " AND a.status = ?"
+        sql += f" AND a.status = ? AND NOT {_HIDDEN_OPEN_COPY}"
         params.append(status)
     elif exclude_statuses:
         marks = ",".join("?" for _ in exclude_statuses)
@@ -1199,9 +1199,17 @@ def false_negative_stats(conn: sqlite3.Connection) -> dict:
     }
 
 
+# Copies hidden as duplicates that you never acted on: not worth a status pill or count.
+_HIDDEN_OPEN_COPY = (
+    "(COALESCE(j.filtered, 0) = 1 AND a.status IN ('new', 'shortlisted', 'cv_ready') "
+    "AND (j.filter_reason LIKE 'duplicate of #%' OR j.filter_reason LIKE 'llm dedup%'))"
+)
+
+
 def status_counts(conn: sqlite3.Connection) -> dict[str, int]:
     rows = conn.execute(
-        "SELECT status, COUNT(*) AS n FROM applications GROUP BY status"
+        "SELECT a.status, COUNT(*) AS n FROM applications a JOIN jobs j ON j.id = a.job_id "
+        f"WHERE NOT {_HIDDEN_OPEN_COPY} GROUP BY a.status"
     ).fetchall()
     return {r["status"]: r["n"] for r in rows}
 
