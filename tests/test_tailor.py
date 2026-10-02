@@ -351,6 +351,65 @@ def test_page_layout_parses_pdftotext_bbox_output(tmp_path, monkeypatch):
     assert layout.pages == 1 and layout.line_counts == [2] and layout.bottoms == [63.0]
 
 
+def _counting_llm(monkeypatch):
+    """LLM selection and summary succeed and count how often they are asked."""
+    monkeypatch.setattr(engine.provider, "available", lambda: True)
+    calls = {"select": 0, "summary": 0}
+
+    def select(job, e, p, s, judge_context=None):
+        calls["select"] += 1
+        return {"experience_ids": [0, 1], "experience_scores": [[90, 40, 70, 60], [50, 50, 50]],
+                "project_ids": [0, 1, 2], "project_scores": [[], [], []],
+                "extra_project_ids": [3], "extra_project_scores": [[]],
+                "skill_scores": [], "reasoning": "r"}
+
+    def summary_text(*a, **k):
+        calls["summary"] += 1
+        return ("Machine Learning Engineer with hands-on LLM engineering experience from a recent internship "
+                "in Paris, building agentic pipelines and evaluation tooling. Applying this to the ML role at Acme.")
+
+    monkeypatch.setattr(engine.llm_select, "select", select)
+    monkeypatch.setattr(engine.summary, "generate_summary", summary_text)
+    return calls
+
+
+def test_a_tailoring_saves_its_llm_answer_and_summary_and_a_refit_reuses_them(tmp_path, monkeypatch):
+    monkeypatch.setattr(engine, "CV_OUT_DIR", tmp_path)
+    monkeypatch.setattr(engine, "compile_tex", _writing_compile)
+    _two_page_layout(monkeypatch)
+    calls = _counting_llm(monkeypatch)
+    job = Job(source="x", external_id="1", title="ML Engineer", company="Acme", description="machine learning")
+
+    first = engine.tailor_job(job, 1, auto=True, role_category="AI")
+    plan = engine.load_plan(first.tex_path)
+
+    asked = dict(calls)
+    assert asked["select"] == 1 and asked["summary"] >= 1
+    assert plan["language"] == "en" and plan["role_category"] == "AI"
+    assert plan["selection"]["experience_scores"][0] == [90, 40, 70, 60]
+    saved_summary = plan["summary"]["text"]
+    assert saved_summary and saved_summary in first.tex_path.read_text()
+
+    again = engine.tailor_job(job, 1, auto=True, role_category="AI", language=plan["language"], stored=plan)
+
+    assert calls == asked                                           # no new LLM call at all
+    assert again.tex_path != first.tex_path and again.pdf_path is not None
+    assert saved_summary in again.tex_path.read_text()               # the same summary is in the new CV
+
+
+def test_a_cv_made_by_the_keyword_fallback_has_no_plan_to_reuse(tmp_path, monkeypatch):
+    monkeypatch.setattr(engine, "CV_OUT_DIR", tmp_path)
+    monkeypatch.setattr(engine, "compile_tex", _writing_compile)
+    _two_page_layout(monkeypatch)
+    _no_llm(monkeypatch)
+    job = Job(source="x", external_id="1", title="ML Engineer", company="Acme", description="machine learning")
+
+    result = engine.tailor_job(job, 1, auto=True)
+
+    assert result.fallback and engine.load_plan(result.tex_path) is None
+    assert engine.load_plan(tmp_path / "missing.tex") is None
+
+
 def _llm_ok(monkeypatch):
     """LLM block selection succeeds with a minimal valid pick, so no keyword fallback."""
     monkeypatch.setattr(engine.provider, "available", lambda: True)

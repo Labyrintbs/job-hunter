@@ -1,6 +1,7 @@
 """Tailor the base CV to a job and compile it to PDF."""
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -101,6 +102,7 @@ class Selection(NamedTuple):
     skills: list[SkillCategory]
     plan: fit.Plan
     used_fallback: bool
+    raw: dict | None = None     # the LLM's answer, kept so a refit needs no new call
 
 
 def _keyword_bullet_scores(text: str, terms: set[str]) -> int:
@@ -141,22 +143,23 @@ def _plan_for(experiences, projects, skills, lang: str) -> fit.Plan:
 
 
 def _select_blocks(job: Job, parsed: ParsedCV, terms: set[str],
-                   judge_context: str | None = None) -> Selection:
+                   judge_context: str | None = None, stored: dict | None = None) -> Selection:
     """Decide which experiences/projects to keep and score every bullet and skills item,
     mirroring templates/cv_tailoring_workflow.md: an LLM call chooses from the real,
     existing content (see tailor/select.py), falling back to deterministic keyword
     scores if the LLM backend is unavailable or its response is unusable, so tailoring
     never hard-fails just because that call did. How much of it fits is decided later,
     by measuring (tailor/fit.py). `judge_context` (optional) is the fit-judge's own
-    verdict/reasons for this posting, already computed and stored. Each fallback is
-    recorded via fetch_diag under a `tailor_llm_*` reason."""
+    verdict/reasons for this posting, already computed and stored. `stored` is an earlier
+    LLM answer to reuse instead of asking again (a refit). Each fallback is recorded via
+    fetch_diag under a `tailor_llm_*` reason."""
     lang = parsed.lang
     conditional = _CONDITIONAL_SKILL_CATEGORY[lang]
     menu_cats = [c for c in parsed.skills if c.name != _FIXED_SKILL_CATEGORY[lang]]
     reason, detail = "tailor_llm_unavailable", "no LLM backend"
-    if provider.available():
+    if stored is not None or provider.available():
         try:
-            result = llm_select.select(
+            result = stored if stored is not None else llm_select.select(
                 job,
                 _menu_pairs(parsed.experiences),
                 _menu_pairs(parsed.projects),
@@ -182,7 +185,7 @@ def _select_blocks(job: Job, parsed: ParsedCV, terms: set[str],
                         continue
                     skills.append((c, scores))
                 return Selection([b for b, _ in exps], [b for b, _, _ in projs], [c for c, _ in skills],
-                                 _plan_for(exps, projs, skills, lang), False)
+                                 _plan_for(exps, projs, skills, lang), False, result)
             reason, detail = "tailor_llm_unusable", "LLM selection was empty or incomplete"
         except Exception as exc:
             reason, detail = "tailor_llm_error", f"{type(exc).__name__}: {exc}"[:200]
@@ -283,12 +286,34 @@ class Draft(NamedTuple):
 
 def _draft(job: Job, parsed: ParsedCV | None = None, judge_context: str | None = None,
            role_category: str = "", language: str = "en",
-           summ: summary.Summary | None = None) -> Draft:
+           summ: summary.Summary | None = None, stored: dict | None = None) -> Draft:
     """`language` picks the master CV ("en" or "fr"); an already parsed CV carries its
-    own. `summ` reuses an already written summary (it doesn't depend on the selection)."""
+    own. `summ` reuses an already written summary (it doesn't depend on the selection).
+    `stored` is a saved plan (see _plan_record): its LLM answer and summary are reused, so
+    no LLM call is made."""
     parsed = parsed or snippet_bank.parse(base_cv_path(language), language)
-    selection = _select_blocks(job, parsed, _job_terms(job), judge_context=judge_context)
+    if stored:
+        summ = summ or summary.Summary(**stored["summary"])
+    selection = _select_blocks(job, parsed, _job_terms(job), judge_context=judge_context,
+                               stored=stored["selection"] if stored else None)
     return Draft(job, parsed, selection, summ or _write_summary(job, role_category, parsed), role_category)
+
+
+def _plan_record(draft: Draft, language: str) -> dict:
+    """What a later refit needs to rebuild this CV without an LLM call."""
+    return {"language": language, "role_category": draft.role_category,
+            "selection": draft.selection.raw, "summary": dict(draft.summ._asdict())}
+
+
+def load_plan(tex_path: str | Path) -> dict | None:
+    """The saved plan next to a CV version, or None when there is none or it is unusable
+    (no LLM answer was kept because the keyword fallback made that CV)."""
+    path = Path(tex_path).with_suffix(".plan.json")
+    try:
+        plan = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return plan if isinstance(plan, dict) and plan.get("selection") and plan.get("summary") else None
 
 
 _LATEX_COMMAND = re.compile(r"\\[A-Za-z]+\*?|[{}\\$]|%[^\n]*")
@@ -477,7 +502,7 @@ def _publish_latest(out_dir: Path, name: str) -> None:
 
 def tailor_job(job: Job, job_id: int, auto: bool = False,
               judge_context: str | None = None, role_category: str = "",
-              language: str | None = None) -> TailorResult:
+              language: str | None = None, stored: dict | None = None) -> TailorResult:
     """Generate + compile a tailored CV for a job. Returns a TailorResult; a failed
     compile, or a still-sparse second page after the retry, sets `note` and is
     recorded via fetch_diag under a `tailor_*` reason.
@@ -500,8 +525,12 @@ def tailor_job(job: Job, job_id: int, auto: bool = False,
     name = f"cv-{_version_stamp()}"
 
     language = language or job_language(job.title, job.description, job.language)
-    draft = _draft(job, judge_context=judge_context, role_category=role_category, language=language)
+    draft = _draft(job, judge_context=judge_context, role_category=role_category, language=language,
+                   stored=stored)
     used_fallback, notes = draft.selection.used_fallback, draft.notes
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / f"{name}.plan.json").write_text(
+        json.dumps(_plan_record(draft, language), ensure_ascii=False, indent=1), encoding="utf-8")
     fitted = _fit_cv(draft, out_dir, name)
     if fitted.status == "unmeasured":
         fetch_diag.track("tailor", "tailor_fit_unmeasured", detail="could not read the page layout", company=job.company)

@@ -10,7 +10,7 @@ from .llm import provider
 from .notify import dispatch as notify_dispatch
 from .pipeline import (backfill_languages, cover_one, daily_run, enrich_one, enrich_pending, import_revised_cv,
                        judge_all, judge_one, process_backlog, rejudge_category, rejudge_juniors,
-                       repair_duplicates, rescreen_all, run_backfill, run_fetch, tailor_one)
+                       refit_one, repair_duplicates, rescreen_all, run_backfill, run_fetch, tailor_one)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -102,6 +102,11 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("languages", help="one-off catch-up: set each job's French/English language "
                                      "from its own text (source labels are unreliable)")
+
+    p_refit = sub.add_parser("refit", help="rebuild CVs from the LLM answer saved with each (no LLM call), "
+                             "e.g. after a change to the fit rules or the layout")
+    p_refit.add_argument("job_ids", type=int, nargs="*")
+    p_refit.add_argument("--all", action="store_true", help="every visible cv_ready job")
 
     p_dedup_repair = sub.add_parser("dedup-repair", help="one-off: un-hide jobs you acted on that the old "
                                     "duplicate rule hid, and hide open copies of known duplicates "
@@ -298,6 +303,23 @@ def main(argv: list[str] | None = None) -> int:
         summary = backfill_languages()
         print(f"checked={summary['checked']} newly_set={summary['newly_set']} "
               f"label_overridden={summary['label_overridden']}")
+        return 0
+
+    if args.command == "refit":
+        ids = list(args.job_ids)
+        if args.all:
+            with db.connect() as conn:
+                ids = [r["id"] for r in db.list_jobs(conn, status="cv_ready", min_score=0)]
+        done = skipped = 0
+        for jid in ids:
+            result = refit_one(jid)
+            if result.get("skipped") or result.get("error"):
+                skipped += 1
+                print(f"  #{jid}: skipped ({result.get('skipped') or result.get('error')})")
+            else:
+                done += 1
+                print(f"  #{jid}: {'ok' if result['compiled'] else 'compile failed'} {result['note']}".rstrip())
+        print(f"refitted={done} skipped={skipped}")
         return 0
 
     if args.command == "dedup-repair":

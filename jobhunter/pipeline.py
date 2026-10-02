@@ -1332,6 +1332,27 @@ def tailor_one(job_id: int, auto: bool = False, language: str | None = None) -> 
         return _tailor_and_record(job_id, auto, row, job, language)
 
 
+def refit_one(job_id: int) -> dict:
+    """Rebuild a job's newest CV from the LLM answer and summary saved with it (no LLM call):
+    the way to apply a changed fit rule or layout to an existing CV. A CV made by the keyword
+    fallback, or before plans were saved, has nothing to reuse and is skipped."""
+    db.init_db()
+    with db.connect() as conn:
+        row = db.get_job(conn, job_id)
+        if not row:
+            return {"job_id": job_id, "error": "not found"}
+        job = db.job_from_row(row)
+        latest = next((a for a in db.list_cv_artifacts(conn, job_id) if a["pdf_path"] and a["tex_path"]), None)
+        plan = cv_engine.load_plan(latest["tex_path"]) if latest and latest["origin"] == "ai" else None
+    if plan is None:
+        return {"job_id": job_id, "skipped": "no saved selection to reuse"}
+    out_dir = cv_engine.CV_OUT_DIR / f"{job_id}-{cv_engine._slug(job.company)}"
+    with _tailor_lock(out_dir) as acquired:
+        if not acquired:
+            return {"job_id": job_id, "skipped": "another run is already tailoring this job"}
+        return _tailor_and_record(job_id, True, row, job, plan["language"], stored=plan)
+
+
 @contextmanager
 def _tailor_lock(out_dir: Path):
     """Non-blocking per-job file lock (yields whether it was acquired), so the daily
@@ -1349,11 +1370,13 @@ def _tailor_lock(out_dir: Path):
             fcntl.flock(lock_file, fcntl.LOCK_UN)
 
 
-def _tailor_and_record(job_id: int, auto: bool, row, job, language: str | None = None) -> dict:
+def _tailor_and_record(job_id: int, auto: bool, row, job, language: str | None = None,
+                       stored: dict | None = None) -> dict:
+    extra = {"stored": stored} if stored else {}
     with fetch_diag.run_tracking() as tracker:
         result = cv_engine.tailor_job(
             job, job_id, auto=auto, judge_context=_judge_context(row),
-            role_category=row["role_category"] or "", language=language)
+            role_category=row["role_category"] or "", language=language, **extra)
     tex_path, pdf_path, note = result.tex_path, result.pdf_path, result.note
 
     with db.connect() as conn:

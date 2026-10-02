@@ -1361,6 +1361,45 @@ def test_repair_restores_copies_hidden_when_the_original_was_hidden_too_and_keep
         assert db.get_job(conn, manual)["filtered"] == 1
 
 
+def test_refit_one_rebuilds_the_newest_cv_from_its_saved_plan_without_asking_the_llm(tmp_db, config, tmp_path, monkeypatch):
+    with db.connect() as conn:
+        jid = _insert(conn, config, description=_REAL_JD)
+    tex = tmp_path / "cv-old.tex"
+    tex.write_text("x")
+    tex.with_suffix(".plan.json").write_text(
+        '{"language": "fr", "role_category": "AI", "selection": {"experience_ids": [0]}, '
+        '"summary": {"text": "t", "reason": "", "detail": ""}}')
+    with db.connect() as conn:
+        db.add_cv_artifact(conn, jid, str(tex), str(tmp_path / "cv-old.pdf"), origin="ai", lang="fr")
+    seen = {}
+
+    def fake_tailor_job(job, job_id, auto=False, judge_context=None, role_category="", language=None, stored=None):
+        seen.update(language=language, stored=stored, auto=auto)
+        return _fake_tailor_job(tmp_path)(job, job_id, auto=auto)
+    monkeypatch.setattr(pipeline.cv_engine, "tailor_job", fake_tailor_job)
+
+    result = pipeline.refit_one(jid)
+
+    assert result["compiled"] and seen["language"] == "fr" and seen["auto"] is True
+    assert seen["stored"]["selection"] == {"experience_ids": [0]}
+
+
+def test_refit_one_skips_a_job_without_a_saved_plan_or_with_a_hand_revised_cv(tmp_db, config, tmp_path):
+    with db.connect() as conn:
+        bare = _insert(conn, config, external_id="bare", description=_REAL_JD)
+        revised = _insert(conn, config, external_id="rev", company="Other", description=_REAL_JD)
+        tex = tmp_path / "cv-x.tex"
+        tex.write_text("x")
+        db.add_cv_artifact(conn, bare, str(tex), str(tmp_path / "cv-x.pdf"), origin="ai")
+        tex.with_suffix(".plan.json").write_text('{"selection": {"a": 1}, "summary": {"text": "t"}}')
+        db.add_cv_artifact(conn, revised, str(tex), str(tmp_path / "rev.pdf"), origin="revised")
+        tex.with_suffix(".plan.json").unlink()
+
+    assert "no saved selection" in pipeline.refit_one(bare)["skipped"]
+    assert "no saved selection" in pipeline.refit_one(revised)["skipped"]
+    assert pipeline.refit_one(999999) == {"job_id": 999999, "error": "not found"}
+
+
 def test_process_backlog_settles_duplicates_before_it_tailors(tmp_db, config, monkeypatch):
     monkeypatch.setattr(pipeline.provider, "available", lambda: True)
     order = []
@@ -1430,7 +1469,7 @@ def _fake_tailor_job(tmp_path, note=""):
     """A tailor_job stand-in that writes real versioned files, like the engine does."""
     calls = []
 
-    def fake(job, job_id, auto=False, judge_context=None, role_category="", language=None):
+    def fake(job, job_id, auto=False, judge_context=None, role_category="", language=None, stored=None):
         stamp = f"v{len(calls)}"
         tex, pdf = tmp_path / f"cv-{stamp}.tex", tmp_path / f"cv-{stamp}.pdf"
         tex.write_text("tex"); pdf.write_bytes(b"%PDF")
