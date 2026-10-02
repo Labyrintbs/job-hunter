@@ -23,7 +23,7 @@ BOTTOM_MARGIN_PT = 36         # 0.5in bottom margin in both masters
 
 # Added to a score: work-experience bullets are removed only after everything else is gone
 # (100 outweighs any score), projects outlast skills items. Major Modules always go first.
-PROTECT = {"skill": 0, "project_bullet": 20, "project": 30, "exp_bullet": 100}
+PROTECT = {"skill": 0, "main_skill": 40, "project_bullet": 20, "project": 30, "exp_bullet": 100}
 MODULE_EFF = -20
 MAX_MODULES, MIN_MODULES = 4, 2
 MIN_PROJECTS = 2
@@ -31,6 +31,7 @@ MIN_PROJECT_BULLETS = 1
 MIN_EXP_BULLETS = 2
 MIN_SKILL_ITEMS = 3          # a skills line never drops below this many items...
 SKILL_KEEP_SHARE = 0.4       # ...or below this share of its items, whichever is more
+MIN_GROUP_ITEMS = 3          # ...and each ';' group in it keeps this many (or all it has if fewer)
 MODULE_LINES = 0.4
 
 MAX_COMPILES = 10
@@ -127,13 +128,32 @@ class SkillLine:
     keep: list[bool]
     trimmable: bool = True
     min_keep: int = MIN_SKILL_ITEMS
+    groups: list[int] = field(default_factory=list)     # which ';' group each item belongs to
+    main: bool = False                                  # the Technical Skills line: trimmed last
 
     @classmethod
-    def build(cls, items: list[str], scores: list[int] | None, trimmable: bool = True) -> "SkillLine":
+    def build(cls, items: list[str], scores: list[int] | None, trimmable: bool = True,
+              seps: list[str] | None = None, main: bool = False) -> "SkillLine":
         scores = list(scores or [])[:len(items)]
         scores += [50] * (len(items) - len(scores))
+        groups, g = [], 0
+        for i in range(len(items)):
+            if seps and i and seps[i].strip() == ";":
+                g += 1
+            groups.append(g)
         return cls([plain_len(i) + 2 for i in items], scores, [True] * len(items), trimmable,
-                   max(MIN_SKILL_ITEMS, math.ceil(SKILL_KEEP_SHARE * len(items))))
+                   max(MIN_SKILL_ITEMS, math.ceil(SKILL_KEEP_SHARE * len(items))), groups, main)
+
+    def removable(self, j: int) -> bool:
+        """Item j may go: the line keeps its minimum and so does the item's own group."""
+        if not (self.trimmable and self.keep[j] and sum(self.keep) > self.min_keep):
+            return False
+        groups = self.groups or [0] * len(self.keep)
+        mates = [k for k, g in enumerate(groups) if g == groups[j]]
+        return sum(self.keep[k] for k in mates) > min(len(mates), MIN_GROUP_ITEMS)
+
+    def eff(self, j: int) -> float:
+        return self.scores[j] + PROTECT["main_skill" if self.main else "skill"]
 
 
 @dataclass
@@ -148,7 +168,7 @@ class Plan:
             return Entry(e.lines, e.scores, list(e.keep), e.base_lines, e.kept)
 
         def skill(s):
-            return SkillLine(s.chars, s.scores, list(s.keep), s.trimmable, s.min_keep)
+            return SkillLine(s.chars, s.scores, list(s.keep), s.trimmable, s.min_keep, s.groups, s.main)
         return Plan([entry(e) for e in self.experiences], [entry(e) for e in self.projects],
                     [skill(s) for s in self.skills], self.modules)
 
@@ -182,9 +202,8 @@ def removals(plan: Plan) -> list[Cut]:
     if plan.modules > MIN_MODULES:
         cuts.append(Cut("module", eff=MODULE_EFF, lines=MODULE_LINES))
     for i, line in enumerate(plan.skills):
-        if line.trimmable and sum(line.keep) > line.min_keep:
-            cuts += [Cut("skill", i, j, line.scores[j] + PROTECT["skill"], line.chars[j] / SKILL_CHARS_PER_LINE)
-                     for j, k in enumerate(line.keep) if k]
+        cuts += [Cut("skill", i, j, line.eff(j), line.chars[j] / SKILL_CHARS_PER_LINE)
+                 for j in range(len(line.keep)) if line.removable(j)]
     for i, e in enumerate(plan.experiences):
         if e.kept and e.kept_count() > MIN_EXP_BULLETS:
             cuts += [Cut("exp_bullet", i, j, e.scores[j] + PROTECT["exp_bullet"], e.lines[j])
@@ -206,7 +225,7 @@ def additions(plan: Plan) -> list[Cut]:
     if plan.modules < MAX_MODULES:
         cuts.append(Cut("module", eff=MODULE_EFF, lines=MODULE_LINES))
     for i, line in enumerate(plan.skills):
-        cuts += [Cut("skill", i, j, line.scores[j] + PROTECT["skill"], line.chars[j] / SKILL_CHARS_PER_LINE)
+        cuts += [Cut("skill", i, j, line.eff(j), line.chars[j] / SKILL_CHARS_PER_LINE)
                  for j, k in enumerate(line.keep) if not k]
     for kind, entries in (("exp_bullet", plan.experiences), ("project_bullet", plan.projects)):
         for i, e in enumerate(entries):

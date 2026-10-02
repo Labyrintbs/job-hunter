@@ -267,6 +267,39 @@ def test_a_skills_line_keeps_the_larger_of_three_items_and_forty_percent():
     assert sum(long_line.keep) == 7
 
 
+TECH = ["Python", "C/C++", "PyTorch", "NumPy", "pandas", "scikit-learn", "OpenCV", "Open3D",
+        "FastAPI", "SQLite", "Pydantic", "API REST", "pytest", "Linux", "Git", "GitLab CI/CD", "Docker"]
+TECH_SEPS = ["", ", ", "; ", ", ", ", ", ", ", ", ", ", ", "; ", ", ", ", ", ", ", ", ", "; ", ", ", ", ", ", "]
+
+
+def test_each_group_of_the_technical_skills_line_keeps_three_items_or_all_it_has():
+    line = fit.SkillLine.build(TECH, None, seps=TECH_SEPS, main=True)
+    assert sorted(set(line.groups)) == [0, 1, 2, 3] and line.groups[:2] == [0, 0]
+    plan = fit.Plan([], [], [line])
+    while cuts := fit.removals(plan):
+        fit.apply_cut(plan, cuts[0])
+    kept = {g: sum(k for k, gg in zip(line.keep, line.groups) if gg == g) for g in range(4)}
+    assert kept == {0: 2, 1: 3, 2: 3, 3: 3}                  # 'Python, C/C++' has only two; the rest keep three
+
+
+def test_the_lowest_scored_items_of_a_group_go_first_and_the_best_three_stay():
+    scores = [90, 80, 95, 50, 10, 85, 20, 30, 70, 60, 40, 30, 20, 90, 80, 70, 60]
+    line = fit.SkillLine.build(TECH, scores, seps=TECH_SEPS, main=True)
+    plan = fit.Plan([], [], [line])
+    while cuts := fit.removals(plan):
+        fit.apply_cut(plan, cuts[0])
+    kept_deep = [TECH[j] for j in range(2, 8) if line.keep[j]]
+    assert sorted(kept_deep) == sorted(["PyTorch", "NumPy", "scikit-learn"])         # the three best of the six
+
+
+def test_the_technical_skills_line_is_trimmed_after_the_other_skills_lines():
+    main = fit.SkillLine.build(TECH, [20] * 17, seps=TECH_SEPS, main=True)
+    other = fit.SkillLine.build(["a", "b", "c", "d", "e", "f", "g", "h"], [60] * 8)
+    plan = fit.Plan([], [], [main, other])
+    first = [c for c in fit.removals(plan) if c.kind == "skill"][:5]
+    assert all(c.a == 1 for c in first)              # a lower-scored item of the main line still goes later
+
+
 def test_the_compile_budget_is_respected():
     plan = _plan(exp=(5, 5), projects=(5, 5, 5), skill_items=10)
     res, cv = _run(plan, capacity=FakeCV().size(plan) * 0.4, max_compiles=1)

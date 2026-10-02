@@ -134,7 +134,9 @@ def _plan_for(experiences, projects, skills, lang: str) -> fit.Plan:
     for cat, scores in skills:
         parts = snippet_bank.split_skill_items(cat.line)
         fixed = cat.name == _FIXED_SKILL_CATEGORY[lang] or parts is None
-        lines.append(fit.SkillLine.build(parts.items if parts else [], scores, trimmable=not fixed))
+        main = not lines and not fixed            # the first skills line (Technical Skills) matters most
+        lines.append(fit.SkillLine.build(parts.items if parts else [], scores, trimmable=not fixed,
+                                         seps=parts.seps if parts else None, main=main))
     return fit.Plan([entry(b, s) for b, s in experiences], [entry(b, s, k) for b, s, k in projects], lines)
 
 
