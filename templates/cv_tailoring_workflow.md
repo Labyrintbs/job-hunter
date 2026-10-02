@@ -144,7 +144,7 @@ Build the middle around one or two concrete stories with numbers, not a list of 
 
 Name a real gap if the JD has an obvious requirement I don't meet, and frame it honestly rather than hiding it. This has consistently felt better than pretending.
 
-Close with availability (available immediately, Paris) and what specifically draws me to this company.
+Close with availability (available immediately; based in Paris, and open to relocating when the job is in another French city) and what specifically draws me to this company.
 
 Same no-dashes rule. Don't overclaim, don't inflate internships into full-time roles.
 

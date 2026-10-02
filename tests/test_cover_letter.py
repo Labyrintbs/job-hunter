@@ -120,3 +120,14 @@ def test_a_correct_first_draft_costs_one_call(monkeypatch, tmp_path):
     monkeypatch.setattr(CL.provider, "generate", lambda prompt, **kw: calls.append(1) or FR_LETTER)
     CL.draft_to_file(_job(), tmp_path, language="fr")
     assert len(calls) == 1
+
+
+def test_the_letter_prompt_carries_the_job_location_and_the_relocation_closing(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(CL.provider, "generate",
+                        lambda prompt, system=None, **kw: seen.update(prompt=prompt, system=system) or "x")
+    job = Job(source="wttj", external_id="2", title="ML Engineer", company="Acme",
+              location="Toulouse, Occitanie, France", description="we build production ML systems")
+    CL.draft(job)
+    assert "Location: Toulouse, Occitanie, France" in seen["prompt"]
+    assert "open to relocating" in seen["system"] and "Paris area" not in seen["system"]
