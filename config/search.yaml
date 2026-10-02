@@ -174,6 +174,30 @@ linkedin:
                         # finding new/relevant results; zero 429s at this depth
   max_retries: 3       # retries on 429 before giving up on a page
   backoff_seconds: 2.0
+  # Region pass: the "France" search above ranks Paris first and runs out of depth, so each
+  # other metropolitan region is searched on its own (fewer queries and pages per region).
+  regions:
+    enabled: true
+    queries:
+      - "machine learning engineer"
+      - "deep learning engineer"
+      - "nlp engineer"
+      - "computer vision engineer"
+      - "ai engineer"
+      - "data scientist"
+    locations:
+      - "Auvergne-Rhône-Alpes, France"
+      - "Occitanie, France"
+      - "Nouvelle-Aquitaine, France"
+      - "Provence-Alpes-Côte d'Azur, France"
+      - "Hauts-de-France, France"
+      - "Pays de la Loire, France"
+      - "Bretagne, France"
+      - "Grand Est, France"
+      - "Normandie, France"
+      - "Bourgogne-Franche-Comté, France"
+      - "Centre-Val de Loire, France"
+    max_pages: 3
   # Second pass: location "Europe", f_WT=2 as a coarse noise-reducer only (it lets
   # non-remote postings through) -- real remote status is confirmed later from the
   # JD text (see match.detect_remote_from_text, pipeline.enrich_one).
@@ -192,10 +216,8 @@ francetravail:
   # Moot while FRANCE_TRAVAIL_CLIENT_ID/SECRET stay unset (fetch() returns []
   # immediately either way) -- set for consistency and for whenever it's revived.
   fetch_interval_hours: 12
-  # Île-de-France (75,92,93,94,77,78,91,95) plus major hubs: 69 Lyon, 31 Toulouse,
-  # 38 Grenoble, 06 Nice/Sophia Antipolis, 59 Lille, 44 Nantes, 33 Bordeaux,
-  # 35 Rennes, 34 Montpellier, 67 Strasbourg.
-  departements: "75,92,93,94,77,78,91,95,69,31,38,06,59,44,33,35,34,67"
+  # Empty = the whole of France (no departement filter).
+  departements: ""
   queries:
     - "machine learning engineer"
     - "deep learning engineer"
