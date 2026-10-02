@@ -73,3 +73,14 @@ def test_the_dashboard_map_adds_pairs_the_checks_called_the_same(tmp_db):
         assert db.possible_duplicates_map(conn) == {}
         db.record_duplicate_check(conn, a, b, "same", "high", "identical")
         assert db.possible_duplicates_map(conn) == {a: [b], b: [a]}
+
+
+def test_a_hidden_duplicate_you_never_acted_on_leaves_the_status_pill_and_count(tmp_db):
+    with db.connect() as conn:
+        a, _ = db.upsert_job(conn, _job("1", loc="Nantes"), 60, "r")
+        b, _ = db.upsert_job(conn, _job("2", title="AI Engineer (H/F)", loc="Lyon"), 60, "r2")
+        for jid in (a, b):
+            db.mark_cv_ready(conn, jid)
+        db.set_llm_filter(conn, b, f"duplicate of #{a} (cv_ready) -- same posting")
+        assert db.status_counts(conn) == {"cv_ready": 1}
+        assert [r["id"] for r in db.list_jobs(conn, status="cv_ready")] == [a]
