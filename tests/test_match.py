@@ -1,3 +1,5 @@
+import pytest
+from jobhunter import match
 from jobhunter.match import (classify_role, detect_seniority, has_citizenship_requirement,
                               is_relevant, min_years_required, screen)
 from jobhunter.models import Job
@@ -306,3 +308,12 @@ def test_detect_remote_from_text_false_for_plain_description():
     assert detect_remote_from_text("You will work on our Berlin office team, on-site.") is False
     assert detect_remote_from_text("") is False
     assert detect_remote_from_text(None) is False
+
+
+@pytest.mark.parametrize("loc,tier", [
+    ("Puteaux - 92", "idf"), ("92 - Puteaux", "idf"),
+    ("Brest - 29", "france"), ("06 - Valbonne", "france"), ("Saint-Denis - 974", "france"),
+    ("Porto, Portugal", "outside"), ("München (81671)", "outside"),
+])
+def test_a_french_departement_number_marks_a_location_as_french(config, loc, tier):
+    assert match.geo_tier(loc, config) == tier

@@ -129,6 +129,19 @@ def detect_remote_from_text(text: str) -> bool:
     return any(term in t for term in _REMOTE_TERMS)
 
 
+_IDF_DEPARTEMENTS = {"75", "77", "78", "91", "92", "93", "94", "95"}
+# "Puteaux - 92" (HelloWork), "92 - Puteaux" (France Travail): a French departement
+# number stands in for the country. 2A/2B are Corsica, 97x overseas.
+_DEPT_CODE = r"(0[1-9]|[1-8]\d|9[0-5]|2[ab]|97\d)"
+_DEPT_AFTER = re.compile(r"\S\s-\s" + _DEPT_CODE + r"$")
+_DEPT_BEFORE = re.compile(r"^" + _DEPT_CODE + r"\s-\s\S")
+
+
+def _french_departement(loc: str) -> str:
+    m = _DEPT_AFTER.search(loc) or _DEPT_BEFORE.search(loc)
+    return m.group(1) if m else ""
+
+
 def geo_tier(location: str, config: dict) -> str:
     """Coarse geography bucket for analytics: idf | major_city | europe_remote |
     remote | france | outside | unknown. IDF wins first (it's the application
@@ -149,6 +162,9 @@ def geo_tier(location: str, config: dict) -> str:
         return "remote"
     if "france" in loc:
         return "france"
+    dept = _french_departement(loc)
+    if dept:
+        return "idf" if dept in _IDF_DEPARTEMENTS else "france"
     return "outside"
 
 

@@ -181,3 +181,16 @@ def test_workplace_type_does_not_alter_returned_location(monkeypatch):
     assert jobs[0].location == "Levallois-Perret, Île-de-France, France"
 
 
+
+
+def test_region_pass_searches_each_region_with_its_own_queries_and_pages(monkeypatch):
+    from jobhunter import pipeline
+    calls = []
+    monkeypatch.setattr(pipeline.linkedin, "fetch", lambda **kw: calls.append(kw) or [])
+    cfg = {"query": "q", "linkedin": {
+        "enabled": True, "queries": ["a", "b"], "locations": ["France"], "max_pages": 10,
+        "regions": {"enabled": True, "queries": ["a"], "locations": ["Occitanie, France"], "max_pages": 3},
+        "europe_remote": {"enabled": False}}}
+    pipeline._fetch_linkedin(cfg)
+    assert [(c["queries"], c["locations"], c["max_pages"]) for c in calls] == [
+        (["a", "b"], ["France"], 10), (["a"], ["Occitanie, France"], 3)]

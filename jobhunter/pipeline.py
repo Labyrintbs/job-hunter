@@ -49,6 +49,16 @@ def _fetch_linkedin(config: dict) -> list:
         max_retries=li.get("max_retries", 3),
         backoff_base=li.get("backoff_seconds", 2.0),
     )
+    rg = li.get("regions") or {}
+    if rg.get("enabled"):
+        jobs += linkedin.fetch(
+            queries=rg.get("queries") or queries,
+            locations=rg.get("locations") or [],
+            max_pages=rg.get("max_pages", 3),
+            recent_hours=li.get("recent_hours", 168),
+            max_retries=li.get("max_retries", 3),
+            backoff_base=li.get("backoff_seconds", 2.0),
+        )
     er = li.get("europe_remote") or {}
     if er.get("enabled", True):
         # f_WT here is only a coarse pre-filter (see linkedin.fetch's docstring) --
