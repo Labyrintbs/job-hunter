@@ -87,17 +87,22 @@ def _fetch_one(client: httpx.Client, query: str, location: str, max_pages: int,
         if workplace_type:
             params["f_WT"] = workplace_type
         url = f"{SEARCH_URL}?{urllib.parse.urlencode(params)}"
-        resp = None
+        resp, error = None, ""
         for attempt in range(max_retries + 1):
-            resp = client.get(url)
-            if resp.status_code != 429:
-                break
+            try:
+                resp, error = client.get(url), ""
+                if resp.status_code != 429:
+                    break
+            except (httpx.HTTPError, OSError) as exc:
+                # A reset or timeout on one page must not discard the jobs already collected.
+                resp, error = None, f"{type(exc).__name__}: {exc}"[:100]
             if attempt < max_retries:
                 time.sleep(backoff_base * 2 ** attempt)
-        if resp.status_code != 200 or not resp.text.strip():
+        if resp is None or resp.status_code != 200 or not resp.text.strip():
+            status = error or resp.status_code
             fetch_diag.track("linkedin", "page_fetch_stopped",
-                              detail=f"{query!r}@{location!r} page={page} status={resp.status_code}")
-            break  # rate-limited past retries, or exhausted
+                              detail=f"{query!r}@{location!r} page={page} status={status}")
+            break  # rate-limited or unreachable past retries, or exhausted
         cards = _CARD_RE.findall(resp.text)
         if not cards:
             break

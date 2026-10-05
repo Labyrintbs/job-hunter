@@ -70,7 +70,10 @@ class _Client:
 
     def get(self, url):
         self.urls.append(url)
-        return self._responses.pop(0) if self._responses else _Resp(200, "")
+        item = self._responses.pop(0) if self._responses else _Resp(200, "")
+        if isinstance(item, Exception):
+            raise item
+        return item
 
 
 def test_fetch_covers_every_query_location_pair(monkeypatch):
@@ -129,6 +132,34 @@ def test_fetch_gives_up_after_max_retries(monkeypatch):
     jobs = linkedin.fetch(["ml"], ["Paris"], max_pages=1, max_retries=2, backoff_base=0.01)
     assert jobs == []
     assert len(client.urls) == 3   # initial + 2 retries, then gave up
+
+
+def _patched(monkeypatch, client):
+    class _CM:
+        def __enter__(self):
+            return client
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(linkedin.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(linkedin.httpx, "Client", lambda *a, **k: _CM())
+
+
+def test_a_connection_reset_is_retried_like_a_429(monkeypatch):
+    client = _Client([linkedin.httpx.ReadError("Connection reset by peer"), _Resp(200, CARD)])
+    _patched(monkeypatch, client)
+    jobs = linkedin.fetch(["ml"], ["Paris"], max_pages=1, max_retries=2, backoff_base=0.01)
+    assert len(jobs) == 1 and len(client.urls) == 2
+
+
+def test_a_page_that_keeps_failing_keeps_the_jobs_already_collected(monkeypatch):
+    reset = linkedin.httpx.ReadError("Connection reset by peer")
+    # query "a" gets its page, then the next page and every retry fail; query "b" still runs
+    client = _Client([_Resp(200, CARD), reset, reset, _Resp(200, CARD.replace("4455825967", "4455825968"))])
+    _patched(monkeypatch, client)
+    jobs = linkedin.fetch(["a", "b"], ["Paris"], max_pages=2, max_retries=1, backoff_base=0.01)
+    assert sorted(j.external_id for j in jobs) == ["4455825967", "4455825968"]
 
 
 def test_workplace_type_adds_f_wt_param_when_set(monkeypatch):
