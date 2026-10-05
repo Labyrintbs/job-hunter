@@ -84,3 +84,15 @@ def test_a_hidden_duplicate_you_never_acted_on_leaves_the_status_pill_and_count(
         db.set_llm_filter(conn, b, f"duplicate of #{a} (cv_ready) -- same posting")
         assert db.status_counts(conn) == {"cv_ready": 1}
         assert [r["id"] for r in db.list_jobs(conn, status="cv_ready")] == [a]
+
+
+def test_a_company_listed_under_an_alias_is_the_same_company_for_duplicates(tmp_db, monkeypatch):
+    monkeypatch.setattr("jobhunter.config.load_search_config", lambda: {})
+    with db.connect() as conn:
+        a, _ = db.upsert_job(conn, _job("1", company="Dassault Systèmes", loc="Vélizy"), 60, "r")
+        b, _ = db.upsert_job(conn, _job("2", company="3ds", title="AI Engineer (H/F)", loc="Lyon"), 60, "r2")
+        assert db.find_possible_duplicates(conn, with_overlap=True) == []
+        monkeypatch.setattr("jobhunter.config.load_search_config",
+                            lambda: {"company_aliases": {"Dassault Systèmes": ["3ds"]}})
+        pairs = db.find_possible_duplicates(conn, with_overlap=True)
+    assert [{p["a"], p["b"]} for p in pairs] == [{a, b}]

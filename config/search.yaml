@@ -105,6 +105,11 @@ exclude_terms:
 # Companies to never show.
 company_blocklist: []
 
+# Different names for one employer, so duplicate detection treats them as the same company
+# (canonical name: the other names it is listed under).
+company_aliases:
+  Dassault Systèmes: ["3ds"]
+
 # Auto-hide (Filtered bucket, not deleted) jobs that read as too senior for a junior.
 # A junior/new-grad title always overrides this gate.
 seniority:

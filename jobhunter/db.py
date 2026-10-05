@@ -466,6 +466,16 @@ def _companies_related(a: str, b: str) -> bool:
     return na in nb or nb in na
 
 
+def _company_aliases() -> dict[str, str]:
+    """Normalized alias -> canonical company name, from search.yaml's company_aliases."""
+    from .config import load_search_config
+    try:
+        listed = load_search_config().get("company_aliases") or {}
+    except Exception:
+        return {}
+    return {_normalize(alias): canonical for canonical, names in listed.items() for alias in names}
+
+
 def find_possible_duplicates(conn: sqlite3.Connection, title_ratio: float = 0.80,
                              with_overlap: bool = False) -> list[dict]:
     """Non-destructive 'maybe the same posting' detector: same city + near-identical
@@ -493,14 +503,16 @@ def find_possible_duplicates(conn: sqlite3.Connection, title_ratio: float = 0.80
     Surfaces candidates for a human to judge, never auto-merges. Uses only
     difflib -- no embeddings needed at this scale."""
     rows = conn.execute("SELECT id, company, title, location, description FROM jobs").fetchall()
+    aliases = _company_aliases()
     by_city: dict[str, list[tuple[int, str, str]]] = defaultdict(list)
     by_company: dict[str, list[int]] = defaultdict(list)
     for r in rows:
         title = _strip_title_junk(_normalize(r["title"]))
+        company = aliases.get(_normalize(r["company"]), r["company"])
         if title:
-            by_city[_norm_city(r["location"])].append((r["id"], r["company"], title))
-        if len(_normalize(r["company"])) >= 3 and len((r["description"] or "").strip()) >= dupes.MIN_CHARS:
-            by_company[_normalize(r["company"])].append(r["id"])
+            by_city[_norm_city(r["location"])].append((r["id"], company, title))
+        if len(_normalize(company)) >= 3 and len((r["description"] or "").strip()) >= dupes.MIN_CHARS:
+            by_company[_normalize(company)].append(r["id"])
 
     texts = {r["id"]: r["description"] for r in rows}
     shingled: dict[int, frozenset] = {}
