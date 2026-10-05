@@ -8,7 +8,7 @@ from fastapi.templating import Jinja2Templates
 
 from .. import db, export as export_mod, learn
 from ..config import DATA_DIR, load_search_config
-from ..llm import provider
+from ..llm import provider, usage
 from ..tailor.engine import master_edited_at
 from ..pipeline import cover_one, enrich_one, import_revised_cv, judge_one, run_fetch, tailor_one
 
@@ -259,6 +259,37 @@ def market_page(request: Request):
     return TEMPLATES.TemplateResponse(
         request, "market.html", {"by_scope": by_scope},
     )
+
+
+@app.get("/usage", response_class=HTMLResponse)
+def usage_page(request: Request):
+    """Token use and notional cost of every logged LLM call, by step / model / day."""
+    with db.connect() as conn:
+        summary = usage.summarize(db.llm_calls_since(conn), usage.load_prices())
+        quota = conn.execute("SELECT * FROM llm_quota_snapshots ORDER BY id DESC LIMIT 1").fetchone()
+    return TEMPLATES.TemplateResponse(
+        request, "usage.html",
+        {"s": summary, "quota": dict(quota) if quota else {}, "backend": provider.backend()},
+    )
+
+
+@app.get("/usage/quota")
+def usage_quota():
+    """Live session / weekly usage from the CLI (a few seconds), stored as a snapshot."""
+    quota = usage.fetch_quota()
+    if quota:
+        with db.connect() as conn:
+            db.record_quota_snapshot(conn, quota)
+    return JSONResponse(quota)
+
+
+@app.post("/usage/baseline")
+def usage_baseline():
+    """One tiny logged call: what every call pays before our own prompt is counted."""
+    try:
+        return JSONResponse({"ok": True, **usage.measure_baseline()})
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
 
 
 @app.get("/rules", response_class=HTMLResponse)

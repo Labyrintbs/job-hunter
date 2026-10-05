@@ -122,4 +122,4 @@ def select(job: Job, experiences: list[tuple[str, list[str]]], projects: list[tu
         skills=_skills_menu(skills),
     )
     return provider.generate_json(prompt, system=SYSTEM, max_tokens=1500, json_schema=RESULT_SCHEMA,
-                                  model=provider.FAST_MODEL)
+                                  model=provider.FAST_MODEL, step="cv selection")

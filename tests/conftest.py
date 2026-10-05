@@ -2,6 +2,7 @@ import pytest
 
 from jobhunter import db as db_mod
 from jobhunter import jd_store as jd_store_mod
+from jobhunter.llm import provider as provider_mod
 from jobhunter.tailor import engine as cv_engine_mod
 from jobhunter.tailor import summary as summary_mod
 
@@ -12,6 +13,13 @@ def no_real_summary_llm(monkeypatch):
     backend look available must never reach a real one. Tests of the summary itself
     override this."""
     monkeypatch.setattr(summary_mod, "generate_summary", lambda *a, **k: None)
+
+
+@pytest.fixture(autouse=True)
+def no_usage_log(monkeypatch):
+    """Faked LLM calls must not add rows to the real database's usage log. Tests of the
+    log switch it back on together with tmp_db."""
+    monkeypatch.setattr(provider_mod, "LOG_CALLS", False)
 
 
 @pytest.fixture

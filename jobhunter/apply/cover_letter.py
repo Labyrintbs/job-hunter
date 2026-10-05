@@ -86,7 +86,7 @@ def draft(job: Job, judge_context: str | None = None, cv_text: str | None = None
         judge_block=judge_block,
     )
     system = SYSTEM.format(language=_LANGUAGE.get(language, _LANGUAGE["en"]))
-    return provider.generate(prompt, system=system, max_tokens=1400).strip()
+    return provider.generate(prompt, system=system, max_tokens=1400, step="cover letter").strip()
 
 
 def draft_to_file(job: Job, out_dir: Path, judge_context: str | None = None,

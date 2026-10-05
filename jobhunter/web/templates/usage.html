@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block content %}
+{% macro n(v) %}{{ "{:,}".format(v|int) }}{% endmacro %}
+{% macro usd(v) %}${{ "%.2f"|format(v) }}{% endmacro %}
+<style>
+  .cards { display:flex; gap:14px; flex-wrap:wrap; margin-bottom:22px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px 16px; min-width:200px; }
+  .card .big { font-size:26px; font-weight:700; font-variant-numeric:tabular-nums; }
+  .meter { height:8px; background:var(--line); border-radius:4px; margin-top:6px; overflow:hidden; }
+  .meter span { display:block; height:100%; background:var(--accent); }
+  .stack { display:flex; height:14px; border-radius:4px; overflow:hidden; background:var(--line); min-width:240px; }
+  .seg-setup { background:#8b94a7; } .seg-own { background:var(--accent); } .seg-out { background:#5ad1a0; }
+  .dot { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:4px; }
+  td.num, th.num { text-align:right; font-variant-numeric:tabular-nums; }
+  h3 { margin:26px 0 8px; }
+</style>
+
+<div class="cards">
+  <div class="card">
+    <div class="muted">Subscription session</div>
+    <div class="big" id="q-session">{% if quota and quota.session_pct is not none %}{{ quota.session_pct }}%{% else %}…{% endif %}</div>
+    <div class="meter"><span id="q-session-bar" style="width:{{ quota.session_pct or 0 }}%"></span></div>
+    <div class="muted" id="q-session-resets" style="font-size:12px">{% if quota %}resets {{ quota.session_resets }}{% endif %}</div>
+  </div>
+  <div class="card">
+    <div class="muted">Subscription week (all models)</div>
+    <div class="big" id="q-week">{% if quota and quota.week_pct is not none %}{{ quota.week_pct }}%{% else %}…{% endif %}</div>
+    <div class="meter"><span id="q-week-bar" style="width:{{ quota.week_pct or 0 }}%"></span></div>
+    <div class="muted" id="q-week-resets" style="font-size:12px">{% if quota %}resets {{ quota.week_resets }}{% endif %}</div>
+  </div>
+  {% for p in s.periods %}
+  <div class="card">
+    <div class="muted">{{ p.label }}</div>
+    <div class="big">{{ usd(p.cost) }}</div>
+    <div class="muted" style="font-size:12px">{{ n(p.calls) }} calls · {{ n(p.input) }} in · {{ n(p.output) }} out{% if p.failed %} · <span style="color:var(--danger)">{{ p.failed }} failed</span>{% endif %}</div>
+  </div>
+  {% endfor %}
+</div>
+<p class="muted" style="max-width:760px">
+  Backend: <b>{{ backend }}</b>. Costs are list prices (<code>config/llm_prices.yaml</code>), so on a
+  subscription they show which steps and models weigh most, not a bill. The two percentages
+  are read live from <code>claude -p /usage</code>; they cover everything on this account,
+  not only this project. Calls made before this page existed are not counted.
+</p>
+
+<h3>Where the input tokens go</h3>
+<p class="muted" style="max-width:760px">
+  <span class="dot seg-setup"></span>CLI setup the call carries before our prompt
+  <span class="dot seg-own" style="margin-left:12px"></span>our prompt
+  <span class="dot seg-out" style="margin-left:12px"></span>output.
+  Setup is measured by a one-line baseline call in the same mode
+  ({% if s.slim_now %}<b>slim mode is on</b>{% else %}slim mode is off{% endif %}).
+  {% if s.baseline %}Latest baseline: <b>{{ n(s.baseline.tokens) }}</b> tokens
+  ({{ s.baseline.model }}, {{ "slim" if s.baseline.slim else "default setup" }}, {{ s.baseline.at[:16] }}).
+  {% else %}No baseline yet.{% endif %}
+  <button class="ghost" id="baseline-btn" style="margin-left:8px">Measure baseline now (1 call)</button>
+  <span id="baseline-msg"></span>
+</p>
+{% if s.steps %}
+{% set top = s.steps | map(attribute="avg_input") | max %}
+<table>
+  <thead><tr><th>Step</th><th>Average call</th><th class="num">Calls</th><th class="num">Avg input</th><th class="num">of which setup</th><th class="num">Cost</th><th class="num">Share</th></tr></thead>
+  <tbody>
+  {% for st in s.steps %}
+    {% set out_avg = (st.output // st.calls) if st.calls else 0 %}
+    {% set scale = (top + out_avg) or 1 %}
+    <tr>
+      <td>{{ st.name }}</td>
+      <td>
+        <div class="stack" title="setup {{ n(st.avg_setup) }} · our prompt {{ n(st.avg_input - st.avg_setup) }} · output {{ n(out_avg) }}">
+          <span class="seg-setup" style="width:{{ 100 * st.avg_setup / scale }}%"></span>
+          <span class="seg-own" style="width:{{ 100 * (st.avg_input - st.avg_setup) / scale }}%"></span>
+          <span class="seg-out" style="width:{{ 100 * out_avg / scale }}%"></span>
+        </div>
+      </td>
+      <td class="num">{{ n(st.calls) }}{% if st.failed %} <span style="color:var(--danger)" title="failed calls">({{ st.failed }}✗)</span>{% endif %}</td>
+      <td class="num">{{ n(st.avg_input) }}</td>
+      <td class="num">{% if st.avg_input %}{{ (100 * st.avg_setup / st.avg_input) | round | int }}%{% endif %}</td>
+      <td class="num">{{ usd(st.cost) }}{% if st.unpriced %} <span class="muted" title="calls on a model with no price">+?</span>{% endif %}</td>
+      <td class="num">{{ (100 * st.cost_share) | round | int }}%</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No calls logged yet. They appear as the next jobs are judged, tailored or checked for duplicates.</p>
+{% endif %}
+
+<h3>By model</h3>
+<table>
+  <thead><tr><th>Model</th><th class="num">Calls</th><th class="num">Input</th><th class="num">Output</th><th class="num">Cost</th></tr></thead>
+  <tbody>
+  {% for m in s.models %}
+    <tr><td>{{ m.name }}</td><td class="num">{{ n(m.calls) }}</td><td class="num">{{ n(m.input) }}</td><td class="num">{{ n(m.output) }}</td><td class="num">{{ usd(m.cost) }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+<h3>By day (last 14, UTC)</h3>
+{% set dmax = (s.days | map(attribute="cost") | max) if s.days else 0 %}
+<table>
+  <tbody>
+  {% for d in s.days %}
+    <tr>
+      <td style="width:110px">{{ d.name }}</td>
+      <td><div class="meter" style="height:12px"><span style="width:{{ (100 * d.cost / dmax) if dmax else 0 }}%"></span></div></td>
+      <td class="num" style="width:90px">{{ usd(d.cost) }}</td>
+      <td class="num muted" style="width:140px">{{ n(d.calls) }} calls</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+<script>
+  function setQuota(q) {
+    if (!q || q.session_pct == null) return;
+    document.getElementById("q-session").textContent = q.session_pct + "%";
+    document.getElementById("q-session-bar").style.width = q.session_pct + "%";
+    document.getElementById("q-session-resets").textContent = "resets " + (q.session_resets || "");
+    document.getElementById("q-week").textContent = q.week_pct + "%";
+    document.getElementById("q-week-bar").style.width = q.week_pct + "%";
+    document.getElementById("q-week-resets").textContent = "resets " + (q.week_resets || "");
+  }
+  fetch("/usage/quota").then(r => r.json()).then(setQuota).catch(() => {});
+  document.getElementById("baseline-btn").addEventListener("click", async () => {
+    const msg = document.getElementById("baseline-msg");
+    msg.textContent = " measuring…";
+    const r = await fetch("/usage/baseline", {method: "POST"});
+    msg.textContent = r.ok ? " done, reloading" : " failed";
+    if (r.ok) location.reload();
+  });
+</script>
+{% endblock %}

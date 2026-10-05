@@ -55,7 +55,7 @@ def compare(job_a: Job, job_b: Job) -> dict:
         description_b=(job_b.description or "")[:8000],
     )
     data = provider.generate_json(prompt, system=SYSTEM, max_tokens=300, json_schema=RESULT_SCHEMA,
-                                  model=provider.FAST_MODEL)
+                                  model=provider.FAST_MODEL, step="dedup")
     return {
         "verdict": str(data.get("verdict", "")),
         "confidence": str(data.get("confidence", "")),

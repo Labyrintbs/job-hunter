@@ -1,0 +1,38 @@
+# API list prices in USD per million tokens, used by the /usage page to turn logged token
+# counts into a notional cost. A Claude subscription is not billed per token: its limit is
+# a quota, so read these as a relative cost between steps and models, not a bill.
+# Source: public pricing roundups, October 2026 (not Anthropic's own page), so check them
+# against the cost the CLI reports per call; the Haiku figures match it exactly and the
+# Sonnet ones to within the cost of its thinking tokens.
+prices_as_of: "2026-10-05"
+models:
+  claude-sonnet-5-5:
+    input: 2.00
+    output: 10.00
+    cache_read: 0.20
+    cache_write_5m: 2.50
+    cache_write_1h: 4.00
+  claude-sonnet-5:
+    input: 2.00
+    output: 10.00
+    cache_read: 0.20
+    cache_write_5m: 2.50
+    cache_write_1h: 4.00
+  claude-haiku-4-5-20251001:
+    input: 1.00
+    output: 5.00
+    cache_read: 0.10
+    cache_write_5m: 1.25
+    cache_write_1h: 2.00
+  claude-opus-5-5:
+    input: 4.00
+    output: 20.00
+    cache_read: 0.20
+    cache_write_5m: 5.00
+    cache_write_1h: 8.00
+  claude-opus-5:
+    input: 5.00
+    output: 25.00
+    cache_read: 0.50
+    cache_write_5m: 6.25
+    cache_write_1h: 10.00

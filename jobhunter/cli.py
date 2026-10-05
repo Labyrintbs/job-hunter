@@ -63,6 +63,8 @@ def main(argv: list[str] | None = None) -> int:
     p_cv.add_argument("--tex", help="path to your revised .tex (optional)")
 
     sub.add_parser("llm-status", help="show which LLM backend is active")
+    sub.add_parser("llm-baseline", help="one tiny logged LLM call: the input tokens every call "
+                   "pays before our own prompt (shown on the /usage page)")
 
     p_run = sub.add_parser("run", help="one scheduled run: fetch + judge new jobs (cron target)")
     p_run.add_argument("--no-judge", action="store_true")
@@ -240,6 +242,12 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "llm-status":
         print(f"LLM backend: {provider.backend()} (available={provider.available()})")
+        return 0
+
+    if args.command == "llm-baseline":
+        from .llm import usage
+        db.init_db()
+        print(usage.measure_baseline())
         return 0
 
     if args.command == "judge":

@@ -136,7 +136,7 @@ def judge(job: Job, preferences: str = "") -> dict:
         description=(job.description or "")[:16000],
     )
     data = provider.generate_json(prompt, system=SYSTEM, max_tokens=600, json_schema=RESULT_SCHEMA,
-                                  model=provider.FAST_MODEL)
+                                  model=provider.FAST_MODEL, step="judge")
     score = int(max(0, min(100, data.get("score", 0))))
     return {
         "score": score,

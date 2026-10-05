@@ -260,7 +260,8 @@ def generate_summary(job: Job, anchor: str, title: str, company: str, feedback: 
         + (f"\nYour previous attempt was rejected: {feedback}. Fix that.\n" if feedback else "")
     )
     system = _SYSTEM.format(language=_LANGUAGE_RULE[lang])
-    return provider.generate_json(prompt, system=system, max_tokens=500, json_schema=_SCHEMA).get("summary")
+    return provider.generate_json(prompt, system=system, max_tokens=500, json_schema=_SCHEMA,
+                                  step="summary").get("summary")
 
 
 def build(job: Job, role_category: str, cv_text: str, lang: str = "en") -> Summary:

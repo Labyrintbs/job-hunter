@@ -64,7 +64,7 @@ def condense_profile(conn, max_examples: int = 100, persist: bool = True) -> dic
         f"DISMISSED (you rejected these):\n{_example_block(neg, 'dismiss_reasons', limit=max_examples)}\n\n"
         "Write the preference profile now."
     )
-    text = provider.generate(prompt, system=_PROFILE_SYSTEM, max_tokens=400).strip()
+    text = provider.generate(prompt, system=_PROFILE_SYSTEM, max_tokens=400, step="profile").strip()
     if persist and text:
         db.add_profile(conn, text, len(pos), len(neg))
     return {"status": "ok", "text": text, "interested": len(pos), "dismissed": len(neg)}

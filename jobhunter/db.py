@@ -128,6 +128,38 @@ CREATE TABLE IF NOT EXISTS duplicate_checks (
     PRIMARY KEY (job_id_a, job_id_b)
 );
 
+-- One row per LLM call (see llm/provider.py), for the /usage page. Token counts are what
+-- the backend reported; cost_reported is the CLI's own list-price figure (0 on the API).
+CREATE TABLE IF NOT EXISTS llm_calls (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    at              TEXT NOT NULL DEFAULT (datetime('now')),
+    step            TEXT NOT NULL DEFAULT '',
+    model           TEXT NOT NULL DEFAULT '',
+    backend         TEXT NOT NULL DEFAULT '',
+    input_tokens    INTEGER NOT NULL DEFAULT 0,   -- not served from the cache
+    cache_read      INTEGER NOT NULL DEFAULT 0,
+    cache_write_5m  INTEGER NOT NULL DEFAULT 0,
+    cache_write_1h  INTEGER NOT NULL DEFAULT 0,
+    output_tokens   INTEGER NOT NULL DEFAULT 0,
+    cost_reported   REAL NOT NULL DEFAULT 0,
+    duration_ms     INTEGER NOT NULL DEFAULT 0,
+    prompt_chars    INTEGER NOT NULL DEFAULT 0,   -- our own prompt + system text
+    slim            INTEGER NOT NULL DEFAULT 0,   -- the CLI ran without its default setup
+    ok              INTEGER NOT NULL DEFAULT 1,
+    error           TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_llm_calls_at ON llm_calls(at);
+
+-- The subscription's own session / weekly usage, read from `claude -p /usage` (llm/usage.py).
+CREATE TABLE IF NOT EXISTS llm_quota_snapshots (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    at           TEXT NOT NULL DEFAULT (datetime('now')),
+    session_pct  INTEGER,
+    session_resets TEXT NOT NULL DEFAULT '',
+    week_pct     INTEGER,
+    week_resets  TEXT NOT NULL DEFAULT ''
+);
+
 CREATE TABLE IF NOT EXISTS filter_rules (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     kind       TEXT NOT NULL,          -- negative_kw | company_block
@@ -1346,6 +1378,26 @@ def get_source_fetch_state(conn: sqlite3.Connection, source: str) -> sqlite3.Row
     return conn.execute(
         "SELECT * FROM source_fetch_state WHERE source = ?", (source,)
     ).fetchone()
+
+
+def record_llm_call(conn: sqlite3.Connection, **fields) -> None:
+    cols = ", ".join(fields)
+    marks = ", ".join("?" for _ in fields)
+    conn.execute(f"INSERT INTO llm_calls ({cols}) VALUES ({marks})", tuple(fields.values()))
+
+
+def llm_calls_since(conn: sqlite3.Connection, since: str = "") -> list[sqlite3.Row]:
+    """Logged LLM calls at or after `since` (a 'YYYY-MM-DD HH:MM:SS' UTC string), oldest first."""
+    return conn.execute("SELECT * FROM llm_calls WHERE at >= ? ORDER BY id", (since,)).fetchall()
+
+
+def record_quota_snapshot(conn: sqlite3.Connection, quota: dict) -> None:
+    conn.execute(
+        "INSERT INTO llm_quota_snapshots (session_pct, session_resets, week_pct, week_resets) "
+        "VALUES (?, ?, ?, ?)",
+        (quota.get("session_pct"), quota.get("session_resets", ""),
+         quota.get("week_pct"), quota.get("week_resets", "")),
+    )
 
 
 def record_source_fetch(conn: sqlite3.Connection, source: str, count: int) -> None:
