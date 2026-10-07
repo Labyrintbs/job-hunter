@@ -12,6 +12,10 @@ SHINGLE_WORDS = 5
 MIN_CHARS = 300            # shorter descriptions are too thin to compare
 CANDIDATE_OVERLAP = 0.3    # same company and at least this similar: worth a check
 SAME_OVERLAP = 0.9         # identical text: the same posting, listed more than once
+# Rules that settle a pair without the LLM (tuned on the pairs the LLM had already judged).
+RULE_SAME_MIN_OVERLAP = 0.1         # same company, city and title, and not completely different text
+RULE_DIFFERENT_MAX_OVERLAP = 0.5    # found only through loose text overlap, and below this ...
+RULE_DIFFERENT_MAX_TITLE_RATIO = 0.8  # ... with titles this unlike: different roles
 
 # A job in one of these statuses has been acted on; it is never hidden as a duplicate.
 ENGAGED = ("applied", "responded", "interview", "offer", "rejected")
@@ -30,6 +34,21 @@ def shingles(text: str | None) -> frozenset[str]:
 def overlap(a: frozenset[str], b: frozenset[str]) -> float:
     """Jaccard overlap of two shingle sets, 0.0 when either is empty."""
     return len(a & b) / len(a | b) if a and b else 0.0
+
+
+def rule_verdict(pair: dict) -> dict | None:
+    """The verdict a pair gets without asking the LLM, or None when it needs the LLM. `pair` is
+    one entry of db.find_possible_duplicates(with_overlap=True). The rules lean toward
+    "different": a duplicate wrongly kept stays visible, a real job wrongly hidden is lost."""
+    ov = pair["overlap"]
+    if pair["via_title"] and pair["same_title"] and ov >= RULE_SAME_MIN_OVERLAP:
+        return {"verdict": "same", "confidence": "high",
+                "reason": f"rule: same title and city at the same employer, descriptions {ov:.0%} alike"}
+    if (not pair["via_title"] and not pair["same_title"] and ov < RULE_DIFFERENT_MAX_OVERLAP
+            and pair["title_ratio"] < RULE_DIFFERENT_MAX_TITLE_RATIO):
+        return {"verdict": "different", "confidence": "high",
+                "reason": f"rule: different titles, descriptions only {ov:.0%} alike"}
+    return None
 
 
 def choose_original(rows: list[dict]) -> int:

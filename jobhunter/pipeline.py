@@ -844,35 +844,40 @@ def repair_duplicates(apply: bool = False) -> dict:
 def check_duplicates(limit: int = 10) -> dict:
     """Settle possible-duplicate pairs (db.find_possible_duplicates with description overlap),
     caching each verdict so a pair is never re-checked, and hide the copy that is not the
-    original. Identical text (dupes.SAME_OVERLAP) is the same posting without asking anyone;
-    the rest goes to the LLM, `limit` pairs per run, pairs involving a job you act on first.
+    original. Identical text (dupes.SAME_OVERLAP) is the same posting without asking anyone, and
+    so are the clear cases of dupes.rule_verdict; only the unsure rest goes to the LLM, `limit`
+    pairs per run, pairs involving a job you act on first.
     Skips a pair where either side still lacks real JD content -- a title-only guess isn't
     reliable enough for a call this consequential. Run before tailoring, so a duplicate
     never gets a CV or a letter."""
     db.init_db()
     with db.connect() as conn:
         status = {r["job_id"]: r["status"] for r in conn.execute("SELECT job_id, status FROM applications")}
+        already = {(r["job_id_a"], r["job_id_b"]) for r in conn.execute("SELECT job_id_a, job_id_b FROM duplicate_checks")}
+        text_len = {r["id"]: r["n"] or 0 for r in conn.execute(
+            "SELECT id, length(trim(description, ' ' || char(9, 10, 13))) AS n FROM jobs")}
         todo = []
         for p in db.find_possible_duplicates(conn, with_overlap=True):
             a, b = sorted((p["a"], p["b"]))
-            if db.get_duplicate_check(conn, a, b) is not None:
+            if (a, b) in already:
                 continue
-            row_a, row_b = db.get_job(conn, a), db.get_job(conn, b)
-            if not row_a or not row_b:
-                continue
-            if (len((row_a["description"] or "").strip()) < _MIN_DESCRIPTION_CHARS or
-                    len((row_b["description"] or "").strip()) < _MIN_DESCRIPTION_CHARS):
+            if text_len.get(a, 0) < _MIN_DESCRIPTION_CHARS or text_len.get(b, 0) < _MIN_DESCRIPTION_CHARS:
                 continue
             live = any(status.get(i) in (*dupes.ENGAGED, "cv_ready", "shortlisted") for i in (a, b))
-            todo.append((not live, -p["overlap"], a, b, p["overlap"]))
-    todo.sort()
+            todo.append((not live, -p["overlap"], a, b, p))
+    todo.sort(key=lambda t: t[:4])
 
-    checked = same = filtered = llm_calls = 0
+    checked = same = filtered = llm_calls = by_rule = 0
     quota_out = False
-    for _, _, a, b, ov in todo:
+    for _, _, a, b, p in todo:
+        ov = p["overlap"]
+        rule = dupes.rule_verdict(p) if ov < dupes.SAME_OVERLAP else None
         if ov >= dupes.SAME_OVERLAP:
             result = {"verdict": "same", "confidence": "high",
                       "reason": f"the descriptions are {ov:.0%} identical"}
+        elif rule:
+            result = rule
+            by_rule += 1
         elif llm_calls >= limit or quota_out or not provider.available():
             continue
         else:
@@ -892,7 +897,7 @@ def check_duplicates(limit: int = 10) -> dict:
             if result["verdict"] == "same" and result["confidence"] == "high":
                 same += 1
                 filtered += _hide_duplicates_of(conn, a, result["reason"])
-    return {"checked": checked, "same": same, "filtered": filtered}
+    return {"checked": checked, "same": same, "filtered": filtered, "by_rule": by_rule}
 
 
 def enrich_one(job_id: int) -> dict:

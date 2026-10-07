@@ -167,10 +167,11 @@ def _parse_cli_output(stdout: str, json_schema: dict | None) -> tuple[str, dict]
 
 def _generate_cli(prompt: str, system: str | None, timeout: int,
                   json_schema: dict | None = None, model: str | None = None,
-                  step: str = "") -> str:
+                  step: str = "", slim: bool | None = None) -> str:
     model = model or MODEL
+    slim = SLIM if slim is None else slim
     cmd = [_cli_path() or "claude", "-p", prompt, "--model", model, "--output-format", "json"]
-    if SLIM:
+    if slim:
         cmd += ["--system-prompt", system or _DEFAULT_SYSTEM, *_SLIM_FLAGS]
     elif system:
         cmd += ["--append-system-prompt", system]
@@ -183,11 +184,11 @@ def _generate_cli(prompt: str, system: str | None, timeout: int,
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=_cli_env())
     except subprocess.TimeoutExpired:
-        _log_call(step, model, "claude-cli", chars, slim=SLIM, error=f"timeout after {timeout}s")
+        _log_call(step, model, "claude-cli", chars, slim=slim, error=f"timeout after {timeout}s")
         raise
     text, data = _parse_cli_output(proc.stdout, json_schema)
     meta = dict(usage=data.get("usage"), duration_ms=data.get("duration_ms") or 0,
-                cost_reported=data.get("total_cost_usd") or 0.0, slim=SLIM)
+                cost_reported=data.get("total_cost_usd") or 0.0, slim=slim)
     if proc.returncode != 0:
         # The CLI prints errors like usage limits / "Not logged in" to stdout, not stderr.
         message = f"claude CLI failed (rc={proc.returncode}): {(proc.stderr or text).strip()[:300]}"
@@ -199,13 +200,15 @@ def _generate_cli(prompt: str, system: str | None, timeout: int,
 
 def generate(prompt: str, system: str | None = None, max_tokens: int = 1500,
              timeout: int = DEFAULT_TIMEOUT, json_schema: dict | None = None,
-             model: str | None = None, step: str = "") -> str:
-    """`step` names the pipeline step for the usage log (select, judge, dedup, ...)."""
+             model: str | None = None, step: str = "", slim: bool | None = None) -> str:
+    """`step` names the pipeline step for the usage log (select, judge, dedup, ...).
+    `slim` overrides the global SLIM for this one call (CLI backend only)."""
     if _has_api_key():
         # max_tokens applies here; the CLI path below has no equivalent knob.
         return _generate_api(prompt, system, max_tokens, model, step=step)
     if _has_cli():
-        return _generate_cli(prompt, system, timeout, json_schema=json_schema, model=model, step=step)
+        return _generate_cli(prompt, system, timeout, json_schema=json_schema, model=model, step=step,
+                             slim=slim)
     raise LLMUnavailable("no ANTHROPIC_API_KEY and no `claude` CLI on PATH")
 
 

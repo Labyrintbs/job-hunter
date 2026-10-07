@@ -142,6 +142,12 @@ esn_companies:
   - nexton
   - randstad digital
 
+# Company names that mean "unknown" (not given, or a job board's own name): duplicate detection
+# never treats jobs under them as one employer.
+company_placeholders:
+  - non renseigné
+  - free-work
+
 # Different names for one employer, so duplicate detection treats them as the same company
 # (canonical name: the other names it is listed under).
 company_aliases:
@@ -459,3 +465,8 @@ market_trend:
     - { label: "AI engineering", param: codeROME, code: M1889 }
     - { label: "DevOps", param: codeROME, code: M1827 }
     - { label: "Cybersecurity", param: codeROME, code: M1856 }
+
+# LLM call options. dedup_slim runs the duplicate-check calls without the CLI's default setup
+# (far fewer tokens per call); scripts/eval_dedup_slim.py checks it still judges as well.
+llm:
+  dedup_slim: true

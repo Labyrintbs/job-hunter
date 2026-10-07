@@ -47,7 +47,16 @@ RESULT_SCHEMA = {
 }
 
 
-def compare(job_a: Job, job_b: Job) -> dict:
+def _slim_setting() -> bool | None:
+    """True when search.yaml's llm.dedup_slim is on; None otherwise, i.e. follow the global SLIM."""
+    from ..config import load_search_config
+    return True if (load_search_config().get("llm") or {}).get("dedup_slim") else None
+
+
+def compare(job_a: Job, job_b: Job, slim: bool | None = None) -> dict:
+    """`slim` forces slim (True) or the default setup (False) for this call; None follows the config."""
+    if slim is None:
+        slim = _slim_setting()
     prompt = PROMPT.format(
         title_a=job_a.title, company_a=job_a.company, location_a=job_a.location,
         description_a=(job_a.description or "")[:8000],
@@ -55,7 +64,7 @@ def compare(job_a: Job, job_b: Job) -> dict:
         description_b=(job_b.description or "")[:8000],
     )
     data = provider.generate_json(prompt, system=SYSTEM, max_tokens=300, json_schema=RESULT_SCHEMA,
-                                  model=provider.FAST_MODEL, step="dedup")
+                                  model=provider.FAST_MODEL, step="dedup", slim=slim)
     return {
         "verdict": str(data.get("verdict", "")),
         "confidence": str(data.get("confidence", "")),

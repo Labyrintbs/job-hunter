@@ -508,6 +508,29 @@ def _company_aliases() -> dict[str, str]:
     return {_normalize(alias): canonical for canonical, names in listed.items() for alias in names}
 
 
+def _company_placeholders() -> set[str]:
+    """Normalized company names that stand for "unknown" (a board's own name, "not given", empty):
+    jobs under them are different employers and never count as the same company."""
+    from .config import load_search_config
+    try:
+        listed = load_search_config().get("company_placeholders") or []
+    except Exception:
+        listed = []
+    return {_normalize(n) for n in listed} | {""}
+
+
+def _related_company_keys(keys: set[str]) -> list[tuple[str, str]]:
+    """(short, long) pairs of normalized company names where the short one (4+ characters) sits
+    inside the long one, found through an index of 4-character pieces instead of comparing
+    every name with every other."""
+    grams: dict[str, set[str]] = defaultdict(set)
+    for k in keys:
+        for i in range(len(k) - 3):
+            grams[k[i:i + 4]].add(k)
+    return [(short, long_) for short in keys if len(short) >= 4
+            for long_ in grams.get(short[:4], ()) if long_ != short and short in long_]
+
+
 def find_possible_duplicates(conn: sqlite3.Connection, title_ratio: float = 0.80,
                              with_overlap: bool = False) -> list[dict]:
     """Non-destructive 'maybe the same posting' detector: same city + near-identical
@@ -532,21 +555,38 @@ def find_possible_duplicates(conn: sqlite3.Connection, title_ratio: float = 0.80
     city, or under a reworded title, is found; the LLM (or, for identical text, the overlap
     alone) then decides. Each pair carries its description `overlap` (0.0 when unmeasured).
 
+    Companies listed under search.yaml's company_placeholders ("not given", a job board's own
+    name, empty) are never treated as one employer.
+
+    Candidates are found through lookups, not by comparing every job with every other, so the
+    cost grows about linearly with the number of jobs. With `with_overlap` each pair also
+    carries what dupes.rule_verdict needs: `via_title` (found by the title rules, not only by
+    text overlap), `same_title` and `title_ratio`.
+
     Surfaces candidates for a human to judge, never auto-merges. Uses only
     difflib -- no embeddings needed at this scale."""
-    rows = conn.execute("SELECT id, company, title, location, description FROM jobs").fetchall()
+    columns = "id, company, title, location" + (", description" if with_overlap else "")
+    rows = conn.execute(f"SELECT {columns} FROM jobs").fetchall()
     aliases = _company_aliases()
-    by_city: dict[str, list[tuple[int, str, str]]] = defaultdict(list)
+    placeholders = _company_placeholders()
+    at: dict[tuple[str, str], list[tuple[int, str]]] = defaultdict(list)   # (city, company) -> [(id, title)]
+    cities_of: dict[str, set[str]] = defaultdict(set)
     by_company: dict[str, list[int]] = defaultdict(list)
+    titles: dict[int, str] = {}
     for r in rows:
         title = _strip_title_junk(_normalize(r["title"]))
-        company = aliases.get(_normalize(r["company"]), r["company"])
+        company = _normalize(aliases.get(_normalize(r["company"]), r["company"]))
+        if company in placeholders:
+            continue
+        titles[r["id"]] = title
         if title:
-            by_city[_norm_city(r["location"])].append((r["id"], company, title))
-        if len(_normalize(company)) >= 3 and len((r["description"] or "").strip()) >= dupes.MIN_CHARS:
-            by_company[_normalize(company)].append(r["id"])
+            city = _norm_city(r["location"])
+            at[(city, company)].append((r["id"], title))
+            cities_of[company].add(city)
+        if with_overlap and len(company) >= 3 and len((r["description"] or "").strip()) >= dupes.MIN_CHARS:
+            by_company[company].append(r["id"])
 
-    texts = {r["id"]: r["description"] for r in rows}
+    texts = {r["id"]: r["description"] for r in rows} if with_overlap else {}
     shingled: dict[int, frozenset] = {}
 
     def overlap(a: int, b: int) -> float:
@@ -557,33 +597,44 @@ def find_possible_duplicates(conn: sqlite3.Connection, title_ratio: float = 0.80
 
     pairs, seen = [], set()
 
-    def add(a: int, b: int) -> None:
+    def add(a: int, b: int, via_title: bool) -> None:
         key = (min(a, b), max(a, b))
-        if key not in seen:
-            seen.add(key)
-            pairs.append({"a": a, "b": b, "overlap": overlap(a, b) if with_overlap else 0.0})
+        if key in seen:
+            return
+        seen.add(key)
+        pair = {"a": a, "b": b, "overlap": 0.0}
+        if with_overlap:
+            ta, tb = titles.get(key[0], ""), titles.get(key[1], "")
+            pair.update(overlap=overlap(a, b), via_title=via_title, same_title=bool(ta) and ta == tb,
+                        title_ratio=SequenceMatcher(None, ta, tb).ratio())
+        pairs.append(pair)
 
-    for bucket in by_city.values():
-        n = len(bucket)
-        for i in range(n):
-            id_a, co_a, ta = bucket[i]
-            for k in range(i + 1, n):
-                id_b, co_b, tb = bucket[k]
-                if _normalize(co_a) == _normalize(co_b):
-                    if ta == tb:
-                        add(id_a, id_b)
-                    continue
-                if not _companies_related(co_a, co_b):
-                    continue
-                if SequenceMatcher(None, ta, tb).ratio() >= title_ratio:
-                    add(id_a, id_b)
+    # Same employer, same city: only an exact (de-junked) title counts.
+    for jobs in at.values():
+        by_title: dict[str, list[int]] = defaultdict(list)
+        for job_id, title in jobs:
+            by_title[title].append(job_id)
+        for ids in by_title.values():
+            for i, a in enumerate(ids):
+                for b in ids[i + 1:]:
+                    add(a, b, via_title=True)
+
+    # Parent / subsidiary names in the same city: a near-identical title counts.
+    for short, long_ in _related_company_keys(set(cities_of)):
+        for city in cities_of[short] & cities_of[long_]:
+            for id_a, ta in at[(city, short)]:
+                for id_b, tb in at[(city, long_)]:
+                    # the ratio depends on argument order: the lower id goes first
+                    first, second = (ta, tb) if id_a < id_b else (tb, ta)
+                    if SequenceMatcher(None, first, second).ratio() >= title_ratio:
+                        add(id_a, id_b, via_title=True)
 
     if with_overlap:
         for ids in by_company.values():
             for i, a in enumerate(ids):
                 for b in ids[i + 1:]:
                     if overlap(a, b) >= dupes.CANDIDATE_OVERLAP:
-                        add(a, b)
+                        add(a, b, via_title=False)
     return pairs
 
 

@@ -1154,7 +1154,7 @@ def test_check_duplicates_skips_pair_missing_jd_content(tmp_db, config, monkeypa
 
     stats = pipeline.check_duplicates()
 
-    assert stats == {"checked": 0, "same": 0, "filtered": 0}
+    assert stats == {"checked": 0, "same": 0, "filtered": 0, "by_rule": 0}
     assert called == []
 
 
@@ -1171,7 +1171,7 @@ def test_check_duplicates_caches_verdict_and_never_rechecks(tmp_db, config, monk
     monkeypatch.setattr(pipeline.llm_dedup, "compare", fake_compare)
 
     stats = pipeline.check_duplicates()
-    assert stats == {"checked": 1, "same": 0, "filtered": 0}
+    assert stats == {"checked": 1, "same": 0, "filtered": 0, "by_rule": 0}
     assert len(calls) == 1
     with db.connect() as conn:
         assert db.get_duplicate_check(conn, a, b)["verdict"] == "different"
@@ -1191,7 +1191,7 @@ def test_check_duplicates_auto_filters_older_job_on_confident_same_verdict(tmp_d
 
     stats = pipeline.check_duplicates()
 
-    assert stats == {"checked": 1, "same": 1, "filtered": 1}
+    assert stats == {"checked": 1, "same": 1, "filtered": 1, "by_rule": 0}
     with db.connect() as conn:
         assert db.get_job(conn, older)["filtered"] == 1
         assert db.get_job(conn, newer)["filtered"] == 0   # the newer listing is kept
@@ -1206,10 +1206,70 @@ def test_check_duplicates_does_not_filter_on_low_confidence_same_verdict(tmp_db,
 
     stats = pipeline.check_duplicates()
 
-    assert stats == {"checked": 1, "same": 0, "filtered": 0}
+    assert stats == {"checked": 1, "same": 0, "filtered": 0, "by_rule": 0}
     with db.connect() as conn:
         assert db.get_job(conn, a)["filtered"] == 0
         assert db.get_job(conn, b)["filtered"] == 0
+
+
+_SHARED_TEXT = " ".join(f"shared{i}" for i in range(60))       # two listings sharing this overlap by ~30%
+
+
+def _partly_shared(own: str) -> str:
+    return _SHARED_TEXT + " " + " ".join(f"{own}{i}" for i in range(60))
+
+
+def test_two_different_roles_with_loosely_overlapping_text_are_settled_without_the_llm(tmp_db, config, monkeypatch):
+    monkeypatch.setattr(pipeline.provider, "available", lambda: True)
+    monkeypatch.setattr(pipeline.llm_dedup, "compare", lambda a, b: 1 / 0)
+    with db.connect() as conn:
+        a = _insert(conn, config, external_id="r-a", company="RuleCo", title="Data Analyst",
+                    description=_partly_shared("alpha"))
+        b = _insert(conn, config, external_id="r-b", company="RuleCo", title="Machine Learning Engineer",
+                    description=_partly_shared("beta"))
+
+    stats = pipeline.check_duplicates()
+
+    assert stats == {"checked": 1, "same": 0, "filtered": 0, "by_rule": 1}
+    with db.connect() as conn:
+        check = db.get_duplicate_check(conn, a, b)
+        assert check["verdict"] == "different" and check["reason"].startswith("rule:")
+
+
+def test_the_same_title_in_the_same_city_with_shared_text_is_a_duplicate_without_the_llm(tmp_db, config, monkeypatch):
+    monkeypatch.setattr(pipeline.provider, "available", lambda: False)
+    monkeypatch.setattr(pipeline.llm_dedup, "compare", lambda a, b: 1 / 0)
+    with db.connect() as conn:
+        older = _insert(conn, config, external_id="s-a", company="RuleCo", title="Data Scientist (H/F)",
+                        description=_partly_shared("alpha"))
+        newer = _insert(conn, config, external_id="s-b", company="RuleCo", title="Data Scientist",
+                        description=_partly_shared("beta"))
+        conn.execute("UPDATE jobs SET fetched_at = '2020-01-01 00:00:00' WHERE id = ?", (older,))
+        conn.execute("UPDATE jobs SET fetched_at = '2030-01-01 00:00:00' WHERE id = ?", (newer,))
+        conn.execute("UPDATE jobs SET filtered = 0, filter_reason = '' WHERE id IN (?, ?)", (older, newer))
+
+    stats = pipeline.check_duplicates()
+
+    assert stats == {"checked": 1, "same": 1, "filtered": 1, "by_rule": 1}
+    with db.connect() as conn:
+        assert db.get_job(conn, older)["filtered"] == 1 and db.get_job(conn, newer)["filtered"] == 0
+
+
+def test_rule_settled_pairs_do_not_use_up_the_llm_limit(tmp_db, config, monkeypatch):
+    monkeypatch.setattr(pipeline.provider, "available", lambda: True)
+    calls = []
+    monkeypatch.setattr(pipeline.llm_dedup, "compare", lambda a, b: calls.append(1) or
+                        {"verdict": "different", "confidence": "high", "reason": "x"})
+    with db.connect() as conn:
+        _insert(conn, config, external_id="l-a", company="RuleCo", title="Data Analyst",
+                description=_partly_shared("alpha"))
+        _insert(conn, config, external_id="l-b", company="RuleCo", title="Machine Learning Engineer",
+                description=_partly_shared("beta"))
+        _insert_dup_pair(conn, config)                      # needs the LLM: same title, no shared text
+
+    stats = pipeline.check_duplicates(limit=1)
+
+    assert stats["by_rule"] == 1 and stats["checked"] == 2 and len(calls) == 1
 
 
 _SAME_POSTING = ("We build a production LLM platform and need an engineer to design agentic pipelines, "
@@ -1235,7 +1295,7 @@ def test_identical_text_is_the_same_posting_without_asking_the_llm(tmp_db, confi
 
     stats = pipeline.check_duplicates()
 
-    assert stats == {"checked": 1, "same": 1, "filtered": 1}
+    assert stats == {"checked": 1, "same": 1, "filtered": 1, "by_rule": 0}
     with db.connect() as conn:
         assert db.get_job(conn, first)["filtered"] == 1 and db.get_job(conn, second)["filtered"] == 0
         reason = db.get_job(conn, first)["filter_reason"]
@@ -2064,5 +2124,5 @@ def test_check_duplicates_stops_calling_the_llm_once_the_session_limit_is_hit(tm
         raise RuntimeError("claude CLI failed (rc=1): You've hit your session limit")
 
     monkeypatch.setattr(pipeline.llm_dedup, "compare", fake_compare)
-    assert pipeline.check_duplicates(limit=10) == {"checked": 0, "same": 0, "filtered": 0}
+    assert pipeline.check_duplicates(limit=10) == {"checked": 0, "same": 0, "filtered": 0, "by_rule": 0}
     assert len(calls) == 1

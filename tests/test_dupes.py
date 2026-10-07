@@ -96,3 +96,46 @@ def test_a_company_listed_under_an_alias_is_the_same_company_for_duplicates(tmp_
                             lambda: {"company_aliases": {"Dassault Systèmes": ["3ds"]}})
         pairs = db.find_possible_duplicates(conn, with_overlap=True)
     assert [{p["a"], p["b"]} for p in pairs] == [{a, b}]
+
+
+def test_jobs_under_a_placeholder_company_are_never_paired(tmp_db, monkeypatch):
+    monkeypatch.setattr("jobhunter.config.load_search_config",
+                        lambda: {"company_placeholders": ["non renseigné"]})
+    with db.connect() as conn:
+        db.upsert_job(conn, _job("1", company="Non renseigné"), 60, "r")
+        db.upsert_job(conn, _job("2", company="non renseigné", title="AI Engineer (H/F)"), 60, "r2")
+        db.upsert_job(conn, _job("3", company="Acme", title="Data Scientist"), 60, "r3")
+        db.upsert_job(conn, _job("4", company="Acme", title="Data Scientist (H/F)"), 60, "r4")
+        pairs = db.find_possible_duplicates(conn, with_overlap=True)
+    assert len(pairs) == 1 and {pairs[0]["a"], pairs[0]["b"]} != {1, 2}      # only the two Acme jobs
+
+
+def test_a_parent_and_subsidiary_name_in_the_same_city_still_pair_on_a_near_identical_title(tmp_db):
+    with db.connect() as conn:
+        a, _ = db.upsert_job(conn, _job("1", company="Ubisoft"), 60, "r")
+        b, _ = db.upsert_job(conn, _job("2", company="Ubisoft Paris Studio", title="AI Engineer (H/F)"), 60, "r2")
+        db.upsert_job(conn, _job("3", company="Ubi", title="AI Engineer"), 60, "r3")             # too short a name
+        db.upsert_job(conn, _job("4", company="Ubisoft Paris Studio", title="Level Designer"), 60, "r4")
+        pairs = db.find_possible_duplicates(conn)
+    assert [{p["a"], p["b"]} for p in pairs] == [{a, b}]
+
+
+def _pair(**kw):
+    return {"overlap": 0.3, "via_title": False, "same_title": False, "title_ratio": 0.3, **kw}
+
+
+def test_same_title_and_city_with_some_shared_text_is_the_same_without_the_llm():
+    r = dupes.rule_verdict(_pair(via_title=True, same_title=True))
+    assert r["verdict"] == "same" and r["confidence"] == "high" and r["reason"].startswith("rule:")
+    assert dupes.rule_verdict(_pair(via_title=True, same_title=True, overlap=0.05)) is None   # no shared text: ask
+
+
+def test_different_titles_found_only_by_loose_text_overlap_are_different_without_the_llm():
+    r = dupes.rule_verdict(_pair())
+    assert r["verdict"] == "different" and r["confidence"] == "high" and r["reason"].startswith("rule:")
+
+
+def test_the_different_rule_leaves_similar_titles_or_strong_overlap_to_the_llm():
+    assert dupes.rule_verdict(_pair(title_ratio=0.85)) is None          # a reworded title may be one opening
+    assert dupes.rule_verdict(_pair(overlap=0.6)) is None               # a lot of shared text
+    assert dupes.rule_verdict(_pair(via_title=True)) is None            # found by the title rules, titles differ

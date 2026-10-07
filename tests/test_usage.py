@@ -127,6 +127,33 @@ def test_slim_mode_replaces_the_default_setup_instead_of_appending_to_it(monkeyp
     assert "--disable-slash-commands" in cmd and "--strict-mcp-config" in cmd
 
 
+def test_a_single_call_can_force_slim_on_or_off_whatever_the_global_setting(monkeypatch):
+    seen = _run_returning(monkeypatch, _envelope())
+    monkeypatch.setattr(provider, "SLIM", False)
+    provider._generate_cli("p", "sys", 30, slim=True)
+    assert "--system-prompt" in seen["cmd"] and "--append-system-prompt" not in seen["cmd"]
+    monkeypatch.setattr(provider, "SLIM", True)
+    provider._generate_cli("p", "sys", 30, slim=False)
+    assert "--append-system-prompt" in seen["cmd"] and "--system-prompt" not in seen["cmd"]
+    provider._generate_cli("p", "sys", 30)      # no override: the global setting
+    assert "--system-prompt" in seen["cmd"]
+
+
+def test_the_dedup_call_is_slim_only_when_the_config_switch_is_on(monkeypatch):
+    from jobhunter.llm import dedup
+    from jobhunter.models import Job
+    got = []
+    monkeypatch.setattr(provider, "generate_json", lambda *a, **kw: got.append(kw["slim"]) or
+                        {"verdict": "same", "confidence": "high", "reason": "r"})
+    job = Job(source="wttj", external_id="1", title="t", company="c", location="l", description="d")
+    monkeypatch.setattr("jobhunter.config.load_search_config", lambda: {"llm": {"dedup_slim": True}})
+    dedup.compare(job, job)
+    monkeypatch.setattr("jobhunter.config.load_search_config", lambda: {})
+    dedup.compare(job, job)                       # switch off: follow the global setting
+    dedup.compare(job, job, slim=False)           # an explicit choice wins over the config
+    assert got == [True, None, False]
+
+
 def test_the_usage_page_renders_logged_calls(tmp_db):
     with db.connect() as conn:
         db.record_llm_call(conn, step="cv selection", model="claude-sonnet-5", backend="claude-cli",
