@@ -1,5 +1,31 @@
 # Job Hunter — working notes
 
+## Running & testing
+
+**Python**: use the `jobhunter` conda env, never a bare `python`/`python3` on
+PATH — the shell's active/default env here is `miniforge3` (base), not this
+project's. Full interpreter path:
+`/Users/tuboshu/opt/anaconda3/envs/jobhunter/bin/python` (3.13). The package
+is installed editable in that env, so both `python -m jobhunter.cli ...` and
+the `jobhunter` console script
+(`/Users/tuboshu/opt/anaconda3/envs/jobhunter/bin/jobhunter`) work.
+
+**Tests**: `/Users/tuboshu/opt/anaconda3/envs/jobhunter/bin/python -m pytest -q`.
+`tests/test_ats_discovery.py::test_probe_returns_none_when_nothing_matches`
+hangs indefinitely (an un-mocked live network call, not yet fixed) — exclude
+it with `--ignore=tests/test_ats_discovery.py` when running the full suite.
+
+**Running the app**: `jobhunter run` is the full cron-target pass
+(fetch → judge → notify); `jobhunter fetch`/`judge`/`process`/`enrich` are the
+individual stages. `jobhunter web --port 8000` serves the FastAPI dashboard;
+`jobhunter history --port 8501` serves a separate Streamlit funnel/timeline
+view. Data lives in SQLite at `data/jobhunter.db`.
+
+**LLM backend**: `jobhunter llm-status` shows which is active. Default is the
+local `claude` CLI (`/Users/tuboshu/.local/bin/claude`, subscription-based, no
+key needed); setting `ANTHROPIC_API_KEY` switches to the direct Anthropic API
+instead.
+
 ## CV tailoring
 
 **Full workflow (evaluate-then-tailor rules, formatting rules, writing
@@ -16,12 +42,6 @@ This machine has the tools needed to compile and visually check tailored CVs,
 but none of them are on PATH by default for non-interactive shells (the Bash
 tool here doesn't source `~/.zshrc`). Use the full invocations below instead
 of re-discovering these each session.
-
-### Python / tests
-
-Use the project's conda env, not a system Python:
-`/Users/tuboshu/opt/anaconda3/envs/jobhunter/bin/python -m pytest -q`
-(`python3` on PATH resolves to it today, but use the full path to be safe).
 
 ### Compile LaTeX -> PDF
 
