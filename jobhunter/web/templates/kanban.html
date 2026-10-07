@@ -18,7 +18,7 @@
       <div style="margin-top:5px; font-size:13px;">
         {% if j["url"] %}<a href="{{ j['url'] }}" target="_blank" rel="noopener">{{ j["title"] }}</a>{% else %}{{ j["title"] }}{% endif %}
       </div>
-      <div class="muted" style="font-size:12px;">{{ j["company"] }} · {{ j["location"] }}</div>
+      <div class="muted" style="font-size:12px;">{{ j["company"] }}{% if is_esn(j["company"]) %} [ESN]{% endif %} · {{ j["location"] }}</div>
     </div>
     {% endfor %}
   </div>

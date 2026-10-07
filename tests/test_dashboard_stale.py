@@ -163,3 +163,23 @@ def test_a_newer_clean_cv_clears_the_review_count(tmp_db):
         assert db.review_count(conn) == 1
         db.add_cv_artifact(conn, jid, "/tmp/b.tex", "/tmp/b.pdf")
         assert db.review_count(conn) == 0
+
+
+def test_dashboard_labels_esn_companies_only(tmp_db):
+    with db.connect() as conn:
+        db.upsert_job(conn, Job(source="wttj", external_id="esn1", title="ML Engineer", company="Capgemini",
+                                location="Paris", url="http://x/esn1"), 60, "r")
+        db.upsert_job(conn, J("esn2", title="Other Job"), 60, "r")
+    text = TestClient(app).get("/").text
+    assert text.count(">ESN</span>") == 1
+
+
+def test_direct_apply_pill_lists_only_company_board_jobs(tmp_db):
+    with db.connect() as conn:
+        db.upsert_job(conn, Job(source="ashby", external_id="d1", title="Direct Job", company="Acme",
+                                location="Paris", url="http://x/d1"), 60, "r")
+        db.upsert_job(conn, J("d2", title="Board Job"), 60, "r")
+    client = TestClient(app)
+    text = client.get("/", params={"direct": 1}).text
+    assert "Direct Job" in text and "Board Job" not in text
+    assert "direct apply · 1" in text

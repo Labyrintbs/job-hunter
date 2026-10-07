@@ -261,7 +261,7 @@ def test_citizenship_gate_can_be_disabled_via_config(config):
 def test_client_facing_language_penalizes_score(config):
     plain = screen(J(title="AI Engineer", desc="build LLM applications"), config).score
     forward_deployed = screen(
-        J(title="Applied AI Engineer", desc="build LLM applications, forward deployed"), config
+        J(title="AI Engineer", desc="build LLM applications, forward deployed"), config
     ).score
     assert forward_deployed < plain
 
@@ -317,3 +317,20 @@ def test_detect_remote_from_text_false_for_plain_description():
 ])
 def test_a_french_departement_number_marks_a_location_as_french(config, loc, tier):
     assert match.geo_tier(loc, config) == tier
+
+
+# --- ESN label ---
+
+def test_is_esn_matches_whole_words_only():
+    from jobhunter.match import is_esn
+    names = ["capgemini", "sii", "cgi"]
+    assert is_esn("Capgemini Engineering", names)
+    assert is_esn("SII", names)
+    assert not is_esn("Siil Robotics", names)
+    assert not is_esn("Logic Gie", names)
+
+
+def test_configured_esn_list_labels_known_firms(config):
+    from jobhunter.match import is_esn
+    assert is_esn("Sopra Steria", config["esn_companies"])
+    assert not is_esn("Dataiku", config["esn_companies"])

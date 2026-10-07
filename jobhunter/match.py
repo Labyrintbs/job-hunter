@@ -12,6 +12,7 @@ title always wins, so a "5 years" mention in a junior posting can't push it out.
 """
 from __future__ import annotations
 
+import functools
 import re
 from dataclasses import dataclass, field
 
@@ -55,6 +56,19 @@ CLIENT_FACING_TERMS = [
     "pour le compte d'un client", "pour nos clients",
     "contexte de la mission", "en mission chez",
 ]
+
+
+@functools.lru_cache(maxsize=4)
+def _esn_pattern(names: tuple[str, ...]) -> re.Pattern | None:
+    if not names:
+        return None
+    return re.compile(r"(?<!\w)(?:" + "|".join(re.escape(n.lower()) for n in names) + r")(?!\w)")
+
+
+def is_esn(company: str, names) -> bool:
+    """True when the company name contains one of the configured ESN names as whole words."""
+    pattern = _esn_pattern(tuple(names))
+    return bool(pattern and pattern.search(company.lower()))
 
 
 def has_citizenship_requirement(text: str) -> bool:

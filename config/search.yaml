@@ -105,6 +105,43 @@ exclude_terms:
 # Companies to never show.
 company_blocklist: []
 
+# ESN / consulting firms: the dashboard shows an "ESN" label (whole-word match on the
+# company name, case-insensitive). Label only -- scoring is unaffected.
+esn_companies:
+  - capgemini
+  - sopra steria
+  - alten
+  - akkodis
+  - expleo
+  - atos
+  - eviden
+  - cgi
+  - onepoint
+  - sii
+  - davidson
+  - wavestone
+  - extia
+  - ippon
+  - ausy
+  - altran
+  - aubay
+  - reply
+  - devoteam
+  - sogeti
+  - accenture
+  - tata consultancy
+  - cognizant
+  - infotel
+  - assystem
+  - hardis
+  - inetum
+  - gfi
+  - umanis
+  - talan
+  - keyrus
+  - nexton
+  - randstad digital
+
 # Different names for one employer, so duplicate detection treats them as the same company
 # (canonical name: the other names it is listed under).
 company_aliases:

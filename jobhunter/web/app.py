@@ -6,13 +6,20 @@ from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from .. import db, export as export_mod, learn
+from .. import db, export as export_mod, learn, match
 from ..config import DATA_DIR, load_search_config
 from ..llm import provider, usage
 from ..tailor.engine import master_edited_at
+from ..sources import ats
 from ..pipeline import cover_one, enrich_one, import_revised_cv, judge_one, run_fetch, tailor_one
 
+# Sources whose job link is the company's own application page (not a job board's copy).
+DIRECT_APPLY_SOURCES = (*ats.SUPPORTED_ATS, "workday")
+
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+
+_ESN_NAMES = tuple(load_search_config().get("esn_companies", []))  # read once, not per job row
+TEMPLATES.env.globals["is_esn"] = lambda company: match.is_esn(company or "", _ESN_NAMES)
 
 app = FastAPI(title="Job Hunter")
 
@@ -25,7 +32,8 @@ def _startup() -> None:
 @app.get("/", response_class=HTMLResponse)
 def dashboard(request: Request, status: str | None = None, min_score: int = 0,
               filtered: int = 0, dismissed: int = 0, stale: int = 0,
-              interested: int = 0, stuck: int = 0, review: int = 0, sort: str = "score", q: str = ""):
+              interested: int = 0, stuck: int = 0, review: int = 0, direct: int = 0,
+              sort: str = "score", q: str = ""):
     days = load_search_config().get("staleness_days", 14)
     exclude = ("unavailable", "rejected") if not (
         status or dismissed or interested or filtered or stale or stuck or review) else ()
@@ -62,6 +70,13 @@ def dashboard(request: Request, status: str | None = None, min_score: int = 0,
                     if not j["description_full"] and j["enrich_attempts"] >= db.MAX_ENRICH_ATTEMPTS]
         if review:
             jobs = [j for j in jobs if j["cv_note"]]
+        if direct:
+            jobs = [j for j in jobs if j["source"] in DIRECT_APPLY_SOURCES]
+        n_direct = conn.execute(
+            f"SELECT COUNT(*) FROM jobs j JOIN applications a ON a.job_id = j.id WHERE j.filtered = 0 "
+            f"AND a.status NOT IN ('unavailable', 'rejected') "
+            f"AND j.source IN ({','.join('?' for _ in DIRECT_APPLY_SOURCES)})",
+            tuple(DIRECT_APPLY_SOURCES)).fetchone()[0]
         counts = db.status_counts(conn)
         n_review = db.review_count(conn)
         n_filtered = db.filtered_count(conn)
@@ -104,6 +119,8 @@ def dashboard(request: Request, status: str | None = None, min_score: int = 0,
             "interested": interested,
             "stuck": stuck,
             "review": review,
+            "direct": direct,
+            "n_direct": n_direct,
             "n_review": n_review,
             "sort": sort,
             "q": q,
