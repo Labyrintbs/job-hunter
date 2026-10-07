@@ -130,3 +130,18 @@ companies:
   - { name: Bureau Veritas, ats: successfactors, token: careers.bureauveritas.com }
   - { name: EssilorLuxottica, ats: successfactors, token: careers.essilorluxottica.com }
   - { name: Payflows, ats: recruitee, token: payflows }
+  - { name: "Sogelink Group", ats: teamtailor, token: sogelink }
+  - { name: "Lemrock", ats: ashby, token: lemrock }
+  # Below: added 2026-10-07 from a probe of companies already in the DB. Tokens are guessed
+  # from the company name; vinci and sigma boards belonged to namesakes and were dropped.
+  # Decathlon Technology overlaps the Decathlon board above (the larger of the two boards).
+  - { name: Cohere, ats: ashby, token: cohere }
+  - { name: Deliveroo, ats: greenhouse, token: deliveroo }
+  - { name: Assystem, ats: smartrecruiters, token: assystem }
+  - { name: Sia, ats: smartrecruiters, token: sia }
+  - { name: Decathlon Technology, ats: greenhouse, token: decathlontechnology }
+  - { name: Npv, ats: ashby, token: npv }
+  - { name: Matera, ats: recruitee, token: matera }
+  - { name: Whize, ats: recruitee, token: whize }
+  - { name: Webnet, ats: recruitee, token: webnet }
+  - { name: fortil group, ats: teamtailor, token: fortil }
