@@ -104,12 +104,25 @@ def _skills_menu(skills: list[tuple[str, list[str]]]) -> str:
         for name, items in skills)
 
 
+def _pinned_block(pinned: dict) -> str:
+    parts = []
+    if "experiences" in pinned:
+        parts.append(f"experience_ids must be exactly {pinned['experiences']} in this order")
+    if "projects" in pinned:
+        parts.append(f"project_ids must be exactly {pinned['projects']} in this order, and extra_project_ids empty")
+    return ("\nREQUIRED CHOICE (fixed by the person, not by you): " + "; ".join(parts)
+            + ". Still score every bullet of those entries as usual.\n")
+
+
 def select(job: Job, experiences: list[tuple[str, list[str]]], projects: list[tuple[str, list[str]]],
-           skills: list[tuple[str, list[str]]], judge_context: str | None = None) -> dict:
+           skills: list[tuple[str, list[str]]], judge_context: str | None = None,
+           pinned: dict | None = None) -> dict:
     """`experiences`/`projects` are [(block text, [bullet strings])] pairs, see
     engine._menu_pairs; `skills` is [(category name, [item strings])].
     `judge_context` (optional) is the fit-judge's own verdict/reasons for this
-    posting, passed through as background (see pipeline._judge_context)."""
+    posting, passed through as background (see pipeline._judge_context).
+    `pinned` ({"experiences": [ids], "projects": [ids]}, either optional) fixes which entries
+    are kept; the call then only scores them."""
     judge_block = f"\nFIT-JUDGE'S OWN ASSESSMENT OF THIS POSTING (background only, don't quote it back):\n{judge_context}\n" if judge_context else ""
     prompt = PROMPT.format(
         title=job.title,
@@ -121,5 +134,7 @@ def select(job: Job, experiences: list[tuple[str, list[str]]], projects: list[tu
         projects=_menu(projects),
         skills=_skills_menu(skills),
     )
+    if pinned:
+        prompt += _pinned_block(pinned)
     return provider.generate_json(prompt, system=SYSTEM, max_tokens=1500, json_schema=RESULT_SCHEMA,
                                   model=provider.FAST_MODEL, step="cv selection")

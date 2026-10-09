@@ -258,7 +258,7 @@ def main(argv: list[str] | None = None) -> int:
                 print("error: --name is required with --brief / --brief-file")
                 return 1
             text = args.brief or Path(args.brief_file).read_text(encoding="utf-8")
-            todo = {args.name: text.strip()}
+            todo = {args.name: {"brief": text.strip()}}
         else:
             names = args.presets or list(briefs)
             unknown = [n for n in names if n not in briefs]
@@ -267,9 +267,10 @@ def main(argv: list[str] | None = None) -> int:
                 return 1
             todo = {n: briefs[n] for n in names}
         status = 0
-        for name, brief in todo.items():
+        for name, preset in todo.items():
+            pins = {k: preset[k] for k in ("experiences", "projects") if preset.get(k)} or None
             for lang in (["en", "fr"] if args.lang == "both" else [args.lang]):
-                result = cv_engine.tailor_general(name, brief, lang)
+                result = cv_engine.tailor_general(name, preset["brief"], lang, pins=pins)
                 print(f"{name} ({lang}): {result.pdf_path or 'FAILED'}" + (f"  [{result.note}]" if result.note else ""))
                 status |= result.pdf_path is None
         return int(status)

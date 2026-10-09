@@ -142,8 +142,57 @@ def _plan_for(experiences, projects, skills, lang: str) -> fit.Plan:
     return fit.Plan([entry(b, s) for b, s in experiences], [entry(b, s, k) for b, s, k in projects], lines)
 
 
+def _find_block(blocks: list[Block], name: str) -> int:
+    """Index of the one block whose text contains `name` (case-insensitive). `a|b` accepts either
+    spelling, so one name can match the same entry in the English and the French master."""
+    options = [o.strip().lower() for o in name.split("|") if o.strip()]
+    hits = [i for i, b in enumerate(blocks) if any(o in b.text.lower() for o in options)]
+    if len(hits) != 1:
+        raise ValueError(f"pinned entry {name!r} matches {len(hits)} entries, expected exactly one")
+    return hits[0]
+
+
+def _resolve_pins(parsed: ParsedCV, pins: dict) -> dict:
+    """{"experiences": [names], "projects": [names]} -> the same as indexes into the master."""
+    ids = {}
+    for kind, blocks, cap in (("experiences", parsed.experiences, MAX_EXPERIENCES),
+                              ("projects", parsed.projects, MAX_PROJECTS)):
+        names = pins.get(kind)
+        if names:
+            if len(names) > cap:
+                raise ValueError(f"at most {cap} pinned {kind}, got {len(names)}")
+            ids[kind] = [_find_block(blocks, n) for n in names]
+    return ids
+
+
+def _pinned_answer(result: dict, ids: dict, parsed: ParsedCV) -> dict:
+    """The LLM's answer with its experience / project picks replaced by the pinned entries. Bullet
+    scores come from the answer when it scored that entry, and are a flat 50 otherwise."""
+    def scored(*prefixes):
+        seen = {}
+        for p in prefixes:
+            for i, s in zip(result.get(f"{p}_ids") or [], result.get(f"{p}_scores") or []):
+                seen.setdefault(i, s)
+        return seen
+
+    out = dict(result)
+    if "experiences" in ids:
+        known = scored("experience")
+        out["experience_ids"] = ids["experiences"]
+        out["experience_scores"] = [known.get(i) or [50] * len(parsed.experiences[i].bullets())
+                                    for i in ids["experiences"]]
+    if "projects" in ids:
+        known = scored("project", "extra_project")
+        out["project_ids"] = ids["projects"]
+        out["project_scores"] = [known.get(i) or [50] * len(parsed.projects[i].bullets())
+                                 for i in ids["projects"]]
+        out["extra_project_ids"], out["extra_project_scores"] = [], []
+    return out
+
+
 def _select_blocks(job: Job, parsed: ParsedCV, terms: set[str],
-                   judge_context: str | None = None, stored: dict | None = None) -> Selection:
+                   judge_context: str | None = None, stored: dict | None = None,
+                   pins: dict | None = None) -> Selection:
     """Decide which experiences/projects to keep and score every bullet and skills item,
     mirroring templates/cv_tailoring_workflow.md: an LLM call chooses from the real,
     existing content (see tailor/select.py), falling back to deterministic keyword
@@ -152,20 +201,28 @@ def _select_blocks(job: Job, parsed: ParsedCV, terms: set[str],
     by measuring (tailor/fit.py). `judge_context` (optional) is the fit-judge's own
     verdict/reasons for this posting, already computed and stored. `stored` is an earlier
     LLM answer to reuse instead of asking again (a refit). Each fallback is recorded via
-    fetch_diag under a `tailor_llm_*` reason."""
+    fetch_diag under a `tailor_llm_*` reason. `pins` ({"experiences": [names], "projects":
+    [names]}) fixes which entries are kept, in that order; the LLM then only scores them."""
     lang = parsed.lang
     conditional = _CONDITIONAL_SKILL_CATEGORY[lang]
     menu_cats = [c for c in parsed.skills if c.name != _FIXED_SKILL_CATEGORY[lang]]
+    pinned = _resolve_pins(parsed, pins) if pins else {}
     reason, detail = "tailor_llm_unavailable", "no LLM backend"
     if stored is not None or provider.available():
         try:
-            result = stored if stored is not None else llm_select.select(
-                job,
-                _menu_pairs(parsed.experiences),
-                _menu_pairs(parsed.projects),
-                [(c.name, split.items) for c in menu_cats if (split := snippet_bank.split_skill_items(c.line))],
-                judge_context=judge_context,
-            )
+            if stored is not None:
+                result = stored
+            else:
+                result = llm_select.select(
+                    job,
+                    _menu_pairs(parsed.experiences),
+                    _menu_pairs(parsed.projects),
+                    [(c.name, split.items) for c in menu_cats if (split := snippet_bank.split_skill_items(c.line))],
+                    judge_context=judge_context,
+                    **({"pinned": pinned} if pinned else {}),
+                )
+                if pinned:
+                    result = _pinned_answer(result, pinned, parsed)
             exps = _pick(parsed.experiences, result.get("experience_ids"), result.get("experience_scores"),
                          MAX_EXPERIENCES)
             projs = _pick(parsed.projects, result.get("project_ids"), result.get("project_scores"),
@@ -287,7 +344,7 @@ class Draft(NamedTuple):
 def _draft(job: Job, parsed: ParsedCV | None = None, judge_context: str | None = None,
            role_category: str = "", language: str = "en",
            summ: summary.Summary | None = None, stored: dict | None = None,
-           with_summary: bool = True) -> Draft:
+           with_summary: bool = True, pins: dict | None = None) -> Draft:
     """`language` picks the master CV ("en" or "fr"); an already parsed CV carries its
     own. `summ` reuses an already written summary (it doesn't depend on the selection).
     `stored` is a saved plan (see _plan_record): its LLM answer and summary are reused, so
@@ -298,7 +355,7 @@ def _draft(job: Job, parsed: ParsedCV | None = None, judge_context: str | None =
     elif stored:
         summ = summ or summary.Summary(**stored["summary"])
     selection = _select_blocks(job, parsed, _job_terms(job), judge_context=judge_context,
-                               stored=stored["selection"] if stored else None)
+                               stored=stored["selection"] if stored else None, pins=pins)
     return Draft(job, parsed, selection, summ or _write_summary(job, role_category, parsed), role_category)
 
 
@@ -473,12 +530,8 @@ def _fit_cv(draft: Draft, out_dir: Path, name: str):
     """Fit the draft to two pages (see tailor/fit.py) and keep a log of what it did next
     to the CV. Trial compiles go to a scratch directory; the caller compiles the result."""
     with tempfile.TemporaryDirectory() as tmp:
-        def trial_compile(tex):
-            return compile_tex(tex, Path(tmp), name="fit")
-
-        result = fit.fit(draft.plan, draft.render, trial_compile, _page_layout)
-        if result.status == "fit" and result.layout:
-            _try_project_orders(draft, result, trial_compile)
+        result = fit.fit(draft.plan, draft.render,
+                         lambda tex: compile_tex(tex, Path(tmp), name="fit"), _page_layout)
     lay = result.layout
     lines = [f"status: {result.status} after {result.compiles} compile(s)"]
     if lay:
@@ -487,28 +540,6 @@ def _fit_cv(draft: Draft, out_dir: Path, name: str):
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / f"{name}.fit.txt").write_text("\n".join(lines + result.log) + "\n", encoding="utf-8")
     return result
-
-
-def _try_project_orders(draft: Draft, result, compile_) -> None:
-    """Fill a big blank at the bottom of page 1 by showing the same projects in another order
-    (see fit.best_project_order). Updates `result` in place and says so in its log."""
-    def projects_in(order):
-        return [draft.selection.projects[i] for i in order]
-
-    def render_order(order):
-        plan = result.plan.copy()
-        plan.projects = [plan.projects[i] for i in order]
-        return draft._replace(selection=draft.selection._replace(projects=projects_in(order))).render(plan)
-
-    before = result.layout.free_lines(0)
-    best = fit.best_project_order(result.plan, result.layout, render_order, compile_, _page_layout)
-    if best is None:
-        return
-    order, tex, layout = best
-    plan = result.plan.copy()
-    plan.projects = [plan.projects[i] for i in order]
-    result.plan, result.tex, result.layout = plan, tex, layout
-    result.log.append(f"projects reordered {order} to fill page 1 (free lines {before:.1f} -> {layout.free_lines(0):.1f})")
 
 
 def _version_stamp() -> str:
@@ -532,7 +563,8 @@ def _publish_latest(out_dir: Path, name: str) -> None:
 def tailor_job(job: Job, job_id: int, auto: bool = False,
               judge_context: str | None = None, role_category: str = "",
               language: str | None = None, stored: dict | None = None,
-              out_dir: Path | None = None, with_summary: bool = True) -> TailorResult:
+              out_dir: Path | None = None, with_summary: bool = True,
+              pins: dict | None = None) -> TailorResult:
     """Generate + compile a tailored CV for a job. Returns a TailorResult; a failed
     compile, or a still-sparse second page after the retry, sets `note` and is
     recorded via fetch_diag under a `tailor_*` reason.
@@ -553,13 +585,13 @@ def tailor_job(job: Job, job_id: int, auto: bool = False,
     earlier version; cv.tex/cv.pdf are then refreshed as the latest working copy.
 
     `out_dir` replaces the default `<job_id>-<company>` folder; `with_summary=False` leaves
-    the summary out (see tailor_general)."""
+    the summary out; `pins` fixes the experiences / projects shown (see tailor_general)."""
     out_dir = out_dir or CV_OUT_DIR / f"{job_id}-{_slug(job.company)}"
     name = f"cv-{_version_stamp()}"
 
     language = language or job_language(job.title, job.description, job.language)
     draft = _draft(job, judge_context=judge_context, role_category=role_category, language=language,
-                   stored=stored, with_summary=with_summary)
+                   stored=stored, with_summary=with_summary, pins=pins)
     used_fallback, notes = draft.selection.used_fallback, draft.notes
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / f"{name}.plan.json").write_text(
@@ -591,19 +623,27 @@ def tailor_job(job: Job, job_id: int, auto: bool = False,
 GENERAL_BRIEFS = REPO_ROOT / "templates" / "general_briefs.yaml"
 
 
-def load_general_briefs(path: Path = GENERAL_BRIEFS) -> dict[str, str]:
-    """The presets of templates/general_briefs.yaml: name -> brief text."""
+def load_general_briefs(path: Path = GENERAL_BRIEFS) -> dict[str, dict]:
+    """The presets of templates/general_briefs.yaml: name -> {"brief": text, and optionally
+    "experiences": [names], "projects": [names]}. A plain text value is a brief with no pins."""
     import yaml
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    return {str(k): str(v).strip() for k, v in data.items() if str(v).strip()}
+    presets = {}
+    for name, value in data.items():
+        preset = dict(value) if isinstance(value, dict) else {"brief": value}
+        preset["brief"] = str(preset.get("brief") or "").strip()
+        if preset["brief"]:
+            presets[str(name)] = preset
+    return presets
 
 
-def tailor_general(name: str, brief: str, language: str = "en") -> TailorResult:
+def tailor_general(name: str, brief: str, language: str = "en", pins: dict | None = None) -> TailorResult:
     """A CV for no particular posting (a job fair, a networking contact): the same scoring and
     measured two-page fit as a job's CV, but the `brief` stands in for the posting and there is no
-    summary, so nothing names a company. Written to data/cv/general-<name>-<language>/; no
-    database record."""
+    summary, so nothing names a company. `pins` ({"experiences": [...], "projects": [...]}, names
+    as in the master) fixes which entries appear. Written to data/cv/general-<name>-<language>/;
+    no database record."""
     job = Job(source="general", external_id=name, title=f"General CV: {name}", company=name,
               description=brief, language=language)
     return tailor_job(job, 0, auto=True, language=language,
-                      out_dir=CV_OUT_DIR / f"general-{_slug(name)}-{language}", with_summary=False)
+                      out_dir=CV_OUT_DIR / f"general-{_slug(name)}-{language}", with_summary=False, pins=pins)

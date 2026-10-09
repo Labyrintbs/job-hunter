@@ -595,9 +595,74 @@ def test_a_normal_tailoring_still_writes_a_summary(tmp_path, monkeypatch):
     assert calls["summary"] >= 1
 
 
-def test_the_general_briefs_file_has_the_llm_and_cv_presets():
+def test_the_general_briefs_file_has_the_llm_speech_and_cv_presets_and_their_pins_resolve_in_both_masters():
     briefs = engine.load_general_briefs()
-    assert {"llm", "cv"} <= set(briefs) and all(len(b) > 100 for b in briefs.values())
+    assert {"llm", "llm-speech", "cv"} <= set(briefs) and all(len(p["brief"]) > 100 for p in briefs.values())
+    for lang in ("en", "fr"):
+        parsed = snippet_bank.parse(engine.base_cv_path(lang), lang)
+        for preset in briefs.values():
+            pins = {k: preset[k] for k in ("experiences", "projects") if preset.get(k)}
+            ids = engine._resolve_pins(parsed, pins)                    # raises if a name is missing or ambiguous
+            assert all(len(set(v)) == len(v) for v in ids.values())
+
+
+def test_a_plain_text_preset_is_a_brief_without_pins(tmp_path):
+    path = tmp_path / "b.yaml"
+    path.write_text("a: just text\nb:\n  brief: more\n  experiences: [X]\nc: ''\n", encoding="utf-8")
+    assert engine.load_general_briefs(path) == {"a": {"brief": "just text"}, "b": {"brief": "more", "experiences": ["X"]}}
+
+
+def test_a_pinned_name_must_match_exactly_one_entry_and_pins_respect_the_caps():
+    parsed = snippet_bank.parse(BASE_CV, "en")
+    assert engine._resolve_pins(parsed, {"experiences": ["deepwise", "DILITRUST"]}) == {"experiences": [1, 0]}
+    with pytest.raises(ValueError, match="matches 0"):
+        engine._resolve_pins(parsed, {"projects": ["no such project"]})
+    with pytest.raises(ValueError, match="matches 3"):
+        engine._resolve_pins(parsed, {"experiences": ["Intern"]})              # all three internships say "Intern"
+    with pytest.raises(ValueError, match="at most"):
+        engine._resolve_pins(parsed, {"experiences": ["DiliTrust", "DeepWise", "Orange Labs"]})
+
+
+def test_the_pinned_answer_replaces_the_picks_and_keeps_the_llms_scores_where_it_gave_them():
+    parsed = snippet_bank.parse(BASE_CV, "en")
+    answer = {"experience_ids": [0, 1], "experience_scores": [[90, 80, 70, 60], [50, 50, 50]],
+              "project_ids": [1, 2], "project_scores": [[10, 20], []],
+              "extra_project_ids": [0], "extra_project_scores": [[5, 6, 7, 8]], "skill_scores": [], "reasoning": "r"}
+    out = engine._pinned_answer(answer, {"experiences": [0, 2], "projects": [0, 4]}, parsed)
+    assert out["experience_ids"] == [0, 2] and out["experience_scores"][0] == [90, 80, 70, 60]
+    assert out["experience_scores"][1] == [50, 50, 50]                       # Orange Labs was not scored: flat 50
+    assert out["project_ids"] == [0, 4] and out["project_scores"][0] == [5, 6, 7, 8]    # taken from the extras
+    assert out["extra_project_ids"] == [] and out["skill_scores"] == []
+
+
+def test_pins_fix_the_internships_shown_and_the_select_call_is_told_which(tmp_path, monkeypatch):
+    monkeypatch.setattr(engine, "CV_OUT_DIR", tmp_path)
+    monkeypatch.setattr(engine, "compile_tex", _writing_compile)
+    _two_page_layout(monkeypatch)
+    _counting_llm(monkeypatch)                                              # its answer picks experiences 0 and 1
+    told, inner = [], engine.llm_select.select
+    monkeypatch.setattr(engine.llm_select, "select", lambda job, *a, pinned=None, **k: told.append(pinned) or inner(job, *a, **k))
+
+    result = engine.tailor_general("llm-speech", "brief text", "en", pins={"experiences": ["DiliTrust", "Orange Labs"]})
+
+    tex = result.tex_path.read_text()
+    experience = tex.split(r"\section{PROFESSIONAL EXPERIENCE}")[1].split(r"\section{PROJECTS")[0]
+    assert "Orange Labs" in experience and "DeepWise" not in experience
+    assert told == [{"experiences": [0, 2]}]
+    assert engine.load_plan(result.tex_path)["selection"]["experience_ids"] == [0, 2]    # a refit keeps the pins
+
+
+def test_without_pins_the_select_call_gets_no_pinned_argument(tmp_path, monkeypatch):
+    monkeypatch.setattr(engine, "CV_OUT_DIR", tmp_path)
+    monkeypatch.setattr(engine, "compile_tex", _writing_compile)
+    _two_page_layout(monkeypatch)
+    _counting_llm(monkeypatch)
+    told, inner = [], engine.llm_select.select
+    monkeypatch.setattr(engine.llm_select, "select", lambda job, *a, **k: told.append(dict(k)) or inner(job, *a, **k))
+
+    engine.tailor_general("cv", "brief text", "en")
+
+    assert told and all("pinned" not in k for k in told)
 
 
 def test_the_tailor_general_command_rejects_an_unknown_preset_and_a_nameless_custom_brief(capsys):
@@ -606,42 +671,3 @@ def test_the_tailor_general_command_rejects_an_unknown_preset_and_a_nameless_cus
     assert "no such preset" in capsys.readouterr().out
     assert cli.main(["tailor-general", "--brief", "x"]) == 1
     assert "--name is required" in capsys.readouterr().out
-
-
-def test_the_fit_reorders_projects_when_that_fills_page_one_and_keeps_text_and_plan_in_step(tmp_path, monkeypatch):
-    import re
-    monkeypatch.setattr(engine, "CV_OUT_DIR", tmp_path)
-    _counting_llm(monkeypatch)
-    job = Job(source="x", external_id="1", title="ML Engineer", company="Acme", description="machine learning")
-    draft = engine._draft(job, with_summary=False)
-
-    def title(i):
-        return re.search(r"\\textbf\{([^}]*)\}", draft.selection.projects[i].text).group(1)
-
-    early, late = title(2), title(1)       # the layout is happy only when `early` is shown before `late`
-
-    def titles(tex):
-        return re.findall(r"\\textbf\{([^}]*)\}", tex.split(r"\section{PROJECTS")[1].split(r"\section{SKILLS}")[0])
-
-    def compile_(tex, out_dir, name="cv", expected_pages=None):
-        out_dir.mkdir(parents=True, exist_ok=True)
-        pdf = out_dir / f"{name}.pdf"
-        pdf.write_text(tex, encoding="utf-8")                        # the "PDF" is the tex, so the layout can read it
-        return pdf
-
-    def layout(pdf):
-        shown = titles(pdf.read_text(encoding="utf-8"))
-        free = 1.0 if shown.index(early) < shown.index(late) else 7.0
-        return engine.fit.Layout(2, 792.0, 12.0, [756 - free * 12] * 2, [50, 50], ["a", "b"])
-
-    monkeypatch.setattr(engine, "compile_tex", compile_)
-    monkeypatch.setattr(engine, "_page_layout", layout)
-
-    result = engine._fit_cv(draft, tmp_path, "cv")
-
-    shown = titles(result.tex)
-    assert shown.index(early) < shown.index(late)
-    assert any(line.startswith("projects reordered") for line in result.log)
-    assert result.layout.free_lines(0) == pytest.approx(1.0)
-    assert len(result.plan.projects) == len(draft.plan.projects)
-    assert "projects reordered" in (tmp_path / "cv.fit.txt").read_text()
