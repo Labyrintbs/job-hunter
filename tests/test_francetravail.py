@@ -96,6 +96,43 @@ def test_fetch_paginates_until_short_page(monkeypatch):
     assert len(jobs) == ft.PAGE_SIZE + 5
 
 
+def test_fetch_stops_when_the_api_repeats_the_same_page(monkeypatch):
+    """Regression: when a result set fits in one response the API ignores Range and
+    returns it unchanged for every page; the loop used to request ~160 pages of the
+    same offers (about 25 minutes over five queries)."""
+    ft._token_cache.clear()
+    monkeypatch.setenv("FRANCE_TRAVAIL_CLIENT_ID", "cid")
+    monkeypatch.setenv("FRANCE_TRAVAIL_CLIENT_SECRET", "csecret")
+    monkeypatch.setattr(ft, "_get_token", lambda cid, secret: "tok")
+    monkeypatch.setattr(ft.time, "sleep", lambda *_: None)
+    offers = [{"id": str(i), "intitule": "ML Engineer", "entreprise": {"nom": "Acme"},
+               "lieuTravail": {"libelle": "Paris"}, "description": "d"} for i in range(ft.PAGE_SIZE)]
+    calls = []
+
+    class Client:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def get(self, url, params=None, headers=None):
+            calls.append(headers["Range"])
+            class Resp:
+                status_code = 200
+                def json(self_inner):
+                    return {"resultats": offers}
+            return Resp()
+
+    monkeypatch.setattr(ft.httpx, "Client", Client)
+    jobs = ft.fetch("ml engineer", departements="", max_results=1000)
+    assert len(jobs) == ft.PAGE_SIZE
+    assert len(calls) == 2    # the first page, then one repeat that ends the loop
+
+
 def test_fetch_batches_departements_and_dedups_across_batches(monkeypatch):
     # MAX_DEPARTEMENTS_PER_REQUEST forces IDF's 8 departments into batches, and the
     # same offer can legitimately appear in more than one (multi-site postings),

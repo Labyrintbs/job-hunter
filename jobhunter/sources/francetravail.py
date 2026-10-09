@@ -112,6 +112,7 @@ def _search(query: str, departements: str | None, max_results: int,
     with httpx.Client(timeout=20, headers=headers) as client:
         for batch in _dept_batches(departements):
             start = 0
+            prev_page_ids: list[str] | None = None
             while len(jobs) < max_results:
                 end = start + PAGE_SIZE - 1
                 params = {"motsCles": query, **(extra_params or {})}
@@ -125,6 +126,10 @@ def _search(query: str, departements: str | None, max_results: int,
                 results = data.get("resultats", [])
                 if not results:
                     break
+                page_ids = [str(o.get("id", "")) for o in results]
+                if page_ids == prev_page_ids:
+                    break   # a result set that fit in one response comes back unchanged for every Range
+                prev_page_ids = page_ids
                 for o in results:
                     oid = str(o.get("id", ""))
                     if oid not in seen_ids:
