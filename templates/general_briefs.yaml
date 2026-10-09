@@ -33,3 +33,14 @@ cv:
     OpenCV. LLM work is background only. The CV must not mention any company being applied to.
   experiences: [DiliTrust, DeepWise]
   projects: ["Job Hunter", "Point Cloud|nuages de points", "Polyps|polypes"]
+
+medical:
+  brief: |
+    A CV for the founder of a medical AI startup (retinal imaging, clinical decision support), who
+    is not an ML engineer and reads it to judge a possible technical collaborator. Favour medical
+    imaging: biomedical imaging coursework, CT and CTA segmentation, clinical datasets and
+    annotation workflows, class imbalance, failure diagnosis and validation. LLM work matters
+    where it shows rigorous evaluation (held-out gates, failure taxonomy) and fine-tuning.
+    Computer vision outside medicine is background only. The CV must not mention any company.
+  experiences: [DeepWise, DiliTrust]
+  projects: ["Polyps|polypes", "Point Cloud|nuages de points", "Job Hunter"]
