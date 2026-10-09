@@ -75,13 +75,13 @@
   }
 }
 
-% Each entry heading needs room for its first bullet, so it never ends a page alone
+% An entry heading stays with its first bullet (at least two lines, see \clubpenalty) without needing a fixed gap
 \newcommand{\resumeSubheading}[4]{
-  \needspace{5\baselineskip}\vspace{-2pt plus 12pt}\item
+  \vspace{-2pt plus 12pt}\item
     \begin{tabular*}{1.0\textwidth}[t]{l@{\extracolsep{\fill}}r}
       \textbf{#1} & \textbf{#2} \\
       {#3} & \textnormal{#4} \\
-    \end{tabular*}\vspace{-7pt}
+    \end{tabular*}\vspace{-7pt}\nopagebreak[4]
 }
 
 \newcommand{\resumeSubSubheading}[2]{
