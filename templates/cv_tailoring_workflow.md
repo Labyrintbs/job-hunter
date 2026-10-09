@@ -110,6 +110,12 @@ The daily run and the dashboard's CV button follow the same rules, with the page
 
 A bullet may continue onto page 2 (the master keeps each entry heading together with its first bullet, and never leaves a single line of a bullet alone on a page).
 
+### General CVs for events (`jobhunter tailor-general`)
+
+For a job fair or a networking contact there is no posting and no company to name. `jobhunter tailor-general [llm cv ...] [--lang en|fr|both]` runs the same selection and measured fit, but a short brief from `templates/general_briefs.yaml` stands in for the posting and **no summary is written** (the summary block stays empty; the header tagline is the standard one). A custom brief works too: `--name N --brief "..."` or `--brief-file path`. Each CV goes to `data/cv/general-<name>-<lang>/` (versioned like any tailoring, with its `.fit.txt` and saved plan) and nothing is recorded in the database.
+
+If page 1 ends with a big blank (the next project cannot start there), the fit step also tries the other orders of the shown projects and keeps one that fills page 1 (logged in `.fit.txt` as "projects reordered"). This applies to every tailoring, and it is the only case where projects leave the newest-first order without an argued relevance reason.
+
 ## Step 3: Formatting rules
 
 - Two pages exactly. Not 1.4 pages with a half-empty second page, not 2.1 pages.

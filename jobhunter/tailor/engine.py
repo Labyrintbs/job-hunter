@@ -286,13 +286,16 @@ class Draft(NamedTuple):
 
 def _draft(job: Job, parsed: ParsedCV | None = None, judge_context: str | None = None,
            role_category: str = "", language: str = "en",
-           summ: summary.Summary | None = None, stored: dict | None = None) -> Draft:
+           summ: summary.Summary | None = None, stored: dict | None = None,
+           with_summary: bool = True) -> Draft:
     """`language` picks the master CV ("en" or "fr"); an already parsed CV carries its
     own. `summ` reuses an already written summary (it doesn't depend on the selection).
     `stored` is a saved plan (see _plan_record): its LLM answer and summary are reused, so
-    no LLM call is made."""
+    no LLM call is made. `with_summary=False` leaves the summary empty (no summary call)."""
     parsed = parsed or snippet_bank.parse(base_cv_path(language), language)
-    if stored:
+    if not with_summary:
+        summ = summary.Summary("")
+    elif stored:
         summ = summ or summary.Summary(**stored["summary"])
     selection = _select_blocks(job, parsed, _job_terms(job), judge_context=judge_context,
                                stored=stored["selection"] if stored else None)
@@ -470,8 +473,12 @@ def _fit_cv(draft: Draft, out_dir: Path, name: str):
     """Fit the draft to two pages (see tailor/fit.py) and keep a log of what it did next
     to the CV. Trial compiles go to a scratch directory; the caller compiles the result."""
     with tempfile.TemporaryDirectory() as tmp:
-        result = fit.fit(draft.plan, draft.render,
-                         lambda tex: compile_tex(tex, Path(tmp), name="fit"), _page_layout)
+        def trial_compile(tex):
+            return compile_tex(tex, Path(tmp), name="fit")
+
+        result = fit.fit(draft.plan, draft.render, trial_compile, _page_layout)
+        if result.status == "fit" and result.layout:
+            _try_project_orders(draft, result, trial_compile)
     lay = result.layout
     lines = [f"status: {result.status} after {result.compiles} compile(s)"]
     if lay:
@@ -480,6 +487,28 @@ def _fit_cv(draft: Draft, out_dir: Path, name: str):
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / f"{name}.fit.txt").write_text("\n".join(lines + result.log) + "\n", encoding="utf-8")
     return result
+
+
+def _try_project_orders(draft: Draft, result, compile_) -> None:
+    """Fill a big blank at the bottom of page 1 by showing the same projects in another order
+    (see fit.best_project_order). Updates `result` in place and says so in its log."""
+    def projects_in(order):
+        return [draft.selection.projects[i] for i in order]
+
+    def render_order(order):
+        plan = result.plan.copy()
+        plan.projects = [plan.projects[i] for i in order]
+        return draft._replace(selection=draft.selection._replace(projects=projects_in(order))).render(plan)
+
+    before = result.layout.free_lines(0)
+    best = fit.best_project_order(result.plan, result.layout, render_order, compile_, _page_layout)
+    if best is None:
+        return
+    order, tex, layout = best
+    plan = result.plan.copy()
+    plan.projects = [plan.projects[i] for i in order]
+    result.plan, result.tex, result.layout = plan, tex, layout
+    result.log.append(f"projects reordered {order} to fill page 1 (free lines {before:.1f} -> {layout.free_lines(0):.1f})")
 
 
 def _version_stamp() -> str:
@@ -502,7 +531,8 @@ def _publish_latest(out_dir: Path, name: str) -> None:
 
 def tailor_job(job: Job, job_id: int, auto: bool = False,
               judge_context: str | None = None, role_category: str = "",
-              language: str | None = None, stored: dict | None = None) -> TailorResult:
+              language: str | None = None, stored: dict | None = None,
+              out_dir: Path | None = None, with_summary: bool = True) -> TailorResult:
     """Generate + compile a tailored CV for a job. Returns a TailorResult; a failed
     compile, or a still-sparse second page after the retry, sets `note` and is
     recorded via fetch_diag under a `tailor_*` reason.
@@ -520,13 +550,16 @@ def tailor_job(job: Job, job_id: int, auto: bool = False,
 
     Every tailoring is written under its own timestamped name (cv-<stamp>.tex/.pdf),
     which is what the returned paths point at, so a re-tailor never overwrites an
-    earlier version; cv.tex/cv.pdf are then refreshed as the latest working copy."""
-    out_dir = CV_OUT_DIR / f"{job_id}-{_slug(job.company)}"
+    earlier version; cv.tex/cv.pdf are then refreshed as the latest working copy.
+
+    `out_dir` replaces the default `<job_id>-<company>` folder; `with_summary=False` leaves
+    the summary out (see tailor_general)."""
+    out_dir = out_dir or CV_OUT_DIR / f"{job_id}-{_slug(job.company)}"
     name = f"cv-{_version_stamp()}"
 
     language = language or job_language(job.title, job.description, job.language)
     draft = _draft(job, judge_context=judge_context, role_category=role_category, language=language,
-                   stored=stored)
+                   stored=stored, with_summary=with_summary)
     used_fallback, notes = draft.selection.used_fallback, draft.notes
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / f"{name}.plan.json").write_text(
@@ -553,3 +586,24 @@ def tailor_job(job: Job, job_id: int, auto: bool = False,
         note = f"{CV_FALLBACK_NOTE}; {note}" if note else CV_FALLBACK_NOTE
     _publish_latest(out_dir, name)
     return TailorResult(out_dir / f"{name}.tex", pdf, note, language)
+
+
+GENERAL_BRIEFS = REPO_ROOT / "templates" / "general_briefs.yaml"
+
+
+def load_general_briefs(path: Path = GENERAL_BRIEFS) -> dict[str, str]:
+    """The presets of templates/general_briefs.yaml: name -> brief text."""
+    import yaml
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    return {str(k): str(v).strip() for k, v in data.items() if str(v).strip()}
+
+
+def tailor_general(name: str, brief: str, language: str = "en") -> TailorResult:
+    """A CV for no particular posting (a job fair, a networking contact): the same scoring and
+    measured two-page fit as a job's CV, but the `brief` stands in for the posting and there is no
+    summary, so nothing names a company. Written to data/cv/general-<name>-<language>/; no
+    database record."""
+    job = Job(source="general", external_id=name, title=f"General CV: {name}", company=name,
+              description=brief, language=language)
+    return tailor_job(job, 0, auto=True, language=language,
+                      out_dir=CV_OUT_DIR / f"general-{_slug(name)}-{language}", with_summary=False)

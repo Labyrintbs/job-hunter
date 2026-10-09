@@ -1,0 +1,21 @@
+# Briefs for `jobhunter tailor-general`: each one stands in for the job posting when a CV is
+# built for no particular company (job fair, networking). The selection step scores every CV
+# bullet against the brief; it only picks and ranks existing content, so a brief never adds
+# anything to the CV. Edit the wording freely.
+
+llm: |
+  A general CV handed to any employer at a job fair, aimed at LLM / generative AI engineer roles.
+  Favour hands-on evidence of working with large language models: fine-tuning (SFT, GRPO, LoRA),
+  evaluation (LLM-as-a-judge, failure analysis, held-out gates), agentic pipelines (LangGraph,
+  prompt frameworks), structured output, inference cost and latency, and building end-to-end
+  working systems in Python. Keep the strongest LLM internship and the projects that show
+  LLM systems. Computer vision work is background only. The CV must not mention any company
+  being applied to.
+
+cv: |
+  A general CV handed to any employer at a job fair, aimed at computer vision and medical imaging
+  engineer roles. Favour hands-on evidence in image and 3D understanding: segmentation and
+  classification with CNNs, medical imaging (CT, CTA, clinical datasets, annotation workflows,
+  class imbalance), 3D point cloud registration, NeRF and Blender-generated data, benchmarking
+  and failure diagnosis, PyTorch and OpenCV. Keep the medical imaging internship and the vision
+  projects. LLM work is background only. The CV must not mention any company being applied to.

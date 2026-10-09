@@ -548,3 +548,100 @@ def test_fallback_marker_is_kept_alongside_a_compile_failure_note(tmp_path, monk
 def test_llm_selection_success_is_not_marked_as_fallback(tmp_path, monkeypatch):
     result, tracker = _tailor_with_tracking(tmp_path, monkeypatch, _writing_compile)
     assert not result.fallback and dict(tracker.counts) == {}
+
+
+# ------------------------------------------------------------------ general CVs (no posting, no summary)
+
+def test_a_general_cv_uses_the_brief_as_the_posting_and_writes_no_summary(tmp_path, monkeypatch):
+    monkeypatch.setattr(engine, "CV_OUT_DIR", tmp_path)
+    monkeypatch.setattr(engine, "compile_tex", _writing_compile)
+    _two_page_layout(monkeypatch)
+    calls = _counting_llm(monkeypatch)
+    seen, inner = [], engine.llm_select.select
+    monkeypatch.setattr(engine.llm_select, "select", lambda job, *a, **k: seen.append(job) or inner(job, *a, **k))
+
+    result = engine.tailor_general("llm", "A general CV for LLM engineer roles.", "en")
+
+    assert calls["select"] == 1 and calls["summary"] == 0               # no summary is ever written
+    assert seen[0].description == "A general CV for LLM engineer roles." and seen[0].source == "general"
+    assert result.tex_path.parent == tmp_path / "general-llm-en"
+    tex = result.tex_path.read_text()
+    assert "%SUMMARY-BEGIN\n%SUMMARY-END" in tex                          # an empty summary block
+    assert "Seeking a Machine Learning role" in tex                       # the standard header tagline
+    assert engine.load_plan(result.tex_path)["summary"]["text"] == ""     # so a refit stays summary-free
+
+
+def test_a_general_cv_in_french_uses_the_french_master_and_its_own_folder(tmp_path, monkeypatch):
+    monkeypatch.setattr(engine, "CV_OUT_DIR", tmp_path)
+    monkeypatch.setattr(engine, "compile_tex", _writing_compile)
+    _two_page_layout(monkeypatch)
+    _no_llm(monkeypatch)
+
+    result = engine.tailor_general("cv", "Un CV général.", "fr")
+
+    assert result.lang == "fr" and result.tex_path.parent == tmp_path / "general-cv-fr"
+    assert "Recherche" in result.tex_path.read_text() or "recherche" in result.tex_path.read_text()
+
+
+def test_a_normal_tailoring_still_writes_a_summary(tmp_path, monkeypatch):
+    monkeypatch.setattr(engine, "CV_OUT_DIR", tmp_path)
+    monkeypatch.setattr(engine, "compile_tex", _writing_compile)
+    _two_page_layout(monkeypatch)
+    calls = _counting_llm(monkeypatch)
+    job = Job(source="x", external_id="1", title="ML Engineer", company="Acme", description="machine learning")
+
+    engine.tailor_job(job, 1, auto=True)
+
+    assert calls["summary"] >= 1
+
+
+def test_the_general_briefs_file_has_the_llm_and_cv_presets():
+    briefs = engine.load_general_briefs()
+    assert {"llm", "cv"} <= set(briefs) and all(len(b) > 100 for b in briefs.values())
+
+
+def test_the_tailor_general_command_rejects_an_unknown_preset_and_a_nameless_custom_brief(capsys):
+    from jobhunter import cli
+    assert cli.main(["tailor-general", "nope"]) == 1
+    assert "no such preset" in capsys.readouterr().out
+    assert cli.main(["tailor-general", "--brief", "x"]) == 1
+    assert "--name is required" in capsys.readouterr().out
+
+
+def test_the_fit_reorders_projects_when_that_fills_page_one_and_keeps_text_and_plan_in_step(tmp_path, monkeypatch):
+    import re
+    monkeypatch.setattr(engine, "CV_OUT_DIR", tmp_path)
+    _counting_llm(monkeypatch)
+    job = Job(source="x", external_id="1", title="ML Engineer", company="Acme", description="machine learning")
+    draft = engine._draft(job, with_summary=False)
+
+    def title(i):
+        return re.search(r"\\textbf\{([^}]*)\}", draft.selection.projects[i].text).group(1)
+
+    early, late = title(2), title(1)       # the layout is happy only when `early` is shown before `late`
+
+    def titles(tex):
+        return re.findall(r"\\textbf\{([^}]*)\}", tex.split(r"\section{PROJECTS")[1].split(r"\section{SKILLS}")[0])
+
+    def compile_(tex, out_dir, name="cv", expected_pages=None):
+        out_dir.mkdir(parents=True, exist_ok=True)
+        pdf = out_dir / f"{name}.pdf"
+        pdf.write_text(tex, encoding="utf-8")                        # the "PDF" is the tex, so the layout can read it
+        return pdf
+
+    def layout(pdf):
+        shown = titles(pdf.read_text(encoding="utf-8"))
+        free = 1.0 if shown.index(early) < shown.index(late) else 7.0
+        return engine.fit.Layout(2, 792.0, 12.0, [756 - free * 12] * 2, [50, 50], ["a", "b"])
+
+    monkeypatch.setattr(engine, "compile_tex", compile_)
+    monkeypatch.setattr(engine, "_page_layout", layout)
+
+    result = engine._fit_cv(draft, tmp_path, "cv")
+
+    shown = titles(result.tex)
+    assert shown.index(early) < shown.index(late)
+    assert any(line.startswith("projects reordered") for line in result.log)
+    assert result.layout.free_lines(0) == pytest.approx(1.0)
+    assert len(result.plan.projects) == len(draft.plan.projects)
+    assert "projects reordered" in (tmp_path / "cv.fit.txt").read_text()

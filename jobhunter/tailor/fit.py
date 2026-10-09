@@ -10,6 +10,7 @@ loop is testable without LaTeX.
 """
 from __future__ import annotations
 
+import itertools
 import math
 import re
 import statistics
@@ -36,6 +37,9 @@ MODULE_LINES = 0.4
 
 MAX_COMPILES = 10
 ADD_BACK_MIN_FREE_LINES = 2.0     # add back only when at least this much room is left
+REORDER_MIN_FREE_LINES = 3.0      # page 1 needs more blank than this before other project orders are tried
+REORDER_MIN_GAIN = 3.0            # ...and a new order must win back at least this many lines on page 1
+MAX_REORDER_TRIES = 5             # extra compiles spent on project orders
 
 
 def plain_len(text: str) -> int:
@@ -364,3 +368,42 @@ def fit(plan: Plan, render: Callable[[Plan], str], compile_: Callable[[str], Pat
     elif any(before.kept and not now.kept for before, now in zip(plan.projects, cur.projects)):
         note = "to fit two pages, a whole project was removed"
     return FitResult("fit", cur, tex, layout, compiles, log, note)
+
+
+def project_orders(plan: Plan, limit: int = MAX_REORDER_TRIES) -> list[list[int]]:
+    """Other orders of the shown projects, each a list of indexes into plan.projects. Spares that
+    are not shown keep their places, so only visible projects move."""
+    shown = [i for i, e in enumerate(plan.projects) if e.kept]
+    orders = []
+    for perm in itertools.permutations(shown):
+        if list(perm) == shown:
+            continue
+        order = list(range(len(plan.projects)))
+        for slot, source in zip(shown, perm):
+            order[slot] = source
+        orders.append(order)
+        if len(orders) == limit:
+            break
+    return orders
+
+
+def best_project_order(plan: Plan, layout: Layout, render_order: Callable[[list[int]], str],
+                       compile_: Callable[[str], Path | None], measure: Callable[[Path], Layout | None],
+                       limit: int = MAX_REORDER_TRIES) -> tuple[list[int], str, Layout] | None:
+    """A big blank at the bottom of page 1 usually means the next project cannot start there (a
+    bullet is never split), so try the other orders of the shown projects, one compile each.
+    Returns (order, tex, layout) for the order that leaves the least blank on page 1 while staying
+    on two pages, only when it wins back REORDER_MIN_GAIN lines; otherwise None."""
+    gap = layout.free_lines(0)
+    if layout.pages != 2 or gap <= REORDER_MIN_FREE_LINES:
+        return None
+    best = None
+    for order in project_orders(plan, limit):
+        tex = render_order(order)
+        pdf = compile_(tex)
+        lay = measure(pdf) if pdf else None
+        if lay is None or lay.pages != 2:
+            continue
+        if best is None or lay.free_lines(0) < best[2].free_lines(0):
+            best = (order, tex, lay)
+    return best if best and gap - best[2].free_lines(0) >= REORDER_MIN_GAIN else None

@@ -44,6 +44,16 @@ def main(argv: list[str] | None = None) -> int:
     p_tailor = sub.add_parser("tailor", help="generate + compile a tailored CV")
     p_tailor.add_argument("job_id", type=int)
 
+    p_general = sub.add_parser(
+        "tailor-general",
+        help="CV for no particular posting (job fair): no summary, one per focus in "
+             "templates/general_briefs.yaml, or a custom --brief")
+    p_general.add_argument("presets", nargs="*", help="preset names (default: all of them)")
+    p_general.add_argument("--lang", choices=["en", "fr", "both"], default="en")
+    p_general.add_argument("--name", help="folder name for a custom brief")
+    p_general.add_argument("--brief", help="a custom brief, in place of a preset")
+    p_general.add_argument("--brief-file", help="read the custom brief from this file")
+
     p_judge = sub.add_parser("judge", help="LLM fit-judge jobs")
     p_judge.add_argument("job_id", type=int, nargs="?", help="omit to judge all above --min-score")
     p_judge.add_argument("--min-score", type=int, default=40)
@@ -239,6 +249,30 @@ def main(argv: list[str] | None = None) -> int:
         print(f"tex: {result['tex']}")
         print(f"pdf: {result['pdf']}  (compiled={result['compiled']})")
         return 0
+
+    if args.command == "tailor-general":
+        from .tailor import engine as cv_engine
+        briefs = cv_engine.load_general_briefs()
+        if args.brief or args.brief_file:
+            if not args.name:
+                print("error: --name is required with --brief / --brief-file")
+                return 1
+            text = args.brief or Path(args.brief_file).read_text(encoding="utf-8")
+            todo = {args.name: text.strip()}
+        else:
+            names = args.presets or list(briefs)
+            unknown = [n for n in names if n not in briefs]
+            if unknown:
+                print(f"error: no such preset: {', '.join(unknown)} (have: {', '.join(briefs)})")
+                return 1
+            todo = {n: briefs[n] for n in names}
+        status = 0
+        for name, brief in todo.items():
+            for lang in (["en", "fr"] if args.lang == "both" else [args.lang]):
+                result = cv_engine.tailor_general(name, brief, lang)
+                print(f"{name} ({lang}): {result.pdf_path or 'FAILED'}" + (f"  [{result.note}]" if result.note else ""))
+                status |= result.pdf_path is None
+        return int(status)
 
     if args.command == "llm-status":
         print(f"LLM backend: {provider.backend()} (available={provider.available()})")
