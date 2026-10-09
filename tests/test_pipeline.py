@@ -49,6 +49,66 @@ def test_gather_collects_every_source(tmp_db, config, monkeypatch):
                                          "free_work", "lesjeudis"}
 
 
+def _stub_sources(monkeypatch, **overrides):
+    """Every source returns nothing unless a callable is given for it by name."""
+    monkeypatch.setattr(pipeline.wttj, "fetch", lambda **k: overrides.get("wttj", lambda: [])())
+    monkeypatch.setattr(pipeline.ats, "fetch_all",
+                        lambda companies, workday_queries=None: overrides.get("ats", lambda: [])())
+    monkeypatch.setattr(pipeline, "load_companies", lambda: [])
+    for name in ("linkedin", "francetravail", "hellowork", "arbeitnow", "eures",
+                 "aijobs", "free_work", "lesjeudis"):
+        fn = overrides.get(name, lambda: [])
+        monkeypatch.setattr(pipeline, f"_fetch_{name}", lambda cfg, fn=fn: fn())
+
+
+def test_parallel_fetch_stores_in_source_order_whichever_finishes_first(tmp_db, config, monkeypatch):
+    """Cross-source duplicates collapse into the first copy stored, so a slow wttj must
+    still be stored before a fast linkedin."""
+    import time
+    same = dict(title="Machine Learning Engineer", company="Acme", location="Paris, Ile-de-France, France")
+    def slow_wttj():
+        time.sleep(0.3)
+        return [Job(source="wttj", external_id="w1", **same)]
+    _stub_sources(monkeypatch, wttj=slow_wttj,
+                  linkedin=lambda: [Job(source="linkedin", external_id="l1", **same)])
+    pipeline.run_fetch({**config, "fetch_workers": 4}, force=True)
+    with db.connect() as conn:
+        rows = conn.execute("SELECT source FROM jobs").fetchall()
+    assert [r["source"] for r in rows] == ["wttj"]
+
+
+def test_each_source_is_stored_before_the_slower_ones_finish(tmp_db, config, monkeypatch):
+    """A run killed late must keep what earlier sources already stored."""
+    import time
+    seen = {}
+    def slow_linkedin():
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            with db.connect() as conn:
+                if conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]:
+                    break
+            time.sleep(0.05)
+        with db.connect() as conn:
+            seen["stored_when_linkedin_ended"] = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+        return []
+    _stub_sources(monkeypatch, linkedin=slow_linkedin,
+                  wttj=lambda: [Job(source="wttj", external_id="w1", title="Machine Learning Engineer",
+                                    company="Acme", location="Paris, Ile-de-France, France")])
+    pipeline.run_fetch({**config, "fetch_workers": 4}, force=True)
+    assert seen["stored_when_linkedin_ended"] == 1
+
+
+def test_run_fetch_skips_when_another_fetch_holds_the_lock(tmp_db, config, monkeypatch):
+    called = []
+    _stub_sources(monkeypatch, wttj=lambda: called.append(1) or [])
+    with pipeline._fetch_lock() as acquired:
+        assert acquired
+        stats = pipeline.run_fetch(config, force=True)
+    assert stats["skipped"] and stats["fetched"] == 0 and called == []
+    with db.connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM fetch_runs").fetchone()[0] == 0
+
+
 def test_gather_times_each_fetched_source_but_not_skipped_ones(tmp_db, config, monkeypatch):
     called = []
     _stub_all_sources_except_hellowork(monkeypatch, called)
@@ -63,7 +123,7 @@ def test_gather_times_each_fetched_source_but_not_skipped_ones(tmp_db, config, m
 def test_run_fetch_stores_timings_with_the_run(tmp_db, config, monkeypatch):
     import json
     monkeypatch.setattr(pipeline, "_gather",
-                        lambda cfg, force=False: pipeline._gather_seconds.update(wttj=1.5) or [])
+                        lambda cfg, force=False, on_source=None: pipeline._gather_seconds.update(wttj=1.5) or [])
     stats = pipeline.run_fetch(config)
     assert stats["timings"]["persist"] >= 0 and stats["timings"]["total"] >= stats["timings"]["persist"]
     with db.connect() as conn:
@@ -415,7 +475,7 @@ def test_enrich_one_does_not_double_tag_already_remote_location(tmp_db, config, 
 def test_run_fetch_persists_role_category(tmp_db, config, monkeypatch):
     cv_job = Job(source="wttj", external_id="42", title="Computer Vision Engineer",
                 company="Acme", location="Paris, Ile-de-France, France")
-    monkeypatch.setattr(pipeline, "_gather", lambda cfg, force=False: [cv_job])
+    monkeypatch.setattr(pipeline, "_gather", lambda cfg, force=False, on_source=None: [cv_job])
     stats = pipeline.run_fetch(config)
     with db.connect() as conn:
         row = db.get_job(conn, stats["new_ids"][0])
@@ -428,7 +488,7 @@ def test_run_fetch_precreates_cv_folder_for_kept_not_filtered_jobs(tmp_db, confi
     filtered = Job(source="wttj", external_id="2", title="ML Engineer",
                     company="OtherCo", location="Paris, Ile-de-France, France",
                     description="French citizenship is required for this role.")
-    monkeypatch.setattr(pipeline, "_gather", lambda cfg, force=False: [kept, filtered])
+    monkeypatch.setattr(pipeline, "_gather", lambda cfg, force=False, on_source=None: [kept, filtered])
     stats = pipeline.run_fetch(config)
 
     with db.connect() as conn:
@@ -545,7 +605,7 @@ def test_daily_run_enriches_before_judging(tmp_db, config, monkeypatch):
     # One fresh LinkedIn job (no description at fetch time, like real guest cards).
     fresh_job = Job(source="linkedin", external_id="99", title="Machine Learning Engineer",
                     company="Acme", location="Paris, Ile-de-France, France", url="http://x/99")
-    monkeypatch.setattr(pipeline, "_gather", lambda cfg, force=False: [fresh_job])
+    monkeypatch.setattr(pipeline, "_gather", lambda cfg, force=False, on_source=None: [fresh_job])
 
     marker = "SPECIAL_MARKER_ONLY_PRESENT_AFTER_ENRICHMENT " * 3   # clears the judge's min-length gate
     monkeypatch.setattr(pipeline.enrich, "fetch_full_text", lambda *a, **k: marker)
@@ -639,7 +699,7 @@ def _make_judgeable_jobs(n):
 
 def test_daily_run_auto_tailors_everything_but_weak_verdicts(tmp_db, config, monkeypatch):
     jobs = _make_judgeable_jobs(4)
-    monkeypatch.setattr(pipeline, "_gather", lambda cfg, force=False: jobs)
+    monkeypatch.setattr(pipeline, "_gather", lambda cfg, force=False, on_source=None: jobs)
     monkeypatch.setattr(pipeline.provider, "available", lambda: True)
     monkeypatch.setattr(pipeline.enrich, "fetch_full_text", lambda *a, **k: None)
     monkeypatch.setattr(pipeline.notify_dispatch, "send", lambda rows, cfg: {"selected": 0, "results": {}})
@@ -666,7 +726,7 @@ def test_daily_run_auto_tailors_everything_but_weak_verdicts(tmp_db, config, mon
 
 def test_daily_run_respects_auto_tailor_limit(tmp_db, config, monkeypatch):
     jobs = _make_judgeable_jobs(3)
-    monkeypatch.setattr(pipeline, "_gather", lambda cfg, force=False: jobs)
+    monkeypatch.setattr(pipeline, "_gather", lambda cfg, force=False, on_source=None: jobs)
     monkeypatch.setattr(pipeline.provider, "available", lambda: True)
     monkeypatch.setattr(pipeline.enrich, "fetch_full_text", lambda *a, **k: None)
     monkeypatch.setattr(pipeline.notify_dispatch, "send", lambda rows, cfg: {"selected": 0, "results": {}})
@@ -687,7 +747,7 @@ def test_daily_run_respects_auto_tailor_limit(tmp_db, config, monkeypatch):
 
 def test_daily_run_auto_tailor_false_skips_entirely(tmp_db, config, monkeypatch):
     jobs = _make_judgeable_jobs(1)
-    monkeypatch.setattr(pipeline, "_gather", lambda cfg, force=False: jobs)
+    monkeypatch.setattr(pipeline, "_gather", lambda cfg, force=False, on_source=None: jobs)
     monkeypatch.setattr(pipeline.provider, "available", lambda: True)
     monkeypatch.setattr(pipeline.enrich, "fetch_full_text", lambda *a, **k: None)
     monkeypatch.setattr(pipeline.notify_dispatch, "send", lambda rows, cfg: {"selected": 0, "results": {}})
@@ -2055,7 +2115,7 @@ def test_judge_all_excludes_short_description_jobs_from_the_queue(tmp_db, config
 def test_daily_run_does_not_judge_jobs_whose_enriched_text_is_still_short(tmp_db, config, monkeypatch):
     fresh_job = Job(source="linkedin", external_id="98", title="Machine Learning Engineer",
                     company="Acme", location="Paris, Ile-de-France, France", url="http://x/98")
-    monkeypatch.setattr(pipeline, "_gather", lambda cfg, force=False: [fresh_job])
+    monkeypatch.setattr(pipeline, "_gather", lambda cfg, force=False, on_source=None: [fresh_job])
     monkeypatch.setattr(pipeline.enrich, "fetch_full_text", lambda *a, **k: "only a teaser")
     monkeypatch.setattr(pipeline.provider, "available", lambda: True)
     called = []

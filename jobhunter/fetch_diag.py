@@ -7,10 +7,12 @@ run_tracking() block is active, so it's safe to call from anywhere with no
 signature changes to any fetch function."""
 from __future__ import annotations
 
+import threading
 from collections import defaultdict
 
 _SAMPLE_CAP = 3
 _current: "_Tracker | None" = None
+_lock = threading.Lock()   # sources fetch in parallel threads
 
 
 class _Tracker:
@@ -30,9 +32,10 @@ def track(source: str, reason: str, detail: str = "", company: str = "") -> None
     if _current is None:
         return
     key = (source, company, reason)
-    _current.counts[key] += 1
-    if len(_current.samples[key]) < _SAMPLE_CAP:
-        _current.samples[key].append(detail)
+    with _lock:
+        _current.counts[key] += 1
+        if len(_current.samples[key]) < _SAMPLE_CAP:
+            _current.samples[key].append(detail)
 
 
 class run_tracking:

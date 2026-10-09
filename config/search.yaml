@@ -168,6 +168,10 @@ staleness_days: 14
 # 1000-hit ceiling -- far past the old 100 cap, so depth here is genuine coverage.
 max_hits: 300
 
+# Sources fetched in parallel threads (1 = one at a time). Storing order stays the
+# fixed source order either way, see pipeline._gather.
+fetch_workers: 10
+
 wttj:
   # Real server-side pagination (not a frozen relevance ranking) with proven high
   # volume -- worth checking more often than a source like HelloWork whose

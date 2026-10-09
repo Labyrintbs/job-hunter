@@ -5,6 +5,7 @@ import re
 import shutil
 import subprocess
 import time
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -182,12 +183,20 @@ def _is_due(conn, name: str, config: dict) -> bool:
 _gather_seconds: dict[str, float] = {}   # source -> seconds, from the latest _gather()
 
 
-def _gather(config: dict, force: bool = False) -> list:
+def _gather(config: dict, force: bool = False, on_source=None) -> list:
     """Pull every enabled source. Each is isolated: one source's failure (a bad
     token, a network hiccup, a rate-limit) only drops that source's jobs, never
     the whole run. A source not yet due per its own fetch_interval_hours is
     skipped (contributing no jobs this tick) unless force=True -- used for an
-    explicit on-demand "check now" that should bypass all cadence gating."""
+    explicit on-demand "check now" that should bypass all cadence gating.
+
+    Sources are fetched in parallel threads (search.yaml fetch_workers; 1 = one at
+    a time), but handed over strictly in the list order below, whichever finishes
+    first: the first copy of a cross-source duplicate to be stored becomes the row
+    (db.upsert_job), so the storing order must not depend on network speed. With
+    on_source(name, jobs) each source is handed over as soon as it and the sources
+    before it are done, so a killed run keeps what it already stored; the return
+    value is then empty. Without it, all jobs are returned."""
     sources = [
         ("wttj", lambda: _fetch_wttj(config)),
         ("ats", lambda: _fetch_ats(config)),
@@ -203,25 +212,39 @@ def _gather(config: dict, force: bool = False) -> list:
     jobs: list = []
     counts: dict[str, object] = {}
     _gather_seconds.clear()
+
+    def timed(name, fn):
+        started = time.perf_counter()
+        try:
+            got = fn()
+        except Exception as exc:
+            print(f"  {name} warn: {exc}")
+            got = []
+        return got, round(time.perf_counter() - started, 1)
+
     with db.connect() as conn, fetch_diag.run_tracking() as tracker:
+        due = []
         for name, fn in sources:
             if not force and not _is_due(conn, name, config):
                 interval = config[name]["fetch_interval_hours"]
                 state = db.get_source_fetch_state(conn, name)
                 remaining = max(0.0, interval - _hours_since(state["last_attempted_at"]))
                 counts[name] = f"skipped (next due in ~{remaining:.1f}h)"
-                continue
-            started = time.perf_counter()
-            try:
-                got = fn()
-            except Exception as exc:
-                print(f"  {name} warn: {exc}")
-                got = []
-            _gather_seconds[name] = round(time.perf_counter() - started, 1)
-            counts[name] = len(got)
-            jobs += got
-            db.record_source_fetch(conn, name, len(got))
-            conn.commit()    # don't hold the write lock through the next (slow) source
+            else:
+                due.append((name, fn))
+        workers = max(1, int(config.get("fetch_workers", 1)))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            pending = [(name, pool.submit(timed, name, fn)) for name, fn in due]
+            for name, future in pending:
+                got, seconds = future.result()
+                _gather_seconds[name] = seconds
+                counts[name] = len(got)
+                db.record_source_fetch(conn, name, len(got))
+                conn.commit()    # don't hold the write lock while the next source is awaited
+                if on_source:
+                    on_source(name, got)
+                else:
+                    jobs += got
         tracker.flush(conn)
     print(f"  fetched by source: {counts}")
     print(f"  seconds by source: {_gather_seconds}")
@@ -257,52 +280,97 @@ def _persist_jobs(conn, config: dict, jobs: list) -> list[tuple]:
     return results
 
 
+@contextmanager
+def _fetch_lock():
+    """Non-blocking cross-process lock (yields whether it was acquired): an hourly run
+    that starts while the previous fetch is still going, or a manual fetch from the
+    dashboard, must not fetch the same sources twice at once."""
+    db.DATA_DIR.mkdir(parents=True, exist_ok=True)
+    with open(db.DATA_DIR / ".fetch.lock", "w") as lock_file:
+        try:
+            fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            yield False
+            return
+        try:
+            yield True
+        finally:
+            fcntl.flock(lock_file, fcntl.LOCK_UN)
+
+
+def _empty_fetch_stats(**extra) -> dict:
+    return {"fetched": 0, "kept": 0, "new": 0, "filtered_new": 0, "new_ids": [],
+            "new_by_source": {}, "new_idf": 0, "new_major_city": 0, "new_france": 0,
+            "new_remote": 0, "new_outside": 0, "new_europe_remote": 0,
+            "timings": {}, **extra}
+
+
 def run_fetch(config: dict | None = None, jobs: list | None = None, force: bool = False) -> dict:
     config = config or load_search_config()
     db.init_db()
+    with _fetch_lock() as acquired:
+        if not acquired:
+            print("  another fetch is already running; skipping this one")
+            return _empty_fetch_stats(skipped="another fetch is already running")
+        return _run_fetch(config, jobs, force)
 
+
+def _run_fetch(config: dict, jobs: list | None, force: bool) -> dict:
     run_started = time.perf_counter()
     _gather_seconds.clear()   # stays empty when jobs are passed in (nothing was fetched)
-    if jobs is None:
-        jobs = _gather(config, force=force)
-    persist_started = time.perf_counter()
 
     new_ids: list[int] = []
-    filtered_new = 0
+    totals = {"fetched": 0, "kept": 0, "filtered_new": 0, "persist": 0.0}
     per_source: dict[str, int] = {}
     # Geography of ALL new postings this run (filtered included) = the market signal.
     tier_new = {"idf": 0, "france": 0, "remote": 0, "outside": 0, "unknown": 0}
-    with db.connect() as conn:
-        kept = _persist_jobs(conn, config, jobs)
-        for job, s, tier, jid, is_new in kept:
-            if is_new:
-                tier_new[tier] = tier_new.get(tier, 0) + 1
-                for rid in s.matched_rules:
-                    db.bump_rule_hits(conn, rid)
-                if s.filtered:
-                    filtered_new += 1
-                else:
-                    new_ids.append(jid)
-                    per_source[job.source] = per_source.get(job.source, 0) + 1
-                    # Pre-create the CV folder as soon as a job clears the filter (i.e.
-                    # would show on the dashboard), so the JD (once fetched) and any
-                    # tailored CV later land in the same place for offline analysis.
-                    out_dir = cv_engine.CV_OUT_DIR / f"{jid}-{cv_engine._slug(job.company)}"
-                    out_dir.mkdir(parents=True, exist_ok=True)
 
-        stats = {
-            "fetched": len(jobs), "kept": len(kept), "new": len(new_ids),
-            "filtered_new": filtered_new, "new_ids": new_ids, "new_by_source": per_source,
-            "new_idf": tier_new["idf"], "new_major_city": tier_new.get("major_city", 0),
-            "new_france": tier_new["france"],
-            "new_remote": tier_new["remote"], "new_outside": tier_new["outside"],
-            "new_europe_remote": tier_new.get("europe_remote", 0),
-            "timings": {
-                "sources": dict(_gather_seconds),
-                "persist": round(time.perf_counter() - persist_started, 1),
-                "total": round(time.perf_counter() - run_started, 1),
-            },
-        }
+    def store(_source: str, batch: list) -> None:
+        """Screen and store one source's jobs in their own transaction, so a run that
+        dies later keeps everything stored so far."""
+        started = time.perf_counter()
+        with db.connect() as conn:
+            kept = _persist_jobs(conn, config, batch)
+            for job, s, tier, jid, is_new in kept:
+                if is_new:
+                    tier_new[tier] = tier_new.get(tier, 0) + 1
+                    for rid in s.matched_rules:
+                        db.bump_rule_hits(conn, rid)
+                    if s.filtered:
+                        totals["filtered_new"] += 1
+                    else:
+                        new_ids.append(jid)
+                        per_source[job.source] = per_source.get(job.source, 0) + 1
+                        # Pre-create the CV folder as soon as a job clears the filter (i.e.
+                        # would show on the dashboard), so the JD (once fetched) and any
+                        # tailored CV later land in the same place for offline analysis.
+                        out_dir = cv_engine.CV_OUT_DIR / f"{jid}-{cv_engine._slug(job.company)}"
+                        out_dir.mkdir(parents=True, exist_ok=True)
+        totals["fetched"] += len(batch)
+        totals["kept"] += len(kept)
+        totals["persist"] += time.perf_counter() - started
+
+    if jobs is None:
+        # _gather hands each source to store() as it completes; anything it returns
+        # instead was not handed over.
+        jobs = _gather(config, force=force, on_source=store)
+    if jobs:
+        store("injected", jobs)
+
+    stats = {
+        "fetched": totals["fetched"], "kept": totals["kept"], "new": len(new_ids),
+        "filtered_new": totals["filtered_new"], "new_ids": new_ids, "new_by_source": per_source,
+        "new_idf": tier_new["idf"], "new_major_city": tier_new.get("major_city", 0),
+        "new_france": tier_new["france"],
+        "new_remote": tier_new["remote"], "new_outside": tier_new["outside"],
+        "new_europe_remote": tier_new.get("europe_remote", 0),
+        "timings": {
+            "sources": dict(_gather_seconds),
+            "persist": round(totals["persist"], 1),
+            "total": round(time.perf_counter() - run_started, 1),
+        },
+    }
+    with db.connect() as conn:
         db.add_fetch_run(conn, stats)
     print(f"  screen+store {stats['timings']['persist']}s, fetch run total {stats['timings']['total']}s")
     return stats
