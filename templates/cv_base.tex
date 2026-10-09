@@ -40,7 +40,10 @@
 
 \urlstyle{same}
 
-\raggedbottom
+% A page that ends early (the next block cannot start there) is stretched, through the glue
+% before sections and entries, instead of leaving a blank; the last page is never stretched.
+\flushbottom
+\vbadness=10000
 \clubpenalty=10000 \widowpenalty=10000   % never leave a single line of a bullet alone on a page
 \justifying
 \setlength{\tabcolsep}{0in}
@@ -49,9 +52,11 @@
 \titleformat{\section}{
   \vspace{-4pt}\scshape\raggedright\large\bfseries
 }{}{0em}{}[\color{black}\titlerule \vspace{-5pt}]
-% A section heading never ends a page alone: it moves with the first lines of its content
+\titlespacing*{\section}{0pt}{3.5ex plus 30pt minus .2ex}{2.3ex plus .2ex}
+% A section heading never ends a page alone: it moves with the first lines of its content.
+% Projects need more (their heading and description cannot split), see \needspace before them.
 \let\oldsection\section
-\renewcommand{\section}[1]{\needspace{8\baselineskip}\oldsection{#1}}
+\renewcommand{\section}[1]{\needspace{5\baselineskip}\oldsection{#1}}
 
 % Ensure that generated pdf is machine readable/ATS parsable
 \pdfgentounicode=1
@@ -72,7 +77,7 @@
 
 % Each entry heading needs room for its first bullet, so it never ends a page alone
 \newcommand{\resumeSubheading}[4]{
-  \needspace{5\baselineskip}\vspace{-2pt}\item
+  \needspace{5\baselineskip}\vspace{-2pt plus 12pt}\item
     \begin{tabular*}{1.0\textwidth}[t]{l@{\extracolsep{\fill}}r}
       \textbf{#1} & \textbf{#2} \\
       {#3} & \textnormal{#4} \\
@@ -191,6 +196,7 @@
   \resumeSubHeadingListEnd
 
 %-----------PROJECTS & RESEARCH-----------
+\needspace{8\baselineskip}
 \section{PROJECTS \& RESEARCH EXPERIENCE}
     \vspace{-5pt}
     \resumeSubHeadingListStart
