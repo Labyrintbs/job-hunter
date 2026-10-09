@@ -179,6 +179,9 @@ def _is_due(conn, name: str, config: dict) -> bool:
     return _hours_since(state["last_attempted_at"]) >= interval
 
 
+_gather_seconds: dict[str, float] = {}   # source -> seconds, from the latest _gather()
+
+
 def _gather(config: dict, force: bool = False) -> list:
     """Pull every enabled source. Each is isolated: one source's failure (a bad
     token, a network hiccup, a rate-limit) only drops that source's jobs, never
@@ -199,6 +202,7 @@ def _gather(config: dict, force: bool = False) -> list:
     ]
     jobs: list = []
     counts: dict[str, object] = {}
+    _gather_seconds.clear()
     with db.connect() as conn, fetch_diag.run_tracking() as tracker:
         for name, fn in sources:
             if not force and not _is_due(conn, name, config):
@@ -207,17 +211,20 @@ def _gather(config: dict, force: bool = False) -> list:
                 remaining = max(0.0, interval - _hours_since(state["last_attempted_at"]))
                 counts[name] = f"skipped (next due in ~{remaining:.1f}h)"
                 continue
+            started = time.perf_counter()
             try:
                 got = fn()
             except Exception as exc:
                 print(f"  {name} warn: {exc}")
                 got = []
+            _gather_seconds[name] = round(time.perf_counter() - started, 1)
             counts[name] = len(got)
             jobs += got
             db.record_source_fetch(conn, name, len(got))
             conn.commit()    # don't hold the write lock through the next (slow) source
         tracker.flush(conn)
     print(f"  fetched by source: {counts}")
+    print(f"  seconds by source: {_gather_seconds}")
     return jobs
 
 
@@ -254,8 +261,11 @@ def run_fetch(config: dict | None = None, jobs: list | None = None, force: bool 
     config = config or load_search_config()
     db.init_db()
 
+    run_started = time.perf_counter()
+    _gather_seconds.clear()   # stays empty when jobs are passed in (nothing was fetched)
     if jobs is None:
         jobs = _gather(config, force=force)
+    persist_started = time.perf_counter()
 
     new_ids: list[int] = []
     filtered_new = 0
@@ -287,8 +297,14 @@ def run_fetch(config: dict | None = None, jobs: list | None = None, force: bool 
             "new_france": tier_new["france"],
             "new_remote": tier_new["remote"], "new_outside": tier_new["outside"],
             "new_europe_remote": tier_new.get("europe_remote", 0),
+            "timings": {
+                "sources": dict(_gather_seconds),
+                "persist": round(time.perf_counter() - persist_started, 1),
+                "total": round(time.perf_counter() - run_started, 1),
+            },
         }
         db.add_fetch_run(conn, stats)
+    print(f"  screen+store {stats['timings']['persist']}s, fetch run total {stats['timings']['total']}s")
     return stats
 
 

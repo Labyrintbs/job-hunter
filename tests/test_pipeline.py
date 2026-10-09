@@ -49,6 +49,29 @@ def test_gather_collects_every_source(tmp_db, config, monkeypatch):
                                          "free_work", "lesjeudis"}
 
 
+def test_gather_times_each_fetched_source_but_not_skipped_ones(tmp_db, config, monkeypatch):
+    called = []
+    _stub_all_sources_except_hellowork(monkeypatch, called)
+    with db.connect() as conn:
+        db.record_source_fetch(conn, "hellowork", 5)   # just fetched -> not due again
+    pipeline._gather(config)
+    assert "hellowork" not in pipeline._gather_seconds
+    assert "linkedin" in pipeline._gather_seconds
+    assert all(s >= 0 for s in pipeline._gather_seconds.values())
+
+
+def test_run_fetch_stores_timings_with_the_run(tmp_db, config, monkeypatch):
+    import json
+    monkeypatch.setattr(pipeline, "_gather",
+                        lambda cfg, force=False: pipeline._gather_seconds.update(wttj=1.5) or [])
+    stats = pipeline.run_fetch(config)
+    assert stats["timings"]["persist"] >= 0 and stats["timings"]["total"] >= stats["timings"]["persist"]
+    with db.connect() as conn:
+        stored = json.loads(conn.execute("SELECT timings FROM fetch_runs").fetchone()["timings"])
+    assert stored["sources"] == {"wttj": 1.5}
+    assert set(stored) == {"sources", "persist", "total"}
+
+
 def _stub_all_sources_except_hellowork(monkeypatch, called):
     monkeypatch.setattr(pipeline.wttj, "fetch", lambda **k: [])
     monkeypatch.setattr(pipeline.ats, "fetch_all", lambda companies, workday_queries=None: [])

@@ -194,7 +194,8 @@ CREATE TABLE IF NOT EXISTS fetch_runs (
     new_france  INTEGER DEFAULT 0,
     new_remote  INTEGER DEFAULT 0,
     new_outside INTEGER DEFAULT 0,
-    new_europe_remote INTEGER DEFAULT 0
+    new_europe_remote INTEGER DEFAULT 0,
+    timings     TEXT DEFAULT ''         -- JSON {"sources": {name: seconds}, "persist": s, "total": s}
 );
 
 -- Fetch-phase drop/degradation counters (see jobhunter/fetch_diag.py) --
@@ -317,6 +318,7 @@ MIGRATIONS = {
     "fetch_runs": {
         "new_major_city": "INTEGER DEFAULT 0",
         "new_europe_remote": "INTEGER DEFAULT 0",
+        "timings": "TEXT DEFAULT ''",
     },
     "source_fetch_state": {
         "cursor": "TEXT DEFAULT ''",
@@ -756,14 +758,16 @@ def add_fetch_run(conn: sqlite3.Connection, stats: dict) -> int:
     cur = conn.execute(
         """INSERT INTO fetch_runs
            (fetched, kept, new, filtered_new, by_source,
-            new_idf, new_major_city, new_france, new_remote, new_outside, new_europe_remote)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            new_idf, new_major_city, new_france, new_remote, new_outside, new_europe_remote,
+            timings)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             stats.get("fetched", 0), stats.get("kept", 0), stats.get("new", 0),
             stats.get("filtered_new", 0), json.dumps(stats.get("new_by_source", {})),
             stats.get("new_idf", 0), stats.get("new_major_city", 0), stats.get("new_france", 0),
             stats.get("new_remote", 0), stats.get("new_outside", 0),
             stats.get("new_europe_remote", 0),
+            json.dumps(stats.get("timings", {})),
         ),
     )
     return cur.lastrowid
