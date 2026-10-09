@@ -49,6 +49,9 @@
 \titleformat{\section}{
   \vspace{-4pt}\scshape\raggedright\large\bfseries
 }{}{0em}{}[\color{black}\titlerule \vspace{-5pt}]
+% A section heading never ends a page alone: it moves with the first lines of its content
+\let\oldsection\section
+\renewcommand{\section}[1]{\needspace{8\baselineskip}\oldsection{#1}}
 
 % Ensure that generated pdf is machine readable/ATS parsable
 \pdfgentounicode=1
@@ -57,7 +60,7 @@
 % Custom commands
 \newcommand{\resumeItem}[1]{
   \item\small{
-    {#1 \vspace{-1pt}}
+    {#1\vspace{-1pt}}
   }
 }
 
