@@ -24,6 +24,7 @@ role_categories:
     - conversational ai
     - traitement du langage naturel
     - traitement automatique du langage
+    - traitement du langage
   CV:
     - computer vision
     - image processing
@@ -43,6 +44,7 @@ role_categories:
     - nuage de points
     - traitement d'image
     - vision par ordinateur
+    - vision-language
   AI:
     - genai
     - generative ai
@@ -63,8 +65,35 @@ role_categories:
     - chercheur en ia
     - chercheur en intelligence artificielle
     - ia générative
+    - ia generative
+    - ia gen
     - intelligence artificielle générative
     - grands modèles de langage
+    # French/title variants seen dropped as not_ml_relevant (fetch_drops log)
+    - agentique
+    - agent ia
+    - agents ia
+    - ai agent
+    - ai/ml
+    - ia/ml
+    - ai-ml
+    - ingénieur intelligence artificielle
+    - ingenieur intelligence artificielle
+    - ingénieur(e) intelligence artificielle
+    - ingénieur(e) ia
+    - ingénieur développeur ia
+    - développeur ia
+    - developpeur ia
+    - développeur(se) ia
+    - developpeur(se) ia
+    - développeur(euse) ia
+    - développeur intelligence artificielle
+    - développeur en intelligence artificielle
+    - ia engineer
+    - ai developer
+    - ai scientist
+    - spécialiste ia
+    - spécialiste en intelligence artificielle
   ML/DL:
     - machine learning
     - deep learning
@@ -86,6 +115,15 @@ role_categories:
     - ingénieur algorithmes
     - ingénieur en algorithmique
     - ingénieur de recherche
+    - data-scientist
+    - datascientist
+    - data science engineer
+    - ingénieur data science
+    - ingenieur data science
+    - ingénieur en science des données
+    - ml ops
+    - reinforcement learning
+    - robot learning
   PM:
     - ai product manager
     - product manager ai
@@ -97,6 +135,98 @@ role_categories:
     - technical product owner
     - chef de produit ia
     - chef de produit - ia
+
+# Second way into is_relevant: an AI term and a technical role noun within
+# title_pattern_window characters of each other, either order ("AI Software
+# Engineer", "Développeur Python / IA", "Software Engineer (AI)"), so each
+# phrasing needn't be listed above. Regex fragments, case-insensitive. A title
+# with any title_pattern_excludes substring never enters this way (non-engineering
+# roles); role_categories phrases above are unaffected by the excludes.
+title_pattern_window: 60
+title_ai_terms:
+  - '\bia\b'
+  - '\bai\b'
+  - '\bml\b'
+  - '\bllm'
+  - '\bgen ?ai\b'
+  - 'intelligence artificielle'
+  - 'artificial intelligence'
+  - 'machine learning'
+  - 'agentic'
+  - 'agentique'
+  - 'g[ée]n[ée]rative'
+  - 'generative'
+  - '\brag\b'
+  - '\bnlp\b'
+title_role_terms:
+  - 'engineer'
+  - 'enginer'
+  - 'ing[ée]nieur'
+  - 'd[ée]velopp?eu\w*'
+  - 'developpeu\w*'
+  - 'developer'
+  - '\bdev\b'
+  - 'scientist'
+  - 'chercheu\w*'
+  - 'researcher'
+  - 'programmeur'
+  - 'sp[ée]cialiste'
+  - 'specialist'
+  - '\bexpert\b'
+  - 'tech ?lead'
+  - 'softwareentwickler'
+title_pattern_excludes:
+  - product owner
+  - product manager
+  - product builder
+  - chef de projet
+  - chef(fe) de projet
+  - project manager
+  - consultant
+  - manager
+  - head of
+  - director
+  - sales
+  - presales
+  - pre-sales
+  - business
+  - d'affaires
+  - commercial
+  - account
+  - marketing
+  - recruit
+  - customer success
+  - onboarding
+  - enablement
+  - field engineer
+  - trainer
+  - physician
+  - doctor
+  - patent
+  - growth
+  - seo
+  - designer
+  - devops
+  - sre
+  - reliability
+  - security
+  - sécurité
+  - cyber
+  - enseignant
+  - professeur
+  - formation
+  - pédagogi
+  - strategist
+  - advisor
+  - analyst
+  - analyste
+  - architect
+  - architecte
+  - support
+  - technician
+  - technicien
+  - player experience
+  - sap developer
 
 # Cross-cutting tool/technique terms that don't identify one category (used
 # across NLP/CV/AI/ML-DL equally) -- pooled into score()'s depth bonus instead

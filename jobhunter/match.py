@@ -296,7 +296,26 @@ def classify_role(title: str, description: str, config: dict) -> str:
     for cat in _SPECIFIC_ROLE_CATEGORIES:
         if cat in matches:
             return cat
+    # A title admitted only by the AI-term + role-noun pattern ("AI Software Engineer")
+    # has no category keyword of its own.
+    if matches.get("ML/DL") != "title" and _title_pattern_hit(title, config):
+        return "AI"
     return "ML/DL"
+
+
+def _title_pattern_hit(title: str, config: dict) -> bool:
+    """An AI term and a technical role noun close together in the title, in either
+    order (scoring.yaml title_*). Excluded titles (managers, sales, ...) never match."""
+    ai = config.get("title_ai_terms") or []
+    roles = config.get("title_role_terms") or []
+    if not ai or not roles:
+        return False
+    low = title.lower()
+    if any(x.lower() in low for x in config.get("title_pattern_excludes", [])):
+        return False
+    a, r = "|".join(ai), "|".join(roles)
+    gap = config.get("title_pattern_window", 60)
+    return re.search(rf"(?:{r}).{{0,{gap}}}(?:{a})|(?:{a}).{{0,{gap}}}(?:{r})", low) is not None
 
 
 def is_relevant(job: Job, config: dict) -> bool:
@@ -305,7 +324,7 @@ def is_relevant(job: Job, config: dict) -> bool:
     title = job.title.lower()
     cats = config.get("role_categories") or {}
     role_kw = [t.lower() for terms in cats.values() for t in terms]
-    return any(k in title for k in role_kw)
+    return any(k in title for k in role_kw) or _title_pattern_hit(job.title, config)
 
 
 def _apply_rules(job: Job, config: dict) -> tuple[list[str], list[int]]:

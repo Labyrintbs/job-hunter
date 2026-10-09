@@ -62,6 +62,43 @@ def test_ai_technical_pm_titles_relevant(config):
     assert is_relevant(J(title="Chef de Produit IA"), config) is True
 
 
+def test_french_agentic_and_developer_titles_relevant(config):
+    # Regression: a real CGI posting (Nantes) was dropped as not_ml_relevant because
+    # "agentique", "développeur ia" and "IA – Générative" weren't in role_categories.
+    title = "Développeur(se) IA – Générative et Agentique F/H"
+    assert is_relevant(J(title=title), config) is True
+    s = screen(J(title=title, loc="Nantes, Pays de la Loire, France"), config)
+    assert s.keep is True and s.filtered is False
+    assert classify_role(title, "", config) == "AI"
+
+
+@pytest.mark.parametrize("title", [
+    "AI Software Engineer",
+    "Software Engineer (AI)",
+    "Développeur Python / IA",
+    "Ingénieur Intelligence Artificielle - Workflows Agentiques - H/F",
+    "Ingénieur(e) IA Expérimenté(e) H/F",
+    "Expert IA H/F",
+    "DATA-SCIENTIST - H/F",
+    "ML Ops Engineer",
+    "Tech Lead IA H/F",
+])
+def test_title_pattern_admits_ai_engineering_titles(config, title):
+    assert is_relevant(J(title=title), config) is True
+
+
+@pytest.mark.parametrize("title", [
+    "Product Owner Data & IA H/F",
+    "AI Sales Engineer",
+    "Consultant Data & IA - F/H",
+    "Engineering Manager - AI platform",
+    "Architecte Solutions IA",
+    "Ingénieur Pédagogique Digital Learning",
+])
+def test_title_pattern_keeps_non_engineering_titles_out(config, title):
+    assert is_relevant(J(title=title), config) is False
+
+
 def test_classify_role_pm(config):
     assert classify_role("AI Product Manager", "", config) == "PM"
     assert classify_role("Technical Product Manager", "", config) == "PM"
