@@ -26,6 +26,12 @@ local `claude` CLI (`/Users/tuboshu/.local/bin/claude`, subscription-based, no
 key needed); setting `ANTHROPIC_API_KEY` switches to the direct Anthropic API
 instead.
 
+## Teaching preferences
+
+The user is learning system design alongside the code. When explaining anything
+at system-design level (server, storage, concurrency, architecture choices),
+also name the common alternatives and when each is preferred, briefly.
+
 ## CV tailoring
 
 **Full workflow (evaluate-then-tailor rules, formatting rules, writing
