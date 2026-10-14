@@ -70,9 +70,8 @@ def _fallback_select(blocks: list[Block], terms: set[str], cap: int) -> list[Blo
 
 
 def _pick(blocks: list[Block], ids: object, scores: object, cap: int) -> list[tuple[Block, list]]:
-    """The chosen blocks with their bullet scores, in the order the LLM gave (it was told
-    to default to reverse-chronological and only deviate with a stated reason -- trust
-    that judgment rather than re-sorting). Ignores out-of-range/duplicate/malformed ids
+    """The chosen blocks with their bullet scores, in the order the LLM gave (the caller
+    re-sorts projects by date). Ignores out-of-range/duplicate/malformed ids
     rather than raising, since a slightly messy response shouldn't crash tailoring."""
     if not isinstance(ids, list):
         return []
@@ -136,7 +135,7 @@ def _plan_for(experiences, projects, skills, lang: str) -> fit.Plan:
     for cat, scores in skills:
         parts = snippet_bank.split_skill_items(cat.line)
         fixed = cat.name == _FIXED_SKILL_CATEGORY[lang] or parts is None
-        main = not lines and not fixed            # the first skills line (Technical Skills) matters most
+        main = not lines and not fixed            # the first skills line (Programming & Tools) matters most
         lines.append(fit.SkillLine.build(parts.items if parts else [], scores, trimmable=not fixed,
                                          seps=parts.seps if parts else None, main=main))
     return fit.Plan([entry(b, s) for b, s in experiences], [entry(b, s, k) for b, s, k in projects], lines)
@@ -227,6 +226,8 @@ def _select_blocks(job: Job, parsed: ParsedCV, terms: set[str],
                          MAX_EXPERIENCES)
             projs = _pick(parsed.projects, result.get("project_ids"), result.get("project_scores"),
                           MAX_PROJECTS)
+            if not pinned.get("projects"):      # the LLM's order carries no stated reason, so date order wins
+                projs.sort(key=lambda pick: pick[0].end_date(), reverse=True)
             extras = _pick(parsed.projects, result.get("extra_project_ids"),
                            result.get("extra_project_scores"), MAX_EXTRA_PROJECTS)
             if exps and projs:

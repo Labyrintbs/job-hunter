@@ -73,7 +73,7 @@ def test_fallback_skills_drop_medical_imaging_when_irrelevant(monkeypatch):
               description="RAG, LLM agents, retrieval")
     names = [c.name for c in engine._select_blocks(job, parsed, engine._job_terms(job)).skills]
     assert engine._CONDITIONAL_SKILL_CATEGORY["en"] not in names
-    assert "Technical Skills" in names
+    assert "Programming \\& Tools" in names
 
 
 def test_fallback_skills_keep_medical_imaging_when_relevant(monkeypatch):
@@ -150,7 +150,7 @@ def test_a_trimmed_plan_renders_only_its_kept_bullets_items_and_modules(monkeypa
 
 def test_tailor_uses_llm_selection_when_available(monkeypatch):
     """The primary path: an LLM call (mirroring cv_tailoring_workflow.md) chooses
-    which real blocks to keep, in the order it gives -- not re-sorted by date."""
+    which real blocks to keep; experiences stay in the order it gives, projects are shown newest first."""
     monkeypatch.setattr(engine.provider, "available", lambda: True)
     parsed = snippet_bank.parse(BASE_CV)
     captured = {}
@@ -174,7 +174,7 @@ def test_tailor_uses_llm_selection_when_available(monkeypatch):
 
     assert captured["n_experiences"] == len(parsed.experiences)
     assert captured["n_projects"] == len(parsed.projects)
-    assert "Languages" not in captured["skill_names"] and "Technical Skills" in captured["skill_names"]
+    assert "Languages" not in captured["skill_names"] and "Programming \\& Tools" in captured["skill_names"]
     # experience_ids [1, 0] means block 1 appears before block 0 in the output
     assert tex.index(parsed.experiences[1].text.strip()[:40]) < tex.index(parsed.experiences[0].text.strip()[:40])
     assert _n_projects(tex) == 2
@@ -671,3 +671,17 @@ def test_the_tailor_general_command_rejects_an_unknown_preset_and_a_nameless_cus
     assert "no such preset" in capsys.readouterr().out
     assert cli.main(["tailor-general", "--brief", "x"]) == 1
     assert "--name is required" in capsys.readouterr().out
+
+
+def test_projects_are_shown_newest_first_whatever_order_the_llm_gives_unless_pinned(monkeypatch):
+    monkeypatch.setattr(engine.provider, "available", lambda: True)
+    parsed = snippet_bank.parse(BASE_CV)
+    oldest_first = sorted(range(len(parsed.projects)), key=lambda i: parsed.projects[i].end_date())[:3]
+    answer = {"experience_ids": [0], "experience_scores": [[]], "project_ids": oldest_first,
+              "project_scores": [[], [], []], "skill_scores": [], "reasoning": "r"}
+    monkeypatch.setattr(engine.llm_select, "select", lambda *a, **k: answer)
+    job = Job(source="x", external_id="1", title="ML Engineer", company="Acme", description="machine learning")
+
+    sel = engine._select_blocks(job, parsed, engine._job_terms(job))
+    dates = [b.end_date() for b in sel.projects[:3]]
+    assert dates == sorted(dates, reverse=True)
