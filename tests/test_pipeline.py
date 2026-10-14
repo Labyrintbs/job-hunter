@@ -1527,6 +1527,49 @@ def test_refit_one_rebuilds_the_newest_cv_from_its_saved_plan_without_asking_the
     assert seen["stored"]["selection"] == {"experience_ids": [0]}
 
 
+def _page_recording_tailor(tmp_path, seen):
+    def fake(job, job_id, auto=False, judge_context=None, role_category="", language=None, stored=None, pages=2):
+        seen.append(pages)
+        return _fake_tailor_job(tmp_path)(job, job_id, auto=auto)
+    return fake
+
+
+def test_a_cv_is_one_page_by_default_unless_two_pages_are_asked_for(tmp_db, config, tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline, "DEFAULT_PAGES", 1)        # the real default (conftest makes it 2 for older tests)
+    with db.connect() as conn:
+        jid = _insert(conn, config, description=_REAL_JD)
+    seen = []
+    monkeypatch.setattr(pipeline.cv_engine, "tailor_job", _page_recording_tailor(tmp_path, seen))
+
+    pipeline.tailor_one(jid)
+    pipeline.tailor_one(jid, pages=2)
+    pipeline.tailor_one(jid, pages=1)
+
+    assert seen == [1, 2, 1]
+    with db.connect() as conn:
+        assert [a["base_version"] for a in db.list_cv_artifacts(conn, jid)].count("cv_base_1page.tex") == 2
+
+
+def test_refit_keeps_the_page_count_the_cv_was_made_with(tmp_db, config, tmp_path, monkeypatch):
+    with db.connect() as conn:
+        one = _insert(conn, config, external_id="p1", description=_REAL_JD)
+        old = _insert(conn, config, external_id="p2", company="Other", description=_REAL_JD)
+        for jid, pages_json in ((one, ', "pages": 1'), (old, "")):
+            tex = tmp_path / f"cv-{jid}.tex"
+            tex.write_text("x")
+            tex.with_suffix(".plan.json").write_text(
+                '{"language": "en", "role_category": "AI", "selection": {"a": 1}, '
+                '"summary": {"text": "t", "reason": "", "detail": ""}' + pages_json + "}")
+            db.add_cv_artifact(conn, jid, str(tex), str(tmp_path / f"cv-{jid}.pdf"), origin="ai", lang="en")
+    seen = []
+    monkeypatch.setattr(pipeline.cv_engine, "tailor_job", _page_recording_tailor(tmp_path, seen))
+
+    pipeline.refit_one(one)
+    pipeline.refit_one(old)
+
+    assert seen == [1, 2]        # a plan saved before page counts existed is a two-page CV
+
+
 def test_refit_one_skips_a_job_without_a_saved_plan_or_with_a_hand_revised_cv(tmp_db, config, tmp_path):
     with db.connect() as conn:
         bare = _insert(conn, config, external_id="bare", description=_REAL_JD)

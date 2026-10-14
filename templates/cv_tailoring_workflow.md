@@ -118,11 +118,17 @@ A preset can also pin which entries appear (`experiences:` and `projects:` lists
 
 When the next block cannot start at the bottom of page 1, the masters stretch the glue before sections and entries (`\flushbottom` plus a little stretch), so page 1 is spread out instead of leaving a blank. The last page is never stretched.
 
+### One-page CVs (`--pages 1`)
+
+`jobhunter tailor <job_id> --pages 1` and `jobhunter tailor-general ... --pages 1` build a one-page CV (written as `cv-<stamp>-1p.*`; general ones in `general-<name>-<lang>-1p/`). They start from the hand-condensed masters `templates/cv_base_1page.tex` and `cv_base_1page_fr.tex`: 1 to 3 bullets per experience, 1 per project, same facts with fewer details. Edit those files by hand when the full masters change; the tool never shortens text itself. The fit step then targets one page, and when trimming alone is not enough it retries with the layout fallbacks in `engine.FIT_STEPS`, in order: the standard layout (the one-page masters are set in 11pt, with narrower margins and tighter section gaps), then the Skills in two columns. The step used is written to the `.fit.txt` log. A refit keeps the page count the CV was made with.
+
+All masters are A4 (`a4paper`).
+
 ## Step 3: Formatting rules
 
-- Two pages exactly. Not 1.4 pages with a half-empty second page, not 2.1 pages.
+- Two pages exactly (one for `--pages 1`). Not 1.4 pages with a half-empty second page, not 2.1 pages.
 - Compile and render using the invocations in Step 0.5 (bare `pdflatex`/`pdftoppm` won't be found on PATH), and actually look at the rendered pages before showing me the result. Report the page count.
-- Entry headings already keep their first bullet with them (`\needspace` lives in the `\resumeSubheading` and project heading macros of the masters). If a section heading (e.g. SKILLS) lands at the bottom of a page with its content pushed to the next, add `\needspace{N\baselineskip}` before it.
+- Entry headings already keep their first bullet with them (`\nopagebreak` in `\resumeSubheading`, `\needspace` in the project heading macro of the masters). If a section heading (e.g. SKILLS) lands at the bottom of a page with its content pushed to the next, add `\needspace{N\baselineskip}` before it.
 - If a page ends with a large gap, the fix is adjusting content volume (add a project back, trim a bullet, tighten a Skills line), not fighting LaTeX.
 - Don't change the preamble, custom commands, geometry, or fonts while tailoring a single CV. Layout changes (margins, header size, spacing) are made once in `templates/cv_base.tex` and checked against a sample of real jobs.
 

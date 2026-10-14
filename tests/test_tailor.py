@@ -673,6 +673,87 @@ def test_the_tailor_general_command_rejects_an_unknown_preset_and_a_nameless_cus
     assert "--name is required" in capsys.readouterr().out
 
 
+# ------------------------------------------------------------------ one-page CVs
+
+def _one_page_when(monkeypatch, fits):
+    """Measure every compile as one page when `fits(tex)` holds, else as two pages."""
+    def layout(pdf):
+        tex = pdf.with_suffix(".tex").read_text(encoding="utf-8")
+        if fits(tex):
+            return engine.fit.Layout(1, 842.0, 12.0, [700.0], [50], ["Name"])
+        return engine.fit.Layout(2, 842.0, 12.0, [806.0, 400.0], [50, 20], ["Name", "x"])
+    monkeypatch.setattr(engine, "_page_layout", layout)
+
+
+def _one_page_cv(tmp_path, monkeypatch, fits, language="en"):
+    monkeypatch.setattr(engine, "CV_OUT_DIR", tmp_path)
+    monkeypatch.setattr(engine, "compile_tex", _writing_compile)
+    _no_llm(monkeypatch)
+    _one_page_when(monkeypatch, fits)
+    return engine.tailor_general("cv", "A general CV.", language, pages=1)
+
+
+def test_the_one_page_master_is_a_separate_file_per_language_and_the_default_is_unchanged():
+    assert engine.base_cv_path("en", 1) == engine.BASE_CV_1PAGE and engine.base_cv_path("fr", 1) == engine.BASE_CV_1PAGE_FR
+    assert engine.base_cv_path("en") == engine.BASE_CV and engine.base_cv_path("fr", 2) == engine.BASE_CV_FR
+
+
+def test_the_one_page_masters_keep_at_most_three_bullets_per_experience_and_one_per_project():
+    for lang in ("en", "fr"):
+        parsed = snippet_bank.parse(engine.base_cv_path(lang, 1), lang)
+        assert parsed.experiences and all(1 <= len(b.bullets()) <= 3 for b in parsed.experiences)
+        assert parsed.projects and all(len(b.bullets()) == 1 for b in parsed.projects)
+
+
+def test_a_one_page_cv_uses_its_own_folder_and_version_name_and_records_the_page_target(tmp_path, monkeypatch):
+    result = _one_page_cv(tmp_path, monkeypatch, lambda tex: True)
+
+    assert result.tex_path.parent == tmp_path / "general-cv-en-1p" and result.tex_path.stem.endswith("-1p")
+    assert engine.load_plan(result.tex_path) is None or engine.load_plan(result.tex_path)["pages"] == 1
+    assert "a4paper" in result.tex_path.read_text() and "Seeking a Machine Learning role" in result.tex_path.read_text()
+
+
+def test_a_one_page_cv_is_set_in_11pt_and_falls_back_to_two_column_skills_only_when_needed(tmp_path, monkeypatch):
+    result = _one_page_cv(tmp_path, monkeypatch, lambda tex: "\\begin{multicols}{2}" in tex)
+    tex, log = result.tex_path.read_text(), result.tex_path.with_suffix(".fit.txt").read_text()
+    assert ",11pt]{article}" in tex and "\\begin{multicols}{2}" in tex
+    assert "did not fit one page with the standard layout" in log and "layout fallback used: skills in 2 columns" in log
+
+
+def test_a_one_page_cv_that_fits_at_the_standard_layout_changes_nothing(tmp_path, monkeypatch):
+    result = _one_page_cv(tmp_path, monkeypatch, lambda tex: True)
+    tex = result.tex_path.read_text()
+    assert ",11pt]{article}" in tex and "\\begin{multicols}" not in tex
+    assert "layout fallback" not in result.tex_path.with_suffix(".fit.txt").read_text()
+
+
+def test_a_one_page_cv_that_never_fits_reports_every_attempt(tmp_path, monkeypatch):
+    result = _one_page_cv(tmp_path, monkeypatch, lambda tex: False)
+    log = result.tex_path.with_suffix(".fit.txt").read_text()
+    assert "could not fit one page" in result.note
+    assert log.count("did not fit one page with") == len(engine.FIT_STEPS) and "could not fit: 2 pages" in log
+
+
+def test_two_page_cvs_never_try_the_layout_fallbacks(tmp_path, monkeypatch):
+    monkeypatch.setattr(engine, "CV_OUT_DIR", tmp_path)
+    monkeypatch.setattr(engine, "compile_tex", _writing_compile)
+    _no_llm(monkeypatch)
+    monkeypatch.setattr(engine, "_page_layout", lambda pdf: engine.fit.Layout(
+        3, 842.0, 12.0, [806.0] * 3, [50, 50, 20], ["a", "b", "c"]))
+
+    result = engine.tailor_general("cv", "A general CV.", "en")
+
+    assert ",12pt]{article}" in result.tex_path.read_text() and "layout fallback" not in result.tex_path.with_suffix(".fit.txt").read_text()
+
+
+def test_skills_set_in_two_columns_keep_every_line():
+    parsed = snippet_bank.parse(engine.BASE_CV_1PAGE, "en")
+    one = snippet_bank.reassemble_skills(parsed.document, parsed.skills, "en")
+    two = snippet_bank.reassemble_skills(parsed.document, parsed.skills, "en", columns=2)
+    assert "\\begin{multicols}" not in one and two.count("\\begin{multicols}{2}") == 1 and two.count("\\end{multicols}") == 1
+    assert all(c.line in two for c in parsed.skills)
+
+
 def test_projects_are_shown_newest_first_whatever_order_the_llm_gives_unless_pinned(monkeypatch):
     monkeypatch.setattr(engine.provider, "available", lambda: True)
     parsed = snippet_bank.parse(BASE_CV)

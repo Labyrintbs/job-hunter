@@ -5,7 +5,7 @@
 % ONE-PAGE MASTER — condensed from cv_base_fr.tex (2 bullets per experience, 1 per project); same facts, fewer details
 %------------------------
 
-\documentclass[a4paper,12pt]{article}
+\documentclass[a4paper,11pt]{article}
 
 \usepackage{latexsym}
 \usepackage{titlesec}
@@ -23,10 +23,10 @@
 \usepackage{ragged2e}
 \usepackage{needspace}
 \usepackage[
-  top=0.3in,
-  bottom=0.5in,
-  left=0.55in,
-  right=0.55in
+  top=0.15in,
+  bottom=0.3in,
+  left=0.4in,
+  right=0.4in
 ]{geometry}
 
 \setlength{\multicolsep}{-3.0pt}
@@ -54,7 +54,7 @@
 \titleformat{\section}{
   \vspace{-4pt}\scshape\raggedright\large\bfseries
 }{}{0em}{}[\color{black}\titlerule \vspace{-5pt}]
-\titlespacing*{\section}{0pt}{3.5ex plus 30pt minus .2ex}{2.3ex plus .2ex}
+\titlespacing*{\section}{0pt}{1.8ex plus 10pt minus .2ex}{1.6ex plus .2ex}
 % A section heading never ends a page alone: it moves with the first lines of its content.
 % Projects need more (their heading and description cannot split), see \needspace before them.
 \let\oldsection\section
@@ -129,13 +129,13 @@
 \begin{document}
 
 %----------HEADING----------
-\vspace*{-0.15in}
+\vspace*{-0.2in}
 \begin{center}
     {\LARGE \scshape Hongming Fang} \\[2pt]
     \small Paris, France $|$ (+33) 07 75 77 55 06 $|$
     \href{mailto:hongming.marius.fang@gmail.com}{hongming.marius.fang@gmail.com} $|$
     \href{https://linkedin.com/in/hongming-fang}{\raisebox{-0.2\height}\faLinkedin\ linkedin.com/in/hongming-fang} \\
-    {Ingénieur Machine Learning (CDI/CDD), disponible immédiatement — Île-de-France, ouvert à la mobilité}
+    {Ingénieur Machine Learning (CDI/CDD), \textbf{disponible immédiatement} — Île-de-France, ouvert à la mobilité}
     \vspace{-5pt}
 \end{center}
 
@@ -143,6 +143,7 @@
 \noindent\small{Ingénieur Machine Learning avec une expérience concrète de l'ingénierie LLM et de la segmentation d'images médicales, acquise lors de stages ML à Paris et à Pékin.}\par
 \vspace{-4pt}
 %SUMMARY-END
+\vspace{6pt}
 
 %-----------EDUCATION-----------
 \section{FORMATION}
@@ -172,7 +173,7 @@
       {Stagiaire ingénieur Machine Learning}{Paris, France}
       \resumeItemListStart
         \resumeItem{Conception d'un cadre de prompts structuré enrichi de métadonnées pour l'extraction d'entités juridiques multilingues avec Qwen3.5-4B (+1,6 point d'extraction precision, +8,4 points de context accuracy), et d'une boucle automatisée où un LLM-as-a-judge affine les prompts. Résultat : une context accuracy de 96,8\,\% et un temps d'inférence réduit de 40,8\,\% par rapport au modèle de production.}
-        \resumeItem{Fine-tuning de Qwen3.5-4B par SFT et apprentissage par renforcement (GRPO) : l'accuracy in-distribution dépasse de 8 points celle du modèle de base, avec la meilleure généralisation aux labels jamais vus de toutes les variantes fine-tunées.}
+        \resumeItem{Fine-tuning de Qwen3.5-4B par SFT et apprentissage par renforcement (GRPO) : l'accuracy in-distribution gagne 8 points sur le modèle de base, avec la meilleure généralisation aux labels jamais vus de toutes les variantes.}
         \resumeItem{Conception et implémentation d'un pipeline de génération de métadonnées qui exploite l'historique d'annotations des utilisateurs pour améliorer automatiquement les consignes d'extraction.}
       \resumeItemListEnd
 
@@ -180,7 +181,7 @@
       {DeepWise}{03/2023 -- 09/2023}
       {Stagiaire en algorithmes d'IA (imagerie médicale)}{Pékin, Chine}
       \resumeItemListStart
-        \resumeItem{Amélioration du modèle de segmentation de la table d'examen et des objets externes grâce à l'ajout de scans CTA de l'aorte nouvellement annotés, avec des scores Dice de 0,88/0,72. Après le diagnostic d'une baisse de performance sur une anatomie out-of-distribution, entraînement d'un nouveau modèle avec des scans CTA de la tête supplémentaires, utilisé pour pré-annoter plus de 1\,000 CT sans injection (moins de 5\,\% de corrections manuelles), puis réentraînement d'un modèle unifié sur des données CTA et CT, avec des scores Dice de 0,93/0,76 et une bonne généralisation à des régions du corps jamais vues. Ajout d'un post-traitement qui supprime les petites composantes connexes isolées.}
+        \resumeItem{Amélioration du modèle de segmentation de la table d'examen et des objets externes grâce à de nouveaux scans CTA de l'aorte annotés (Dice 0,88/0,72). Après diagnostic d'une baisse de performance out-of-distribution, entraînement d'un nouveau modèle sur des scans CTA de la tête supplémentaires, utilisé pour pré-annoter 1\,000+ CT sans injection (moins de 5\,\% de corrections manuelles), puis réentraînement d'un modèle unifié CTA et CT (Dice 0,93/0,76) généralisant à des régions du corps jamais vues. Ajout d'un post-traitement supprimant les petites composantes connexes.}
       \resumeItemListEnd
 
     \resumeSubheading
@@ -195,14 +196,14 @@
 %-----------PROJECTS & RESEARCH-----------
 \needspace{8\baselineskip}
 \section{PROJETS ET RECHERCHE}
-    \vspace{-5pt}
+    \vspace{-1pt}
     \resumeSubHeadingListStart
 
     \resumeProjectHeadingFourItemResearch
     {\textbf{Job Hunter : recherche d'emploi et adaptation de CV automatisées par LLM}}{08/2026 -- 09/2026}
     {Projet personnel}{Paris, France}
     \resumeItemListStart
-      \resumeItem{Mise en place de la collecte de plus de 3\,000 offres auprès de 17 sources, où une source en échec n'interrompt pas les autres, avec déduplication inter-sources (comparaison exacte et vérification par LLM) et pré-filtrage par un score à base de règles. Ajout d'un LLM-as-a-judge qui note chaque offre par rapport au profil du candidat et déclenche l'adaptation automatique du CV : le LLM se limite à sélectionner parmi les expériences et les bullet points existants du CV, et ne peut donc rien inventer. Automatisation par des tâches planifiées et un watchdog qui relance les exécutions manquées, avec un tableau de bord FastAPI sur SQLite pour le suivi.}
+      \resumeItem{Mise en place de la collecte de plus de 3\,000 offres auprès de 17 sources, avec déduplication inter-sources (comparaison exacte et vérification par LLM) et pré-filtrage par un score à base de règles. Ajout d'un LLM-as-a-judge qui note chaque offre par rapport au profil du candidat et déclenche l'adaptation automatique du CV, le LLM se limitant à sélectionner le contenu existant du CV, sans rien inventer. Automatisation par des tâches planifiées et un watchdog des exécutions manquées, avec un tableau de bord FastAPI sur SQLite.}
     \resumeItemListEnd
 
     \resumeProjectHeadingFourItemResearch
@@ -229,7 +230,7 @@
     {\textbf{Apprentissage profond pour la classification des polypes colorectaux}}{02/2025 -- 05/2025}
     {Sorbonne Université, projet DIGIT}{Paris, France}
     \resumeItemListStart
-      \resumeItem{Classification des polypes colorectaux (adénomateux ou hyperplasiques) par CNN VGG-19 sur le jeu de données clinique POLAR, après prétraitement et restructuration du jeu pour garantir la cohérence des labels. Application du transfer learning avec data augmentation pour atténuer le déséquilibre des classes, ce qui a fait passer le F1 des polypes hyperplasiques de 0,148 à 0,351.}
+      \resumeItem{Classification des polypes colorectaux (adénomateux ou hyperplasiques) par CNN VGG-19 sur le jeu clinique POLAR, après prétraitement et restructuration du jeu pour la cohérence des labels. Application du transfer learning avec data augmentation pour atténuer le déséquilibre des classes, faisant passer le F1 des polypes hyperplasiques de 0,148 à 0,351.}
     \resumeItemListEnd
 
     \resumeProjectHeadingFourItemResearch
@@ -242,11 +243,11 @@
 
 %-----------SKILLS-----------
 \section{COMPÉTENCES}
- \begin{itemize}[leftmargin=0.2in, label={}]
+ \begin{itemize}[leftmargin=0in, label={}]
     \small{\item{
-    \textbf{Compétences techniques :} Python, C/C++ ; PyTorch, NumPy, pandas, scikit-learn, OpenCV, Open3D ; FastAPI, SQLite, API REST, pytest ; Linux, Git, CI/CD, Docker\\
-    \textbf{IA générative et systèmes agentiques :} prompt engineering, RAG, fine-tuning de LLM (LoRA, SFT, GRPO), pipelines agentiques LangGraph, structured LLM output, vLLM\\
-    \textbf{Évaluation et monitoring des LLM :} évaluation LLM-as-a-judge, conception de failure taxonomies, diagnostic des hallucinations et de la généralisation, optimisation du coût et de la latence d'inférence\\
+    \textbf{Langages et outils :} Python, C/C++ ; PyTorch, NumPy, pandas, scikit-learn, OpenCV, Open3D ; FastAPI, SQLite, API REST, pytest ; Linux, Git, CI/CD, Docker\\
+    \textbf{IA générative :} prompt engineering, RAG, fine-tuning de LLM (LoRA, SFT, GRPO), pipelines agentiques LangGraph, structured LLM output, vLLM\\
+    \textbf{Évaluation des LLM :} évaluation LLM-as-a-judge, conception de failure taxonomies, diagnostic des hallucinations et de la généralisation, optimisation du coût et de la latence d'inférence\\
     \textbf{Deep Learning :} CNN, Transformers, self-supervised learning, transfer learning, distributed training (DDP)\\
     \textbf{Vision par ordinateur :} traitement d'images, segmentation, recalage de nuages de points 2D/3D, classification\\
     \textbf{Langues :} mandarin (langue maternelle), anglais (courant), français (niveau professionnel)

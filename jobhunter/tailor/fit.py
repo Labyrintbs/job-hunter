@@ -1,4 +1,4 @@
-"""Fit a tailored CV to exactly two pages by measuring it, not by guessing.
+"""Fit a tailored CV to exactly two pages (or one, `pages=1`) by measuring it, not by guessing.
 
 The selection call (tailor/select.py) only scores content. This module starts from the
 full CV, compiles it, reads where every line landed (pdftotext -bbox, parsed here) and
@@ -35,6 +35,7 @@ MIN_GROUP_ITEMS = 3          # ...and each ';' group in it keeps this many (or a
 MODULE_LINES = 0.4
 
 MAX_COMPILES = 10
+_PAGE_WORDS = {1: "one page", 2: "two pages"}
 ADD_BACK_MIN_FREE_LINES = 2.0     # add back only when at least this much room is left
 
 
@@ -52,10 +53,11 @@ class Layout:
     bottoms: list[float]        # bottom of the last text line of each page
     line_counts: list[int]
     first_words: list[str]
+    bottom_margin: float = BOTTOM_MARGIN_PT      # the master's own `bottom=` margin, see engine._fit_cv
 
     @property
     def limit(self) -> float:
-        return self.height - BOTTOM_MARGIN_PT
+        return self.height - self.bottom_margin
 
     def overflow_lines(self, pages: int = 2) -> int:
         return sum(self.line_counts[pages:])
@@ -129,7 +131,7 @@ class SkillLine:
     trimmable: bool = True
     min_keep: int = MIN_SKILL_ITEMS
     groups: list[int] = field(default_factory=list)     # which ';' group each item belongs to
-    main: bool = False                                  # the Technical Skills line: trimmed last
+    main: bool = False                                  # the first skills line (Programming & Tools): trimmed last
 
     @classmethod
     def build(cls, items: list[str], scores: list[int] | None, trimmable: bool = True,
@@ -162,6 +164,7 @@ class Plan:
     projects: list[Entry]
     skills: list[SkillLine]
     modules: int = MAX_MODULES
+    min_modules: int = MIN_MODULES        # 0 for a one-page CV: the whole Major Modules line may go
 
     def copy(self) -> "Plan":
         def entry(e):
@@ -170,7 +173,7 @@ class Plan:
         def skill(s):
             return SkillLine(s.chars, s.scores, list(s.keep), s.trimmable, s.min_keep, s.groups, s.main)
         return Plan([entry(e) for e in self.experiences], [entry(e) for e in self.projects],
-                    [skill(s) for s in self.skills], self.modules)
+                    [skill(s) for s in self.skills], self.modules, self.min_modules)
 
 
 @dataclass(frozen=True)
@@ -199,7 +202,7 @@ def _project_lines(e: Entry) -> float:
 def removals(plan: Plan) -> list[Cut]:
     """Everything that may still be removed, least valuable first."""
     cuts = []
-    if plan.modules > MIN_MODULES:
+    if plan.modules > plan.min_modules:
         cuts.append(Cut("module", eff=MODULE_EFF, lines=MODULE_LINES))
     for i, line in enumerate(plan.skills):
         cuts += [Cut("skill", i, j, line.eff(j), line.chars[j] / SKILL_CHARS_PER_LINE)
@@ -285,8 +288,8 @@ def _shrunk_project(plan: Plan, cut: Cut, limit: float) -> Cut | None:
     return Cut("project", cut.a, 0, cut.eff, used, tuple(keep))
 
 
-def _next_addition(plan: Plan, layout: Layout, failed: set) -> Cut | None:
-    free = [layout.free_lines(p) for p in range(2)]
+def _next_addition(plan: Plan, layout: Layout, failed: set, pages: int = 2) -> Cut | None:
+    free = [layout.free_lines(p) for p in range(pages)]
     biggest, total = max(free), sum(free)
     if total < ADD_BACK_MIN_FREE_LINES:
         return None
@@ -301,8 +304,9 @@ def _next_addition(plan: Plan, layout: Layout, failed: set) -> Cut | None:
 
 
 def fit(plan: Plan, render: Callable[[Plan], str], compile_: Callable[[str], Path | None],
-        measure: Callable[[Path], Layout | None], max_compiles: int = MAX_COMPILES) -> FitResult:
-    """Trim `plan` until render(plan) compiles to exactly two pages, then fill leftover room."""
+        measure: Callable[[Path], Layout | None], max_compiles: int = MAX_COMPILES,
+        pages: int = 2) -> FitResult:
+    """Trim `plan` until render(plan) compiles to exactly `pages` pages, then fill leftover room."""
     cur = plan.copy()
     log: list[str] = []
     tex = render(cur)
@@ -316,8 +320,8 @@ def fit(plan: Plan, render: Callable[[Plan], str], compile_: Callable[[str], Pat
 
     failed: set = set()
     while True:
-        if layout.pages > 2:
-            need = layout.overflow_lines() + 0.5
+        if layout.pages > pages:
+            need = layout.overflow_lines(pages) + 0.5
             cuts, freed = [], 0.0
             while freed < need and compiles < max_compiles:
                 options = removals(cur)       # recomputed after every cut, so no minimum is ever crossed
@@ -327,13 +331,13 @@ def fit(plan: Plan, render: Callable[[Plan], str], compile_: Callable[[str], Pat
                 freed += options[0].lines
                 apply_cut(cur, options[0])
             if not cuts or compiles >= max_compiles:
-                log.append(f"could not fit: {layout.pages} pages, {layout.overflow_lines()} line(s) over")
+                log.append(f"could not fit: {layout.pages} pages, {layout.overflow_lines(pages)} line(s) over")
                 return FitResult("cannot_fit", cur, tex, layout, compiles, log,
-                                 f"could not fit two pages ({layout.pages} pages); needs a manual pass")
-            log.append(f"over by {layout.overflow_lines()} line(s) on page 3+; removed: "
+                                 f"could not fit {_PAGE_WORDS[pages]} ({layout.pages} pages); needs a manual pass")
+            log.append(f"over by {layout.overflow_lines(pages)} line(s) past page {pages}; removed: "
                        + "; ".join(describe(c) for c in cuts))
         else:
-            cand = _next_addition(cur, layout, failed) if compiles < max_compiles else None
+            cand = _next_addition(cur, layout, failed, pages) if compiles < max_compiles else None
             if cand is None:
                 break
             trial = cur.copy()
@@ -342,7 +346,7 @@ def fit(plan: Plan, render: Callable[[Plan], str], compile_: Callable[[str], Pat
             compiles += 1
             trial_pdf = compile_(trial_tex)
             trial_layout = measure(trial_pdf) if trial_pdf else None
-            if trial_layout is not None and trial_layout.pages <= 2:
+            if trial_layout is not None and trial_layout.pages <= pages:
                 cur, tex, layout = trial, trial_tex, trial_layout
                 log.append(f"added back {describe(cand)}")
             else:
@@ -360,7 +364,7 @@ def fit(plan: Plan, render: Callable[[Plan], str], compile_: Callable[[str], Pat
         log.append("page 2 starts mid-entry: a bullet continues from page 1")
     note = ""
     if any(not k for e in cur.experiences for k in e.keep):
-        note = "to fit two pages, a work-experience bullet was removed"
+        note = f"to fit {_PAGE_WORDS[pages]}, a work-experience bullet was removed"
     elif any(before.kept and not now.kept for before, now in zip(plan.projects, cur.projects)):
-        note = "to fit two pages, a whole project was removed"
+        note = f"to fit {_PAGE_WORDS[pages]}, a whole project was removed"
     return FitResult("fit", cur, tex, layout, compiles, log, note)

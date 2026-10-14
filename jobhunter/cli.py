@@ -43,6 +43,8 @@ def main(argv: list[str] | None = None) -> int:
 
     p_tailor = sub.add_parser("tailor", help="generate + compile a tailored CV")
     p_tailor.add_argument("job_id", type=int)
+    p_tailor.add_argument("--pages", type=int, choices=[1, 2], default=None,
+                          help="1 = one-page CV from the condensed master, 2 = two pages (default 1)")
 
     p_general = sub.add_parser(
         "tailor-general",
@@ -50,6 +52,10 @@ def main(argv: list[str] | None = None) -> int:
              "templates/general_briefs.yaml, or a custom --brief")
     p_general.add_argument("presets", nargs="*", help="preset names (default: all of them)")
     p_general.add_argument("--lang", choices=["en", "fr", "both"], default="en")
+    p_general.add_argument("--pages", type=int, choices=[1, 2], default=2,
+                           help="1 builds one-page CVs from the condensed master (default 2)")
+    p_general.add_argument("--refit", action="store_true",
+                           help="rebuild from the newest saved plan of each (no LLM call), after a layout change")
     p_general.add_argument("--name", help="folder name for a custom brief")
     p_general.add_argument("--brief", help="a custom brief, in place of a preset")
     p_general.add_argument("--brief-file", help="read the custom brief from this file")
@@ -242,7 +248,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "tailor":
-        result = tailor_one(args.job_id)
+        result = tailor_one(args.job_id, pages=args.pages)
         if result.get("error") or result.get("skipped"):
             print(f"error: {result.get('error') or result['skipped']}")
             return 1
@@ -270,7 +276,17 @@ def main(argv: list[str] | None = None) -> int:
         for name, preset in todo.items():
             pins = {k: preset[k] for k in ("experiences", "projects") if preset.get(k)} or None
             for lang in (["en", "fr"] if args.lang == "both" else [args.lang]):
-                result = cv_engine.tailor_general(name, preset["brief"], lang, pins=pins)
+                stored = None
+                if args.refit:
+                    plans = sorted(cv_engine.general_out_dir(name, lang, args.pages).glob("cv-*.plan.json"),
+                                   key=lambda p: p.stat().st_mtime)
+                    stored = cv_engine.load_plan(str(plans[-1]).removesuffix('.plan.json') + '.tex') if plans else None
+                    if stored is None:
+                        print(f"{name} ({lang}): no saved plan to refit")
+                        status = 1
+                        continue
+                result = cv_engine.tailor_general(name, preset["brief"], lang, pins=pins, pages=args.pages,
+                                                  **({"stored": stored} if stored else {}))
                 print(f"{name} ({lang}): {result.pdf_path or 'FAILED'}" + (f"  [{result.note}]" if result.note else ""))
                 status |= result.pdf_path is None
         return int(status)

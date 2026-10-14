@@ -132,7 +132,8 @@ def dashboard(request: Request, status: str | None = None, min_score: int = 0,
             "dismiss_reasons": db.DISMISS_REASONS,
             "total": sum(counts.values()),
             "llm_available": provider.available(),
-            "cv_master_edited": {lang: master_edited_at(lang) for lang in ("en", "fr")},
+            "cv_master_edited": {f"{lang}{pages}": master_edited_at(lang, pages)
+                                 for lang in ("en", "fr") for pages in (1, 2)},
             "dup_map": dup_map,
             "dup_jobs": dup_jobs,
             "dup_checks": dup_checks,
@@ -187,9 +188,11 @@ def run_fetch_route():
 
 
 @app.post("/tailor/{job_id}")
-def tailor_route(job_id: int, lang: str | None = None):
-    # lang ("en" or "fr") re-tailors in that language instead of the posting's own
-    return JSONResponse(tailor_one(job_id, language=lang if lang in ("en", "fr") else None))
+def tailor_route(job_id: int, lang: str | None = None, pages: int | None = None):
+    # lang ("en" or "fr") re-tailors in that language instead of the posting's own;
+    # pages (1 or 2) picks the one-page or the two-page version (default: DEFAULT_PAGES)
+    return JSONResponse(tailor_one(job_id, language=lang if lang in ("en", "fr") else None,
+                                   pages=pages if pages in (1, 2) else None))
 
 
 @app.post("/judge/{job_id}")

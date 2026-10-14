@@ -367,3 +367,59 @@ def test_the_input_plan_is_not_modified():
     before = fit.removals(plan)
     _run(plan, capacity=FakeCV().size(plan) - 10)
     assert fit.removals(plan) == before
+
+
+# ------------------------------------------------------------------------ one page
+
+class FakeOnePageCV(FakeCV):
+    """Like FakeCV, but a plan that fits is one page long and one that does not is two."""
+    def measure(self, pdf):
+        total = self.size(self.plans[pdf.name])
+        if total > self.capacity:
+            return fit.Layout(2, 792.0, 12.0, [744.0, 100.0], [50, math.ceil(total - self.capacity)], ["a", "b"])
+        return fit.Layout(1, 792.0, 12.0, [756 - (self.capacity - total) * 12], [50], ["a"])
+
+
+def _run_one_page(plan, capacity):
+    cv = FakeOnePageCV(capacity)
+    return fit.fit(plan, cv.render, cv.compile, cv.measure, pages=1), cv
+
+
+def test_a_one_page_target_trims_until_one_page_and_never_stops_at_two():
+    plan = _plan()
+    res, cv = _run_one_page(plan, capacity=FakeCV().size(plan) - 9)
+    assert res.status == "fit" and res.layout.pages == 1
+    assert cv.size(res.plan) <= cv.capacity
+    assert any("past page 1" in line for line in res.log)
+
+
+def test_a_one_page_target_adds_back_only_what_still_fits_one_page():
+    plan = _plan()
+    res, cv = _run_one_page(plan, capacity=FakeCV().size(plan) - 3)
+    free = cv.capacity - cv.size(res.plan)
+    assert res.layout.pages == 1
+    assert not [c for c in fit.additions(res.plan) if c.lines <= free] or free < fit.ADD_BACK_MIN_FREE_LINES
+
+
+def test_one_page_notes_and_give_up_message_say_one_page():
+    plan = _plan(exp=(2, 2), projects=(2, 2, 2), skill_items=2)
+    plan.modules = fit.MIN_MODULES
+    for p in plan.projects:
+        p.keep[1] = False
+    res, _ = _run_one_page(plan, capacity=FakeCV().size(plan) - 4)
+    assert res.note == "to fit one page, a whole project was removed"
+    res, _ = _run_one_page(_plan(exp=(2, 2), projects=(1, 1), skill_items=2), capacity=5)
+    assert res.status == "cannot_fit" and "could not fit one page" in res.note
+
+
+def test_the_major_modules_line_may_go_entirely_only_when_the_plan_allows_it():
+    plan = _plan()
+    assert sum(c.kind == "module" for c in fit.removals(plan)) == 1
+    plan.modules = fit.MIN_MODULES
+    assert not [c for c in fit.removals(plan) if c.kind == "module"]        # a two-page CV keeps 2
+
+    plan.min_modules = 0
+    assert [c for c in fit.removals(plan) if c.kind == "module"]
+    plan.modules = 0
+    assert not [c for c in fit.removals(plan) if c.kind == "module"]
+    assert plan.copy().min_modules == 0

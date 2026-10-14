@@ -115,14 +115,41 @@ def test_dashboard_shows_the_cv_language_and_a_switch_to_the_other_one(tmp_db):
 
     html = TestClient(app).get("/").text
 
-    assert f"tailorCV(this, {fr}, 'en')" in html and "→EN" in html          # a French CV offers English
-    assert f"tailorCV(this, {en}, 'fr')" in html and "→FR" in html          # an English CV offers French
-    assert f"tailorCV(this, {manual}, 'fr')" not in html and f"tailorCV(this, {manual}, 'en')" not in html
+    assert f"tailorCV(this, {fr}, 'en', 2)" in html and "→EN" in html      # a French CV offers English
+    assert f"tailorCV(this, {en}, 'fr', 2)" in html and "→FR" in html      # an English CV offers French
+    assert f"tailorCV(this, {manual}, 'fr'" not in html and f"tailorCV(this, {manual}, 'en'" not in html
     assert ">FR</span>" in html and ">EN</span>" in html
 
 
+def test_dashboard_shows_the_cv_page_count_and_a_switch_to_the_other_version(tmp_db):
+    with db.connect() as conn:
+        one, _ = db.upsert_job(conn, J("50", title="One Page Job"), 60, "r")
+        db.add_cv_artifact(conn, one, "/tmp/a-1p.tex", "/tmp/a-1p.pdf", base_version="cv_base_1page.tex", lang="en")
+        two, _ = db.upsert_job(conn, J("51", title="Two Page Job"), 60, "r")
+        db.add_cv_artifact(conn, two, "/tmp/b.tex", "/tmp/b.pdf", base_version="cv_base.tex", lang="en")
+        manual, _ = db.upsert_job(conn, J("52", title="Hand Revised Job"), 60, "r")
+        db.add_cv_artifact(conn, manual, "", "/tmp/rev.pdf", origin="revised")
+
+    html = TestClient(app).get("/").text
+
+    assert f"tailorCV(this, {one}, null, 2)" in html and f"tailorCV(this, {one}, null, 1)" in html   # 1p CV: refresh stays 1p, "→2p" switches
+    assert f"tailorCV(this, {two}, null, 1)" in html                      # a 2p CV offers the one-page version
+    assert "→2p" in html and "→1p" in html and ">1p</span>" in html and ">2p</span>" in html
+    assert f"tailorCV(this, {manual}, null, 1)" not in html and f"tailorCV(this, {manual}, null, 2)" not in html
+
+
+def test_the_tailor_route_passes_the_page_choice_and_ignores_an_invalid_one(tmp_db, monkeypatch):
+    seen = []
+    monkeypatch.setattr("jobhunter.web.app.tailor_one", lambda job_id, **kw: seen.append(kw) or {"compiled": True})
+    client = TestClient(app)
+    client.post("/tailor/1", params={"pages": 1, "lang": "fr"})
+    client.post("/tailor/1", params={"pages": 7})
+    client.post("/tailor/1")
+    assert seen == [{"language": "fr", "pages": 1}, {"language": None, "pages": None}, {"language": None, "pages": None}]
+
+
 def test_dashboard_shows_the_cv_date_and_flags_a_cv_older_than_the_master(tmp_db, monkeypatch):
-    monkeypatch.setattr("jobhunter.web.app.master_edited_at", lambda lang: "2026-10-01 10:00:00")
+    monkeypatch.setattr("jobhunter.web.app.master_edited_at", lambda lang, pages=2: "2026-10-01 10:00:00")
     with db.connect() as conn:
         old, _ = db.upsert_job(conn, J("40", title="Old Master Job"), 60, "r")
         db.add_cv_artifact(conn, old, "/tmp/o.tex", "/tmp/o.pdf", lang="en")

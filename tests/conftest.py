@@ -16,6 +16,14 @@ def no_real_summary_llm(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def two_page_default(monkeypatch):
+    """Most tests were written for the two-page CV; the real default is DEFAULT_PAGES = 1
+    (tests of that default say so explicitly)."""
+    from jobhunter import pipeline as pipeline_mod
+    monkeypatch.setattr(pipeline_mod, "DEFAULT_PAGES", 2)
+
+
+@pytest.fixture(autouse=True)
 def no_usage_log(monkeypatch):
     """Faked LLM calls must not add rows to the real database's usage log. Tests of the
     log switch it back on together with tmp_db."""

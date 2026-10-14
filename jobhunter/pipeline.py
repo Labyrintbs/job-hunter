@@ -1419,11 +1419,17 @@ def cover_one(job_id: int) -> dict:
     return {"job_id": job_id, "cover_letter": str(path), "lang": language}
 
 
-def tailor_one(job_id: int, auto: bool = False, language: str | None = None) -> dict:
+DEFAULT_PAGES = 1     # page count of a CV made without an explicit choice (daily run, dashboard)
+
+
+def tailor_one(job_id: int, auto: bool = False, language: str | None = None,
+               pages: int | None = None) -> dict:
     """Tailor + compile a CV for one job, record it, and mark the job cv_ready.
-    `auto=True` (daily_run's unsupervised path) also enforces the exact-2-page
-    rule -- see cv_engine.tailor_job. `language` ("en" or "fr") overrides the
-    language detected from the posting (the dashboard's switch to the other one)."""
+    `auto=True` (daily_run's unsupervised path) also enforces the exact page
+    count -- see cv_engine.tailor_job. `language` ("en" or "fr") overrides the
+    language detected from the posting (the dashboard's switch to the other one).
+    `pages` (1 or 2) picks the one-page or two-page CV; default DEFAULT_PAGES."""
+    pages = pages or DEFAULT_PAGES
     db.init_db()
     with db.connect() as conn:
         row = db.get_job(conn, job_id)
@@ -1441,7 +1447,7 @@ def tailor_one(job_id: int, auto: bool = False, language: str | None = None) -> 
             with db.connect() as conn:
                 if not db.needs_tailoring(conn, job_id):
                     return {"job_id": job_id, "skipped": "already tailored"}
-        return _tailor_and_record(job_id, auto, row, job, language)
+        return _tailor_and_record(job_id, auto, row, job, language, pages=pages)
 
 
 def refit_one(job_id: int) -> dict:
@@ -1462,7 +1468,8 @@ def refit_one(job_id: int) -> dict:
     with _tailor_lock(out_dir) as acquired:
         if not acquired:
             return {"job_id": job_id, "skipped": "another run is already tailoring this job"}
-        return _tailor_and_record(job_id, True, row, job, plan["language"], stored=plan)
+        return _tailor_and_record(job_id, True, row, job, plan["language"], stored=plan,
+                                  pages=plan.get("pages", 2))
 
 
 @contextmanager
@@ -1483,8 +1490,10 @@ def _tailor_lock(out_dir: Path):
 
 
 def _tailor_and_record(job_id: int, auto: bool, row, job, language: str | None = None,
-                       stored: dict | None = None) -> dict:
+                       stored: dict | None = None, pages: int = 2) -> dict:
     extra = {"stored": stored} if stored else {}
+    if pages != 2:
+        extra["pages"] = pages
     with fetch_diag.run_tracking() as tracker:
         result = cv_engine.tailor_job(
             job, job_id, auto=auto, judge_context=_judge_context(row),
@@ -1498,7 +1507,7 @@ def _tailor_and_record(job_id: int, auto: bool, row, job, language: str | None =
                            and db.needs_tailoring(conn, job_id))
         if not repeat_fallback:
             db.add_cv_artifact(conn, job_id, str(tex_path), str(pdf_path or ""),
-                               base_version=cv_engine.base_cv_path(result.lang).name,
+                               base_version=cv_engine.base_cv_path(result.lang, pages).name,
                                origin="ai", note=note, lang=result.lang)
             if pdf_path:
                 db.mark_cv_ready(conn, job_id)

@@ -11,6 +11,7 @@ import re
 KEEP = 4
 
 _MODULES_RE = re.compile(r"(\\textit\{(?:Major Modules|Enseignements principaux)\}\s*:\s*)([^}]*)(\})")
+_MODULES_ITEM_RE = re.compile(r"[ \t]*\\resumeItem\{\\textit\{(?:Major Modules|Enseignements principaux)\}[^}]*\}[ \t]*\n")
 
 # The French base's course names, mapped to the English ones the keywords below use.
 _FRENCH = {
@@ -68,8 +69,10 @@ def choose(modules: list[str], job_text: str, keep: int = KEEP) -> list[str]:
 
 
 def apply(doc: str, job_text: str, keep: int = KEEP) -> str:
-    """`doc` with its Major Modules bullet trimmed for this job; unchanged when the
-    bullet isn't there."""
+    """`doc` with its Major Modules bullet trimmed for this job (removed whole when `keep` is 0);
+    unchanged when the bullet isn't there."""
+    if keep <= 0:
+        return _MODULES_ITEM_RE.sub("", doc, count=1)
     m = _MODULES_RE.search(doc)
     if not m:
         return doc

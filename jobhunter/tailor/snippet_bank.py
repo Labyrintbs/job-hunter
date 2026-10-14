@@ -149,7 +149,7 @@ def filter_bullets(text: str, keep: list[int]) -> str:
 
 @dataclass
 class SkillCategory:
-    name: str      # e.g. "Generative AI \& Agentic Systems"
+    name: str      # e.g. "Generative AI"
     line: str      # full "\textbf{Name:} ..." line, no trailing '\\' or newline
     tags: set[str]
 
@@ -322,15 +322,19 @@ def set_summary(doc: str, latex_text: str) -> str:
     return SUMMARY_BLOCK_RE.sub(lambda _: block, doc, count=1)
 
 
-def reassemble_skills(doc: str, categories: list[SkillCategory], lang: str = "en") -> str:
+def reassemble_skills(doc: str, categories: list[SkillCategory], lang: str = "en", columns: int = 1) -> str:
     """Replace the SKILLS item lines with a filtered subset, keeping every
-    existing line verbatim (reuse-only -- never invents an item)."""
+    existing line verbatim (reuse-only -- never invents an item). `columns=2` sets them
+    in two columns (a one-page layout fallback)."""
     m = _skills_block_re(SECTIONS[lang]["skills"]).search(doc)
     if not m or not categories:
         return doc
     suffix = "\\\\"
     lines = [f"    {c.line}{suffix if i < len(categories) - 1 else ''}"
               for i, c in enumerate(categories)]
+    if columns == 2:
+        lines = [r"    {\setlength{\columnsep}{14pt}\begin{multicols}{2}\raggedright", *lines,
+                 r"    \end{multicols}}"]
     inner = "\n" + "\n".join(lines) + "\n    "
     start, end = m.start(2), m.end(2)
     return doc[:start] + inner + doc[end:]

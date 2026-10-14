@@ -7,6 +7,16 @@ ALL = ["Image Processing", "3D Graphics Algorithms", "Data Science", "Computer A
 PR = "Pattern Recognition and Machine Learning for Image Understanding"
 
 
+def test_keeping_no_courses_removes_the_whole_bullet_in_every_master():
+    for path, lang in ((engine.BASE_CV, "en"), (engine.BASE_CV_FR, "fr"),
+                       (engine.BASE_CV_1PAGE, "en"), (engine.BASE_CV_1PAGE_FR, "fr")):
+        doc = snippet_bank.parse(path, lang).document
+        out = courses.apply(doc, "vision", keep=0)
+        assert "Major Modules" not in out and "Enseignements principaux" not in out
+        assert out.count("\\resumeItem{") == doc.count("\\resumeItem{") - 1
+        assert courses.apply(doc, "vision", keep=2) != out                 # keeping some leaves the bullet
+
+
 def test_a_vision_job_keeps_the_image_courses():
     kept = courses.choose(ALL, "computer vision engineer: image segmentation and 3d point cloud work")
     assert len(kept) == courses.KEEP

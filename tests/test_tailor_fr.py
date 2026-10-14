@@ -110,7 +110,7 @@ def test_an_english_summary_that_came_back_in_french_is_a_language_mismatch_too(
 
 def test_the_french_taglines():
     assert engine._tagline("", "fr") == \
-        "{Ingénieur Machine Learning (CDI/CDD), disponible immédiatement — Île-de-France, ouvert à la mobilité}"
+        "{Ingénieur Machine Learning (CDI/CDD), \\textbf{disponible immédiatement} — Île-de-France, ouvert à la mobilité}"
     assert engine._tagline("PM", "fr").startswith("{Product Manager IA (CDI/CDD)")
     assert engine._tagline("", "en").startswith("{Seeking a Machine Learning role")
 
@@ -148,7 +148,7 @@ def test_a_french_tailoring_uses_the_french_master_throughout(no_llm):
     assert r"\section{FORMATION}" in tex and r"\section{EXPÉRIENCE PROFESSIONNELLE}" in tex
     assert r"\section{PROJETS ET RECHERCHE}" in tex and r"\section{COMPÉTENCES}" in tex
     assert r"\section{EDUCATION}" not in tex
-    assert "{Ingénieur Machine Learning (CDI/CDD), disponible immédiatement" in tex
+    assert "{Ingénieur Machine Learning (CDI/CDD), \\textbf{disponible immédiatement}" in tex
     assert "Ingénieur Vision par ordinateur ayant déployé" in tex          # the CV variant, in French
     assert tex.count("%SUMMARY-BEGIN") == 1
     line = next(l for l in tex.splitlines() if "Enseignements principaux" in l)

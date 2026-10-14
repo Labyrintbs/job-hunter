@@ -23,18 +23,23 @@ from .snippet_bank import Block, ParsedCV, SkillCategory
 
 BASE_CV = REPO_ROOT / "templates" / "cv_base.tex"
 BASE_CV_FR = REPO_ROOT / "templates" / "cv_base_fr.tex"
+BASE_CV_1PAGE = REPO_ROOT / "templates" / "cv_base_1page.tex"
+BASE_CV_1PAGE_FR = REPO_ROOT / "templates" / "cv_base_1page_fr.tex"
 CV_OUT_DIR = DATA_DIR / "cv"
 
 
-def base_cv_path(language: str = "en"):
-    """The master CV for a language; English unless the job's text is French."""
+def base_cv_path(language: str = "en", pages: int = 2):
+    """The master CV for a language (English unless the job's text is French); a one-page CV
+    starts from the hand-condensed master."""
+    if pages == 1:
+        return BASE_CV_1PAGE_FR if language == "fr" else BASE_CV_1PAGE
     return BASE_CV_FR if language == "fr" else BASE_CV
 
 
-def master_edited_at(language: str = "en") -> str:
+def master_edited_at(language: str = "en", pages: int = 2) -> str:
     """When the master CV was last edited, as a UTC 'YYYY-MM-DD HH:MM:SS' string
     comparable with cv_artifacts.generated_at. A CV older than this predates the master."""
-    mtime = base_cv_path(language).stat().st_mtime
+    mtime = base_cv_path(language, pages).stat().st_mtime
     return datetime.fromtimestamp(mtime, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
@@ -52,6 +57,8 @@ MAX_PROJECTS = 3
 # cv_tailoring_workflow.md's "Emphasis" step.
 _CONDITIONAL_SKILL_CATEGORY = {"en": r"Computer Vision \& Medical Imaging",
                                "fr": "Vision par ordinateur et imagerie médicale"}
+# The one-page master names the same category more briefly.
+_CONDITIONAL_SKILL_ALIASES = {"en": r"Computer Vision", "fr": "Vision par ordinateur"}
 
 
 def _fallback_select(blocks: list[Block], terms: set[str], cap: int) -> list[Block]:
@@ -203,7 +210,7 @@ def _select_blocks(job: Job, parsed: ParsedCV, terms: set[str],
     fetch_diag under a `tailor_llm_*` reason. `pins` ({"experiences": [names], "projects":
     [names]}) fixes which entries are kept, in that order; the LLM then only scores them."""
     lang = parsed.lang
-    conditional = _CONDITIONAL_SKILL_CATEGORY[lang]
+    conditional = (_CONDITIONAL_SKILL_CATEGORY[lang], _CONDITIONAL_SKILL_ALIASES[lang])
     menu_cats = [c for c in parsed.skills if c.name != _FIXED_SKILL_CATEGORY[lang]]
     pinned = _resolve_pins(parsed, pins) if pins else {}
     reason, detail = "tailor_llm_unavailable", "no LLM backend"
@@ -239,7 +246,7 @@ def _select_blocks(job: Job, parsed: ParsedCV, terms: set[str],
                 skills = []
                 for c in parsed.skills:
                     scores = by_cat.get(c.name)
-                    if c.name == conditional and scores and max(scores) < _CONDITIONAL_MAX_SCORE:
+                    if c.name in conditional and scores and max(scores) < _CONDITIONAL_MAX_SCORE:
                         continue
                     skills.append((c, scores))
                 return Selection([b for b, _ in exps], [b for b, _, _ in projs], [c for c, _ in skills],
@@ -259,7 +266,7 @@ def _select_blocks(job: Job, parsed: ParsedCV, terms: set[str],
     projs = _with_spares(keyword_scored(chosen), keyword_scored(spare))
     skills = []
     for c in parsed.skills:
-        if c.name == conditional and not (c.tags & terms):
+        if c.name in conditional and not (c.tags & terms):
             continue
         split = snippet_bank.split_skill_items(c.line)
         scores = None if c.name == _FIXED_SKILL_CATEGORY[lang] or not split else [
@@ -282,9 +289,9 @@ def _tagline(role_category: str = "", lang: str = "en") -> str:
     pm = role_category == "PM"
     if lang == "fr":
         role = "Product Manager IA" if pm else "Ingénieur Machine Learning"
-        return f"{{{role} (CDI/CDD), {AVAILABILITY['fr']} — Île-de-France, ouvert à la mobilité}}"
+        return f"{{{role} (CDI/CDD), \\textbf{{{AVAILABILITY['fr']}}} — Île-de-France, ouvert à la mobilité}}"
     role = "an AI Product Manager" if pm else "a Machine Learning"
-    return f"{{Seeking {role} role (CDI/CDD), {AVAILABILITY['en']} — Île-de-France, open to mobility}}"
+    return f"{{Seeking {role} role (CDI/CDD), \\textbf{{{AVAILABILITY['en']}}} — Île-de-France, open to mobility}}"
 
 
 def _slug(text: str) -> str:
@@ -305,6 +312,7 @@ class Draft(NamedTuple):
     selection: Selection
     summ: summary.Summary
     role_category: str
+    pages: int = 2
 
     @property
     def plan(self) -> fit.Plan:
@@ -314,7 +322,8 @@ class Draft(NamedTuple):
     def notes(self) -> list[str]:
         return [f"summary fell back to the standard text ({self.summ.detail})"] if self.summ.reason else []
 
-    def render(self, plan: fit.Plan | None = None) -> str:
+    def render(self, plan: fit.Plan | None = None, columns: int = 1) -> str:
+        """`columns=2` (skills in 2 columns) is the one-page layout fallback, see FIT_STEPS."""
         plan = plan or self.plan
         lang, sel, parsed = self.parsed.lang, self.selection, self.parsed
         names = snippet_bank.SECTIONS[lang]
@@ -335,7 +344,7 @@ class Draft(NamedTuple):
             skills.append(SkillCategory(cat.name, text, cat.tags))
         doc = snippet_bank.reassemble(parsed.document, names["projects"], trimmed(sel.projects, plan.projects))
         doc = snippet_bank.reassemble(doc, names["experience"], trimmed(sel.experiences, plan.experiences))
-        doc = snippet_bank.reassemble_skills(doc, skills, lang)
+        doc = snippet_bank.reassemble_skills(doc, skills, lang, columns)
         if parsed.heading_line:
             doc = doc.replace(parsed.heading_line, _tagline(self.role_category, lang), 1)
         doc = snippet_bank.set_summary(doc, summary.latex_escape(self.summ.text))
@@ -345,24 +354,26 @@ class Draft(NamedTuple):
 def _draft(job: Job, parsed: ParsedCV | None = None, judge_context: str | None = None,
            role_category: str = "", language: str = "en",
            summ: summary.Summary | None = None, stored: dict | None = None,
-           with_summary: bool = True, pins: dict | None = None) -> Draft:
-    """`language` picks the master CV ("en" or "fr"); an already parsed CV carries its
-    own. `summ` reuses an already written summary (it doesn't depend on the selection).
+           with_summary: bool = True, pins: dict | None = None, pages: int = 2) -> Draft:
+    """`language` picks the master CV ("en" or "fr"), `pages` the full or the condensed one; an
+    already parsed CV carries its own. `summ` reuses an already written summary (it doesn't depend on the selection).
     `stored` is a saved plan (see _plan_record): its LLM answer and summary are reused, so
     no LLM call is made. `with_summary=False` leaves the summary empty (no summary call)."""
-    parsed = parsed or snippet_bank.parse(base_cv_path(language), language)
+    parsed = parsed or snippet_bank.parse(base_cv_path(language, pages), language)
     if not with_summary:
         summ = summary.Summary("")
     elif stored:
         summ = summ or summary.Summary(**stored["summary"])
     selection = _select_blocks(job, parsed, _job_terms(job), judge_context=judge_context,
                                stored=stored["selection"] if stored else None, pins=pins)
-    return Draft(job, parsed, selection, summ or _write_summary(job, role_category, parsed), role_category)
+    if pages == 1:
+        selection.plan.min_modules = 0
+    return Draft(job, parsed, selection, summ or _write_summary(job, role_category, parsed), role_category, pages)
 
 
 def _plan_record(draft: Draft, language: str) -> dict:
     """What a later refit needs to rebuild this CV without an LLM call."""
-    return {"language": language, "role_category": draft.role_category,
+    return {"language": language, "role_category": draft.role_category, "pages": draft.pages,
             "selection": draft.selection.raw, "summary": dict(draft.summ._asdict())}
 
 
@@ -516,24 +527,48 @@ class TailorResult(NamedTuple):
         return self.note.startswith(CV_FALLBACK_NOTE)
 
 
-def _compile_failure(out_dir: Path, name: str = "cv") -> tuple[str, str]:
+def _compile_failure(out_dir: Path, name: str = "cv", pages: int = 2) -> tuple[str, str]:
     """(fetch_diag reason, note) for a compile that returned no PDF, read off the
     log compile_tex wrote."""
     log = out_dir / f"{name}.compile.log"
     text = log.read_text(encoding="utf-8") if log.exists() else ""
     m = re.search(r"Compiled to (\d+|an unknown number of) page", text)
     if m:
-        return "tailor_page_count", f"compiled to {m.group(1)} page(s), expected exactly 2 -- see {name}.compile.log"
+        return "tailor_page_count", f"compiled to {m.group(1)} page(s), expected exactly {pages} -- see {name}.compile.log"
     return "tailor_latex_error", f"LaTeX compile error -- see {name}.compile.log"
 
 
+# Layout fallbacks tried in order when a one-page CV (11pt in its master) still does not fit
+# after trimming. Two pages never change the layout.
+FIT_STEPS = [("", {}), ("skills in 2 columns", {"columns": 2})]
+
+
 def _fit_cv(draft: Draft, out_dir: Path, name: str):
-    """Fit the draft to two pages (see tailor/fit.py) and keep a log of what it did next
+    """Fit the draft to its page count (see tailor/fit.py) and keep a log of what it did next
     to the CV. Trial compiles go to a scratch directory; the caller compiles the result."""
+    steps = FIT_STEPS if draft.pages == 1 else FIT_STEPS[:1]
+    step_log, result = [], None
+    margin = re.search(r"bottom=([\d.]+)in", draft.parsed.document)
+    bottom = float(margin.group(1)) * 72 if margin else fit.BOTTOM_MARGIN_PT
+
+    def measure(pdf):
+        layout = _page_layout(pdf)
+        if layout is not None:
+            layout.bottom_margin = bottom
+        return layout
+
     with tempfile.TemporaryDirectory() as tmp:
-        result = fit.fit(draft.plan, draft.render,
-                         lambda tex: compile_tex(tex, Path(tmp), name="fit"), _page_layout)
+        for label, opts in steps:
+            result = fit.fit(draft.plan, lambda plan, o=opts: draft.render(plan, **o),
+                             lambda tex: compile_tex(tex, Path(tmp), name="fit"), measure,
+                             pages=draft.pages)
+            if result.status != "cannot_fit":
+                if label:
+                    step_log.append(f"layout fallback used: {label}")
+                break
+            step_log.append(f"did not fit one page with {label or 'the standard layout'}")
     lay = result.layout
+    result.log[:0] = step_log
     lines = [f"status: {result.status} after {result.compiles} compile(s)"]
     if lay:
         lines.append(f"pages: {lay.pages}; free lines per page: "
@@ -565,7 +600,7 @@ def tailor_job(job: Job, job_id: int, auto: bool = False,
               judge_context: str | None = None, role_category: str = "",
               language: str | None = None, stored: dict | None = None,
               out_dir: Path | None = None, with_summary: bool = True,
-              pins: dict | None = None) -> TailorResult:
+              pins: dict | None = None, pages: int = 2) -> TailorResult:
     """Generate + compile a tailored CV for a job. Returns a TailorResult; a failed
     compile, or a still-sparse second page after the retry, sets `note` and is
     recorded via fetch_diag under a `tailor_*` reason.
@@ -586,13 +621,14 @@ def tailor_job(job: Job, job_id: int, auto: bool = False,
     earlier version; cv.tex/cv.pdf are then refreshed as the latest working copy.
 
     `out_dir` replaces the default `<job_id>-<company>` folder; `with_summary=False` leaves
-    the summary out; `pins` fixes the experiences / projects shown (see tailor_general)."""
+    the summary out; `pins` fixes the experiences / projects shown (see tailor_general);
+    `pages=1` builds a one-page CV from the condensed master (version name ends in -1p)."""
     out_dir = out_dir or CV_OUT_DIR / f"{job_id}-{_slug(job.company)}"
-    name = f"cv-{_version_stamp()}"
+    name = f"cv-{_version_stamp()}" + ("-1p" if pages == 1 else "")
 
     language = language or job_language(job.title, job.description, job.language)
     draft = _draft(job, judge_context=judge_context, role_category=role_category, language=language,
-                   stored=stored, with_summary=with_summary, pins=pins)
+                   stored=stored, with_summary=with_summary, pins=pins, pages=pages)
     used_fallback, notes = draft.selection.used_fallback, draft.notes
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / f"{name}.plan.json").write_text(
@@ -603,11 +639,11 @@ def tailor_job(job: Job, job_id: int, auto: bool = False,
     if fitted.note:
         notes.append(fitted.note)
     tex = fitted.tex
-    pdf = compile_tex(tex, out_dir, name=name, expected_pages=2 if auto else None)
+    pdf = compile_tex(tex, out_dir, name=name, expected_pages=pages if auto else None)
 
     reason = note = ""
     if pdf is None:
-        reason, note = _compile_failure(out_dir, name)
+        reason, note = _compile_failure(out_dir, name, pages)
     wrong_language = cv_language_problem(tex, language)
     if wrong_language and not reason:
         reason, note = summary.LANGUAGE_REASON, wrong_language
@@ -638,13 +674,18 @@ def load_general_briefs(path: Path = GENERAL_BRIEFS) -> dict[str, dict]:
     return presets
 
 
-def tailor_general(name: str, brief: str, language: str = "en", pins: dict | None = None) -> TailorResult:
+def general_out_dir(name: str, language: str = "en", pages: int = 2) -> Path:
+    return CV_OUT_DIR / f"general-{_slug(name)}-{language}{'-1p' if pages == 1 else ''}"
+
+
+def tailor_general(name: str, brief: str, language: str = "en", pins: dict | None = None,
+                   pages: int = 2, stored: dict | None = None) -> TailorResult:
     """A CV for no particular posting (a job fair, a networking contact): the same scoring and
     measured two-page fit as a job's CV, but the `brief` stands in for the posting and there is no
     summary, so nothing names a company. `pins` ({"experiences": [...], "projects": [...]}, names
-    as in the master) fixes which entries appear. Written to data/cv/general-<name>-<language>/;
-    no database record."""
+    as in the master) fixes which entries appear. Written to data/cv/general-<name>-<language>/
+    (`-1p` appended for one page); no database record. `stored` is a saved plan to reuse (no LLM call)."""
     job = Job(source="general", external_id=name, title=f"General CV: {name}", company=name,
               description=brief, language=language)
-    return tailor_job(job, 0, auto=True, language=language,
-                      out_dir=CV_OUT_DIR / f"general-{_slug(name)}-{language}", with_summary=False, pins=pins)
+    return tailor_job(job, 0, auto=True, language=language, out_dir=general_out_dir(name, language, pages),
+                      with_summary=False, pins=pins, pages=pages, stored=stored)

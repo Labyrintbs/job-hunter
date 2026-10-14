@@ -819,6 +819,8 @@ def list_jobs(conn: sqlite3.Connection, status: str | None = None, min_score: in
                 ORDER BY c.generated_at DESC, c.id DESC LIMIT 1) AS cv_origin,
                (SELECT lang FROM cv_artifacts c WHERE c.job_id = j.id AND c.pdf_path != ''
                 ORDER BY c.generated_at DESC, c.id DESC LIMIT 1) AS cv_lang,
+               (SELECT base_version FROM cv_artifacts c WHERE c.job_id = j.id AND c.pdf_path != ''
+                ORDER BY c.generated_at DESC, c.id DESC LIMIT 1) AS cv_base,
                (SELECT generated_at FROM cv_artifacts c WHERE c.job_id = j.id AND c.pdf_path != ''
                 ORDER BY c.generated_at DESC, c.id DESC LIMIT 1) AS cv_generated_at,
                (SELECT note FROM cv_artifacts c WHERE c.job_id = j.id
