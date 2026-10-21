@@ -103,7 +103,12 @@ exclude_terms:
   - portage salarial
 
 # Companies to never show.
-company_blocklist: []
+company_blocklist:   # exact name match, case-insensitive
+  - Airbus                    # asks for nationality in the application
+  - Airbus Defense and Space
+  - Airbus Helicopters
+  - Airbus Protect
+  - Airbus UpNext
 
 # ESN / consulting firms: the dashboard shows an "ESN" label (whole-word match on the
 # company name, case-insensitive). Label only -- scoring is unaffected.

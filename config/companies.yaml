@@ -78,7 +78,6 @@ companies:
   - { name: Veolia, ats: smartrecruiters, token: VeoliaEnvironnementSA }
   - { name: Sopra Steria, ats: smartrecruiters, token: SopraSteria1 }
   - { name: Beacon Biosignals, ats: greenhouse, token: beaconbiosignals }
-  - { name: Airbus, ats: workday, tenant: ag, wd_host: wd3, site: Airbus }
   - { name: Renault Group, ats: workday, tenant: alliancewd, wd_host: wd3, site: renault-group-careers, locale: fr-FR }
   - { name: Valeo, ats: workday, tenant: valeo, wd_host: wd3, site: valeo_jobs }
   - { name: Sanofi, ats: workday, tenant: sanofi, wd_host: wd3, site: SanofiCareers }
@@ -145,3 +144,4 @@ companies:
   - { name: Whize, ats: recruitee, token: whize }
   - { name: Webnet, ats: recruitee, token: webnet }
   - { name: fortil group, ats: teamtailor, token: fortil }
+  - { name: "Hubvisory", ats: recruitee, token: hubvisory }
