@@ -54,6 +54,11 @@ def test_fetch_parses_fields_and_strips_html(monkeypatch):
     assert j.url == "https://europa.eu/eures/portal/jv-se/jv-details/1?lang=fr"
 
 
+def test_detail_url_links_to_france_travail_when_id_decodes():
+    assert eures.detail_url("MjEzVkxaSCA5") == "https://candidat.francetravail.fr/offres/recherche/detail/213VLZH"
+    assert eures.detail_url("NjgwMDgwMyA5") == "https://candidat.francetravail.fr/offres/recherche/detail/6800803"
+
+
 def test_paris_nuts_code_maps_to_idf_geo_tier(monkeypatch):
     page = {"numberRecords": 1, "jvs": [_jv(location_map={"FR": ["FR101"]})]}
     monkeypatch.setattr(eures.httpx, "Client", lambda *a, **k: Client([page]))

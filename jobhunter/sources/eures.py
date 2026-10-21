@@ -13,6 +13,7 @@ every new posting; no sort-override param exists.
 """
 from __future__ import annotations
 
+import base64
 import time
 from datetime import datetime, timezone
 
@@ -24,6 +25,7 @@ from .ats import _UA, _strip_html
 
 SEARCH_URL = "https://europa.eu/eures/api/jv-searchengine/public/jv-search/search"
 DETAIL_URL = "https://europa.eu/eures/portal/jv-se/jv-details/{id}?lang=fr"
+FRANCE_TRAVAIL_URL = "https://candidat.francetravail.fr/offres/recherche/detail/{ref}"
 THROTTLE_SECONDS = 0.3
 PAGE_SIZE = 50   # the API rejects resultsPerPage > 50 (HTTP 400)
 
@@ -64,6 +66,16 @@ def _location(location_map: dict) -> str:
     return "; ".join(parts)
 
 
+def detail_url(jid: str) -> str:
+    """Link to the posting. The EURES id is base64 of "<France Travail ref> 9"; the portal
+    page redirects to its home when opened from a click, so link to France Travail instead."""
+    try:
+        ref = base64.b64decode(jid + "=" * (-len(jid) % 4)).decode().split()[0]
+    except (ValueError, IndexError):
+        return DETAIL_URL.format(id=jid)
+    return FRANCE_TRAVAIL_URL.format(ref=ref) if ref.isalnum() else DETAIL_URL.format(id=jid)
+
+
 def _posted_at(creation_date_ms) -> str:
     try:
         return datetime.fromtimestamp(int(creation_date_ms) / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
@@ -98,7 +110,7 @@ def fetch(query: str, max_hits: int = 200, country: str = "fr") -> list[Job]:
                     title=(jv.get("title") or "").strip(),
                     company=(jv.get("employer") or {}).get("name", "") or "",
                     location=_location(jv.get("locationMap") or {}),
-                    url=DETAIL_URL.format(id=jid),
+                    url=detail_url(str(jid)),
                     description=_strip_html(jv.get("description", "") or "")[:5000],
                     posted_at=_posted_at(jv.get("creationDate")),
                 ))
