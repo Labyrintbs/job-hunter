@@ -420,7 +420,7 @@ linkedin_backfill:
 
 eures_backfill:
   enabled: true
-  fetch_interval_hours: 168
+  fetch_interval_hours: 48       # runs Wed + Sat; 48 keeps both days due
   max_hits: 2000                 # moderate multiple, not near-complete coverage --
                                   # no recency-sort override exists (see eures:
                                   # above), so this buys raw coverage, not freshness

@@ -172,7 +172,8 @@ def test_install_backfill_writes_a_loadable_plist_saturday_and_sunday(tmp_path, 
     assert data["Label"] == schedule.BACKFILL_MARKER
     assert "jobhunter.cli backfill" in data["ProgramArguments"][2]
     assert data["StartCalendarInterval"] == [
-        {"Weekday": 6, "Hour": 9, "Minute": 0}, {"Weekday": 0, "Hour": 9, "Minute": 0},
+        {"Weekday": 3, "Hour": 9, "Minute": 0}, {"Weekday": 6, "Hour": 9, "Minute": 0},
+        {"Weekday": 0, "Hour": 9, "Minute": 0},
     ]
     assert "EnvironmentVariables" not in data   # no creds in this shell -> not written
     assert schedule.current_backfill() == line

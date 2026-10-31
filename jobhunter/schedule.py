@@ -238,16 +238,16 @@ def _francetravail_env() -> dict[str, str] | None:
 
 
 def backfill_cron_line(hour: int = 9, minute: int = 0) -> str:
-    """Saturday + Sunday only (launchd Weekday 6, 0) -- run_backfill() itself
+    """Wednesday, Saturday, Sunday (launchd Weekday 3, 6, 0) -- run_backfill() itself
     picks which streams run on which day (pipeline.BACKFILL_GROUPS), so this
-    plist just needs to fire on both."""
+    plist just needs to fire on all three."""
     return _describe(BACKFILL_MARKER, _command("backfill", "backfill_cron.log"),
-                     _calendar_intervals(hour, minute, weekdays=(6, 0)))
+                     _calendar_intervals(hour, minute, weekdays=(3, 6, 0)))
 
 
 def install_backfill(hour: int = 9, minute: int = 0) -> str:
     return _install(BACKFILL_MARKER, "backfill", "backfill_cron.log",
-                    hour, minute, weekdays=(6, 0), env=_francetravail_env())
+                    hour, minute, weekdays=(3, 6, 0), env=_francetravail_env())
 
 
 def uninstall_backfill() -> bool:

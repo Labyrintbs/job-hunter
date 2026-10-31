@@ -1929,6 +1929,13 @@ def test_run_backfill_sunday_runs_only_its_group(monkeypatch):
     assert set(calls) == {"workday", "francetravail", "linkedin_wide"}
 
 
+def test_run_backfill_wednesday_runs_only_eures(monkeypatch):
+    calls = []
+    _stub_all_backfills(monkeypatch, calls)
+    pipeline.run_backfill(day="wednesday")
+    assert calls == ["eures"]
+
+
 def test_run_backfill_weekday_runs_nothing(monkeypatch):
     calls = []
     _stub_all_backfills(monkeypatch, calls)

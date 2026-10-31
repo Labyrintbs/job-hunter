@@ -553,6 +553,7 @@ def _log_backfill(line: str) -> None:
 
 
 BACKFILL_GROUPS = {
+    "wednesday": ("eures",),   # EURES gets a second sweep: one failed Saturday left a 2-week backlog
     "saturday": ("arbeitnow", "wttj", "eures"),
     "sunday": ("workday", "francetravail", "linkedin_wide"),
 }
@@ -802,7 +803,7 @@ _BACKFILL_FUNCS = {
 
 
 def run_backfill(force: bool = False, day: str | None = None) -> dict:
-    """Umbrella called by `jobhunter backfill` and the twice-weekly LaunchAgent.
+    """Umbrella called by `jobhunter backfill` and the LaunchAgent (Wed/Sat/Sun).
     Splits the 6 streams across Saturday/Sunday (BACKFILL_GROUPS) rather than
     running everything in one sitting -- roughly balances request volume per
     day (arbeitnow+wttj+eures vs. workday+francetravail+linkedin_wide), and most

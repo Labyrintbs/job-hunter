@@ -181,7 +181,7 @@ $P -m jobhunter.cli cron show           # preview what would be scheduled (no ch
 $P -m jobhunter.cli cron install --time 08:00   # add a once-daily entry at 08:00
 $P -m jobhunter.cli cron install --interval-hours 12   # or run every N hours instead (anchored at --time)
 $P -m jobhunter.cli cron install --time 02:20 --interval-hours 1 --no-judge --no-tailor  # hourly, fetch-only
-$P -m jobhunter.cli cron install --job backfill   # weekly deep sweep, Saturday + Sunday 09:00
+$P -m jobhunter.cli cron install --job backfill   # deep sweep, Wed (EURES only) + Sat + Sun 09:00
 $P -m jobhunter.cli cron uninstall      # remove it
 ```
 Installing is opt-in because the daily run makes LLM calls (more frequent runs
@@ -217,7 +217,7 @@ triggers a catch-up fetch and logs to `data/watchdog.log`.
 Output is appended to `data/cron.log`.
 
 **Weekly deep-sweep backfill** (`jobhunter backfill`, or `cron install --job
-backfill` for Saturday+Sunday automation): the regular polls above always
+backfill` for Wednesday+Saturday+Sunday automation): the regular polls above always
 restart at position 0/page 1 and are capped shallow for freshness — anything
 older gets pushed out and is never reached again. Backfill walks much deeper:
 arbeitnow/wttj/workday do a full-depth sweep every run (dedup absorbs the
@@ -226,7 +226,8 @@ new postings; confirmed live for arbeitnow), while francetravail resumes a
 real calendar-anchored date window across weeks (`minCreationDate`/
 `maxCreationDate`), since that position is safe to save. Split across
 Saturday (arbeitnow, wttj) and Sunday (workday, francetravail, a wide-window
-linkedin pass) to spread the load. Deliberately excluded from the
+linkedin pass) to spread the load; EURES also gets a Wednesday sweep, since a failed
+Saturday would otherwise leave its postings unseen for a week. Deliberately excluded from the
 market-velocity stats (`fetch_runs`/`v_market_by_run`, which stay
 regular-poll-only) — logs to `data/backfill.log` instead.
 
