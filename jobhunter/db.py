@@ -727,8 +727,10 @@ def upsert_job(conn: sqlite3.Connection, job: Job, score: int, reasons: str, *,
             (score, reasons, int(filtered), filter_reason, seniority, min_years, geo_tier,
              role_category, job.url, int(filtered), row["id"]),
         )
-        _log_event(conn, row["id"], "filtered", old["filtered"] if old else 0, int(filtered),
-                   detail=filter_reason)
+        # Log the stored value: a job with its full description keeps its filter state.
+        new = conn.execute("SELECT filtered FROM jobs WHERE id = ?", (row["id"],)).fetchone()
+        _log_event(conn, row["id"], "filtered", old["filtered"] if old else 0,
+                   new["filtered"] if new else int(filtered), detail=filter_reason)
         return row["id"], False
 
     cur = conn.execute(

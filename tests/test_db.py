@@ -86,6 +86,20 @@ def test_upsert_does_not_clobber_screening_after_enrichment(tmp_db):
         assert row["role_category"] == "ML"
 
 
+def test_a_refetch_of_an_enriched_job_logs_no_false_filtered_event(tmp_db):
+    with db.connect() as conn:
+        jid, _ = db.upsert_job(conn, J("1", url="http://x/1"), 37, "r", filtered=True, filter_reason="score<15")
+        db.set_description(conn, jid, "x" * 500)
+        db.update_screening(conn, jid, 54, "r2", filtered=False, filter_reason="", seniority="",
+                            min_years=None, role_category="ML")
+        before = conn.execute("SELECT COUNT(*) FROM job_events WHERE job_id = ? AND event_type = 'filtered'",
+                              (jid,)).fetchone()[0]
+        db.upsert_job(conn, J("1", url="http://x/1"), 37, "r", filtered=True, filter_reason="score<15")
+        after = conn.execute("SELECT COUNT(*) FROM job_events WHERE job_id = ? AND event_type = 'filtered'",
+                             (jid,)).fetchone()[0]
+        assert after == before and db.get_job(conn, jid)["filtered"] == 0
+
+
 def test_cross_source_dedup_backfills_missing_url_but_never_overwrites(tmp_db):
     # Regression: a manually-imported job (pipeline.import_manual_job) can be added
     # with no url. When an automated fetch later matches it to a real posting, the
