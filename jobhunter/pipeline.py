@@ -1410,10 +1410,13 @@ def cover_one(job_id: int) -> dict:
         job = db.job_from_row(row)
         cv_text = _cv_text_for_letter(conn, job_id)
         language = _letter_language(conn, job_id, job)
+        home = conn.execute("SELECT homepage FROM target_companies WHERE lower(name) = lower(?)",
+                            (job.company,)).fetchone()
+    company_text = cover_letter.fetch_company_text(home["homepage"]) if home and home["homepage"] else ""
     out_dir = cv_engine.CV_OUT_DIR / f"{job_id}-{cv_engine._slug(job.company)}"
     with fetch_diag.run_tracking() as tracker:
         path = cover_letter.draft_to_file(job, out_dir, judge_context=_judge_context(row),
-                                          cv_text=cv_text, language=language)
+                                          cv_text=cv_text, language=language, company_text=company_text)
     with db.connect() as conn:
         db.set_cover_letter(conn, job_id, str(path))
         tracker.flush(conn)

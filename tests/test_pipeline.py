@@ -1626,7 +1626,7 @@ def test_tailor_one_and_cover_one_pass_the_judge_context_through(tmp_db, config,
                         lambda job, job_id, auto=False, judge_context=None, role_category="", language=None:
                         captured.update(tailor_ctx=judge_context) or cv_engine.TailorResult(Path("/tmp/cv.tex"), Path("/tmp/cv.pdf")))
     monkeypatch.setattr(pipeline.cover_letter, "draft_to_file",
-                        lambda job, out_dir, judge_context=None, cv_text=None, language="en":
+                        lambda job, out_dir, judge_context=None, cv_text=None, language="en", company_text="":
                         captured.update(cover_ctx=judge_context) or Path("/tmp/cover_letter.md"))
 
     pipeline.tailor_one(jid)
@@ -1679,7 +1679,7 @@ def _letter_cv_text(tmp_db, config, monkeypatch, artifacts):
             db.add_cv_artifact(conn, jid, tex, pdf, origin=origin)
     captured = {}
     monkeypatch.setattr(pipeline.cover_letter, "draft_to_file",
-                        lambda job, out_dir, judge_context=None, cv_text=None, language="en":
+                        lambda job, out_dir, judge_context=None, cv_text=None, language="en", company_text="":
                         captured.update(cv_text=cv_text) or Path("/tmp/cover_letter.md"))
     pipeline.cover_one(jid)
     return captured["cv_text"]
@@ -2222,7 +2222,7 @@ def test_the_letter_follows_the_language_of_the_cv_it_accompanies(tmp_db, config
         db.add_cv_artifact(conn, jid, str(tex), str(tmp_path / "cv.pdf"), lang="fr")   # ...with a French CV
     seen = {}
     monkeypatch.setattr(pipeline.cover_letter, "draft_to_file",
-                        lambda job, out_dir, judge_context=None, cv_text=None, language="en":
+                        lambda job, out_dir, judge_context=None, cv_text=None, language="en", company_text="":
                         seen.update(language=language) or Path("/tmp/cover_letter.md"))
     result = pipeline.cover_one(jid)
     assert seen["language"] == "fr" and result["lang"] == "fr"
@@ -2235,7 +2235,7 @@ def test_the_letter_without_a_cv_follows_the_postings_language(tmp_db, config, m
         en = _insert(conn, config, external_id="e", title="ML Engineer", company="EnCo", description=_EN_JD)
     seen = []
     monkeypatch.setattr(pipeline.cover_letter, "draft_to_file",
-                        lambda job, out_dir, judge_context=None, cv_text=None, language="en":
+                        lambda job, out_dir, judge_context=None, cv_text=None, language="en", company_text="":
                         seen.append(language) or Path("/tmp/cover_letter.md"))
     pipeline.cover_one(fr)
     pipeline.cover_one(en)

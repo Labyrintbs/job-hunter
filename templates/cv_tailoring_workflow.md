@@ -151,11 +151,11 @@ All masters are A4 (`a4paper`).
 
 ## Step 5: Cover letter, if I ask for one
 
-English, matching the CV. Four or five paragraphs.
+In the CV's language. Three or four short paragraphs, 250 to 350 words. The automated path (`jobhunter/apply/cover_letter.py`) first plans (the posting's top three needs matched to CV lines, plus a company hook and the real gap), then writes in the voice of `templates/cover_letter_voice.md` (my own writing; add real letters there), then checks length, dashes, stock phrases and figures that are in neither the CV nor the posting, with one retry.
 
 Open with the most specific connection between my background and this role, a matching domain, a matching technique, something in the JD only someone who read it carefully would pick up on. Don't open with "I am writing to apply for."
 
-Build the middle around one or two concrete stories with numbers, not a list of skills. The strongest material is usually a diagnosis-and-fix arc: something broke, I found out why, I fixed it, here's the number.
+Build the middle around one concrete story with numbers (a second in one sentence), not a list of skills and not the CV's bullets again. The strongest material is usually a diagnosis-and-fix arc: something broke, I found out why, I fixed it, here's the number.
 
 Name a real gap if the JD has an obvious requirement I don't meet, and frame it honestly rather than hiding it. This has consistently felt better than pretending.
 

@@ -96,6 +96,7 @@ def test_language_problem_only_counts_function_words():
 
 def test_a_wrong_language_draft_is_retried_once_then_kept(monkeypatch, tmp_path):
     from jobhunter import fetch_diag
+    monkeypatch.setattr(CL, "analyse", lambda *a, **k: {})
     answers = iter([EN_LETTER, FR_LETTER])
     calls = []
     monkeypatch.setattr(CL.provider, "generate", lambda prompt, **kw: calls.append(prompt) or next(answers))
@@ -108,6 +109,7 @@ def test_a_wrong_language_draft_is_retried_once_then_kept(monkeypatch, tmp_path)
 
 def test_a_letter_still_in_the_wrong_language_is_tracked(monkeypatch, tmp_path):
     from jobhunter import fetch_diag
+    monkeypatch.setattr(CL, "analyse", lambda *a, **k: {})
     monkeypatch.setattr(CL.provider, "generate", lambda prompt, **kw: EN_LETTER)
     with fetch_diag.run_tracking() as tracker:
         path = CL.draft_to_file(_job(), tmp_path, language="fr")
@@ -115,11 +117,77 @@ def test_a_letter_still_in_the_wrong_language_is_tracked(monkeypatch, tmp_path):
     assert dict(tracker.counts) == {("cover", "Acme", "cover_language_mismatch"): 1}
 
 
-def test_a_correct_first_draft_costs_one_call(monkeypatch, tmp_path):
+def test_a_correct_first_draft_costs_two_calls_the_plan_and_the_letter(monkeypatch, tmp_path):
     calls = []
     monkeypatch.setattr(CL.provider, "generate", lambda prompt, **kw: calls.append(1) or FR_LETTER)
     CL.draft_to_file(_job(), tmp_path, language="fr")
-    assert len(calls) == 1
+    assert len(calls) == 2   # plan call (unusable text -> empty plan) + one draft
+
+
+def test_the_plan_reaches_the_draft_prompt(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(CL.provider, "generate", lambda prompt, **kw: seen.update(prompt=prompt) or "x")
+    plan = {"needs": [{"need": "RAG in production", "evidence": "built a judge loop", "cv_line": "LLM-as-judge"}],
+            "company_hook": "sourced answers", "gap": "no Kubernetes"}
+    CL.draft(_job(), plan=plan)
+    assert "need: RAG in production" in seen["prompt"] and "Why this company: sourced answers" in seen["prompt"]
+    assert "Gap to name honestly: no Kubernetes" in seen["prompt"]
+    CL.draft(_job())
+    assert "LETTER PLAN" not in seen["prompt"]
+
+
+def test_an_unusable_plan_answer_gives_an_empty_plan(monkeypatch):
+    monkeypatch.setattr(CL.provider, "generate", lambda prompt, **kw: "not json")
+    assert CL.analyse(_job(), "CV") == {}
+
+
+def test_the_voice_samples_reach_the_system_prompt(monkeypatch, tmp_path):
+    voice = tmp_path / "voice.md"
+    voice.write_text("short plain sentences", encoding="utf-8")
+    monkeypatch.setattr(CL, "VOICE_FILE", voice)
+    seen = {}
+    monkeypatch.setattr(CL.provider, "generate",
+                        lambda prompt, system=None, **kw: seen.update(system=system) or "x")
+    CL.draft(_job())
+    assert "short plain sentences" in seen["system"]
+    monkeypatch.setattr(CL, "VOICE_FILE", tmp_path / "missing.md")
+    CL.draft(_job())
+    assert "VOICE SAMPLES" not in seen["system"]
+
+
+def test_problems_flags_length_dashes_stock_phrases_and_figures_not_in_the_sources():
+    source = "accuracy rose 96,8 % and latency fell 40.8 %, from 3 000 offers"
+    ok = EN_LETTER + " I reached 96.8 % accuracy and cut latency 40,8 %."
+    assert CL.problems(ok, source, "en") == []
+    assert any("words" in p for p in CL.problems("word " * 400, source, "en"))
+    assert any("dashes" in p for p in CL.problems(ok + " It worked — well.", source, "en"))
+    assert any("stock phrases" in p and "passionate about" in p
+               for p in CL.problems(ok + " I am passionate about AI.", source, "en"))
+    bad = CL.problems(ok + " It cut cost by 55 % for 3000 offers.", source, "en")
+    assert any("55" in p and "3000" not in p for p in bad)   # 3 000 in the source matches 3000
+    assert CL.problems(ok + " I did it in 2026 for 6 months.", source, "en") == []   # years/small counts
+
+
+def test_a_letter_failing_a_check_is_retried_with_the_reasons_and_the_better_one_kept(monkeypatch, tmp_path):
+    from jobhunter import fetch_diag
+    monkeypatch.setattr(CL, "analyse", lambda *a, **k: {})
+    answers = iter([EN_LETTER + " It gained 77 points.", EN_LETTER])
+    prompts = []
+    monkeypatch.setattr(CL.provider, "generate", lambda prompt, **kw: prompts.append(prompt) or next(answers))
+    with fetch_diag.run_tracking() as tracker:
+        path = CL.draft_to_file(_job(), tmp_path, language="en")
+    assert "figures not in the CV or posting, remove them: 77" in prompts[1]
+    assert "77" not in path.read_text(encoding="utf-8")
+    assert dict(tracker.counts) == {}
+
+
+def test_a_letter_that_still_fails_a_check_is_tracked(monkeypatch, tmp_path):
+    from jobhunter import fetch_diag
+    monkeypatch.setattr(CL, "analyse", lambda *a, **k: {})
+    monkeypatch.setattr(CL.provider, "generate", lambda prompt, **kw: EN_LETTER + " It gained 77 points.")
+    with fetch_diag.run_tracking() as tracker:
+        CL.draft_to_file(_job(), tmp_path, language="en")
+    assert dict(tracker.counts) == {("cover", "Acme", "cover_check_failed"): 1}
 
 
 def test_the_letter_prompt_carries_the_job_location_and_the_relocation_closing(monkeypatch):
