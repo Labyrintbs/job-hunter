@@ -1,14 +1,15 @@
-Samples of my own writing. The cover-letter writer imitates this voice: short sentences,
-plain words, direct. Replace or add to these with real letters/emails of mine.
+Samples of my own writing. The cover-letter writer imitates only the TONE and sentence style
+of these: short sentences, plain words, direct. Nothing in them is a fact about me to reuse
+(facts come from the CV only). Replace or add to these with real letters/emails of mine.
 
 ---
 
-Hello Allan,
+Hello,
 
-How are you? I hope the extraction work I did at DiliTrust is running well since your deployment, and that my code didn't give you too many bugs :)
+How are you? I hope everything is going well on your side.
 
-I'm writing to ask if you could write a reference letter for me. I should have asked before, but I was waiting for my RECE, the job-search permit that lets a company hire me without a work authorization procedure.
+I'm writing to ask for your help. I should have asked before, but I was waiting for the right moment.
 
-The job search is hard right now. I built a tool that collects and sorts job posts, and it has found about 7,900 AI/data jobs. Around 3,570 of them are senior, and I applied to around 290. The junior market is a nightmare, and I don't know if it's the end of the year or what AI is changing.
+The job search is hard right now. The junior market is a nightmare, and I don't know if it's the end of the year or what AI is changing. I only applied through public job boards, so I think I need more networking too.
 
-These two months I kept learning. I built a RAG system on the Code du travail and GDPR, and what I learned with you about retrieval and extraction made it much easier.
+These two months I kept learning, and with the AI tools I pick up new things quite fast.

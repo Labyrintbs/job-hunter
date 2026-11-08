@@ -56,7 +56,9 @@ SYSTEM = (
     "about, dynamic team, innovative company), no em-dashes or en-dashes as sentence connectors.\n"
     "- Ground every claim in the candidate's real profile below; never invent experience, "
     "employers, or numbers, and never inflate an internship into a full-time role. Don't state "
-    "durations or dates unless the profile gives them."
+    "durations or dates unless the profile gives them. Don't call a personal project \"in "
+    "production\" or \"deployed\"; say what it does. Never use the voice samples as facts: they "
+    "only show the tone."
 )
 
 PROMPT = """CANDIDATE PROFILE:
@@ -181,10 +183,18 @@ def _numbers(text: str) -> set[str]:
     return out
 
 
-def problems(text: str, source_text: str, language: str) -> list[str]:
+def _fivegrams(text: str) -> set[str]:
+    w = re.findall(r"[\wÀ-ÿ']+", text.lower())
+    return {" ".join(w[i:i + 5]) for i in range(len(w) - 4)}
+
+
+def problems(text: str, source_text: str, language: str, voice_text: str = "") -> list[str]:
     """Why this letter should be redone: language, length, dashes, stock phrases, figures
-    that are in neither the CV nor the posting (`source_text` is both)."""
+    that are in neither the CV nor the posting (`source_text` is both), and wording copied
+    from the voice samples (their facts are not the CV's)."""
     found = []
+    if copied := sorted((_fivegrams(text) & _fivegrams(voice_text)) - _fivegrams(source_text)):
+        found.append("copied from the voice samples, not from the CV: " + "; ".join(copied[:3]))
     if lang := language_problem(text, language):
         found.append(lang)
     words = len(text.split())
@@ -244,10 +254,11 @@ def draft_to_file(job: Job, out_dir: Path, judge_context: str | None = None,
     kw = dict(judge_context=judge_context, cv_text=cv_text, language=language, plan=plan)
     check_source = source + "\n" + (job.description or "")
     text = draft(job, **kw)
-    found = problems(text, check_source, language)
+    voice = VOICE_FILE.read_text(encoding="utf-8") if VOICE_FILE.exists() else ""
+    found = problems(text, check_source, language, voice)
     if found:
         retry = draft(job, feedback="; ".join(found), **kw)
-        retry_found = problems(retry, check_source, language)
+        retry_found = problems(retry, check_source, language, voice)
         if len(retry_found) <= len(found):   # keep the better of the two
             text, found = retry, retry_found
     if found:

@@ -178,6 +178,16 @@ def test_problems_flags_gap_framing_and_lists_of_what_is_missing():
     assert not any("I have not" in p or "gap framing" in p for p in CL.problems(one, "", "en"))
 
 
+def test_problems_flags_wording_copied_from_the_voice_samples():
+    voice = "I built a RAG system on the Code du travail and GDPR, and it was fun."
+    letter = EN_LETTER + " I built a RAG system on the Code du travail last year."
+    assert any("copied from the voice samples" in p for p in CL.problems(letter, "", "en", voice))
+    # the same words in the CV are the CV's facts, so they pass
+    assert not any("copied from the voice" in p
+                   for p in CL.problems(letter, "I built a RAG system on the Code du travail", "en", voice))
+    assert not any("copied from the voice" in p for p in CL.problems(EN_LETTER, "", "en", voice))
+
+
 def test_the_prompts_forbid_gap_lists_and_keep_one_hard_requirement_sentence(monkeypatch):
     assert "Do not list weaknesses" in CL.SYSTEM and "at most ONE sentence" in CL.SYSTEM
     assert "ONLY a hard requirement" in CL.ANALYSIS_PROMPT
