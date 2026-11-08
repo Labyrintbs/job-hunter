@@ -43,8 +43,11 @@ SYSTEM = (
     "sentence). Do not restate the CV's bullets; say what the work showed that this role needs. "
     "A diagnosis-and-fix arc is strongest: something broke, the candidate found out why, fixed "
     "it, here's the number.\n"
-    "- If the posting has an obvious requirement the profile doesn't meet, name that gap "
-    "honestly in one or two sentences instead of hiding it.\n"
+    "- Do not list weaknesses or gaps, and never open or frame a paragraph on what the candidate "
+    "lacks. Only if the posting states a hard requirement the profile clearly misses (a number of "
+    "years, a required tool never used), add at most ONE sentence of under 30 words that names the "
+    "closest thing the candidate did instead. Never use words like \"limits\", \"honest\", "
+    "\"I must be clear\", \"je dois être honnête\".\n"
     "- Say why this company, with something specific from the posting or the company text "
     "(its product, stack or problem). No line that could fit another company.\n"
     "- Close briefly with availability (available immediately; based in Paris, and when the job "
@@ -84,7 +87,8 @@ Description:
 {company_block}
 Return JSON: needs (up to 3: need in the posting's own words, evidence from the CV, cv_line quoted \
 from the CV), company_hook (one specific thing about this company from the posting or company \
-text; empty if none), gap (the most obvious requirement the CV does not meet; empty if none)."""
+text; empty if none), gap (ONLY a hard requirement the posting states and the CV clearly misses, \
+with the closest thing the CV shows instead; empty in most cases)."""
 
 ANALYSIS_SCHEMA = {
     "type": "object",
@@ -142,8 +146,16 @@ def _plan_block(plan: dict | None) -> str:
     if plan.get("company_hook"):
         lines.append(f"Why this company: {plan['company_hook']}")
     if plan.get("gap"):
-        lines.append(f"Gap to name honestly: {plan['gap']}")
+        lines.append(f"Hard requirement missed (one sentence at most, bridge to the closest evidence): {plan['gap']}")
     return "\n".join(lines) + "\n"
+
+
+# Wording of a letter that apologises for what the candidate lacks (see check below).
+GAP_PHRASES = ("mes limites", "être honnête", "être clair sur", "être direct sur", "dois être clair",
+               "préfère être clair", "to be honest", "be upfront", "be clear about", "my limits",
+               "i should name", "i must be clear", "name the gap", "there is a gap", "there are gaps")
+_NEGATIVE = re.compile(r"(?:^|[.!?]\s+)(?:je n'ai (?:pas|jamais|ni)|i (?:have not|haven't|have no|did not|don't|do not)\b|"
+                       r"i have never)", re.I)
 
 
 def language_problem(text: str, language: str) -> str:
@@ -183,6 +195,10 @@ def problems(text: str, source_text: str, language: str) -> list[str]:
     low = text.lower()
     if stock := [p for p in STOCK_PHRASES if p in low]:
         found.append("stock phrases to rewrite: " + ", ".join(stock))
+    if gap := [p for p in GAP_PHRASES if p in low]:
+        found.append("no gap framing, cut it (or one short sentence for a hard requirement): " + ", ".join(gap))
+    if len(_NEGATIVE.findall(text)) >= 2:
+        found.append("two or more 'I have not' sentences: cut the list of what is missing")
     if bad := sorted(_numbers(text) - _numbers(source_text)):
         found.append("figures not in the CV or posting, remove them: " + ", ".join(bad))
     return found

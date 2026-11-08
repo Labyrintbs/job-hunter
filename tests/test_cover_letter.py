@@ -131,7 +131,7 @@ def test_the_plan_reaches_the_draft_prompt(monkeypatch):
             "company_hook": "sourced answers", "gap": "no Kubernetes"}
     CL.draft(_job(), plan=plan)
     assert "need: RAG in production" in seen["prompt"] and "Why this company: sourced answers" in seen["prompt"]
-    assert "Gap to name honestly: no Kubernetes" in seen["prompt"]
+    assert "Hard requirement missed (one sentence at most, bridge to the closest evidence): no Kubernetes" in seen["prompt"]
     CL.draft(_job())
     assert "LETTER PLAN" not in seen["prompt"]
 
@@ -166,6 +166,23 @@ def test_problems_flags_length_dashes_stock_phrases_and_figures_not_in_the_sourc
     bad = CL.problems(ok + " It cut cost by 55 % for 3000 offers.", source, "en")
     assert any("55" in p and "3000" not in p for p in bad)   # 3 000 in the source matches 3000
     assert CL.problems(ok + " I did it in 2026 for 6 months.", source, "en") == []   # years/small counts
+
+
+def test_problems_flags_gap_framing_and_lists_of_what_is_missing():
+    base = EN_LETTER
+    assert any("gap framing" in p for p in CL.problems(base + " Je dois être honnête sur mes limites.", "", "en"))
+    assert any("gap framing" in p for p in CL.problems(base + " To be honest, I lack Kubernetes.", "", "en"))
+    listed = base + " I have not used Azure. I haven't worked on sales data."
+    assert any("I have not" in p for p in CL.problems(listed, "", "en"))
+    one = base + " I haven't run an ML service in production, but I monitored the judge loop."
+    assert not any("I have not" in p or "gap framing" in p for p in CL.problems(one, "", "en"))
+
+
+def test_the_prompts_forbid_gap_lists_and_keep_one_hard_requirement_sentence(monkeypatch):
+    assert "Do not list weaknesses" in CL.SYSTEM and "at most ONE sentence" in CL.SYSTEM
+    assert "ONLY a hard requirement" in CL.ANALYSIS_PROMPT
+    plan = {"needs": [{"need": "n", "evidence": "e", "cv_line": "c"}], "gap": "3+ years"}
+    assert "Hard requirement missed (one sentence at most" in CL._plan_block(plan)
 
 
 def test_a_letter_failing_a_check_is_retried_with_the_reasons_and_the_better_one_kept(monkeypatch, tmp_path):
